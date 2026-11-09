@@ -66,6 +66,24 @@ describe('passthroughs', () => {
     },
   )
 
+  test.skipIf(process.platform !== 'darwin')(
+    'xcode --json: one document; --dry-run opens nothing',
+    async () => {
+      const dry = await fx.kit(['xcode', '--dry-run', '--json'])
+      expect(dry.code).toBe(0)
+      expect(JSON.parse(dry.stdout)).toEqual({
+        dryRun: true,
+        project: 'apps/client/ios/iosApp.xcodeproj',
+        cmd: ['open', '-a', 'Xcode', 'apps/client/ios/iosApp.xcodeproj'],
+      })
+      expect(fx.calls()).toEqual([])
+      const r = await fx.kit(['xcode', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toEqual({ ok: true, project: 'apps/client/ios/iosApp.xcodeproj' })
+      expect(r.stderr).toContain('open ok')
+    },
+  )
+
   test('outside a project: exit 3', async () => {
     expect((await fx.kit(['gradle', 'build'], { cwd: '..' })).code).toBe(3)
   })
