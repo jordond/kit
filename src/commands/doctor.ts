@@ -233,6 +233,8 @@ export function checkCiPin(
 
 /** `[versions]` keys kit's Gradle plugins read from the `libs` catalog (PLAN §13.5): a contract. */
 export const CATALOG_KEYS = [
+  // namespace and BuildInfo package default
+  'app-name',
   'app-android-sdk-compile',
   'app-android-sdk-target',
   'app-android-sdk-min',

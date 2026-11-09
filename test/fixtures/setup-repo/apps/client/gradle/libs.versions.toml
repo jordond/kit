@@ -1,4 +1,5 @@
 [versions]
+app-name = "com.example.setup"
 app-android-sdk-compile = "36"
 app-android-sdk-target = "36"
 app-android-sdk-min = "26"

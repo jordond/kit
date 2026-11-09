@@ -2,6 +2,8 @@
 ######## kit ########
 # kit's Gradle plugins read these keys by name (`kit doctor` checks them). Release versions are
 # bumped by `kit version bump`; build numbers come from the stores and are never committed.
+# Application id / namespace root (e.g. "com.example.app"): BuildInfo and module namespaces derive from it.
+app-name = "com.example.app"
 app-android-sdk-compile = "37"
 app-android-sdk-target = "37"
 app-android-sdk-min = "30"

@@ -291,6 +291,9 @@ export async function releaseMobile(
   const steps: Step[] = []
   /** After the tag: a failure here warns but doesn't fail a release the store already has. */
   const post: Step[] = []
+  // kit.release bakes BuildConstants.IS_INTERNAL from KIT_INTERNAL (Gradle and the Xcode script phase
+  // inherit it). A build promoted from internal to a later track keeps it.
+  const internalFlag: Record<string, string> = track === 'internal' ? { KIT_INTERNAL: '1' } : {}
   if (platform === 'ios') {
     steps.push(
       laneStep(
@@ -304,6 +307,7 @@ export async function releaseMobile(
           KIT_IOS_SCHEME: ios!.scheme,
           KIT_IOS_VERSION: version,
           KIT_IOS_BUILD: String(build),
+          ...internalFlag,
           KIT_IOS_OUTPUT: join(out, ios!.output),
         }),
         (o) => {
@@ -350,6 +354,7 @@ export async function releaseMobile(
           ...common,
           KIT_ANDROID_VERSION: version,
           KIT_ANDROID_CODE: String(build),
+          ...internalFlag,
         }),
         (o) => {
           if (o.ARTIFACT_AAB) artifacts.aab = o.ARTIFACT_AAB
