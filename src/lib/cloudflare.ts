@@ -20,17 +20,63 @@ import { type PipeResult, pipeSecret } from './secrets'
 
 export const WRANGLER_FILES = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml'] as const
 
-// Matched rather than parsed: fail loudly if the key moves rather than guess.
-const JSON_ACCOUNT_ID = /"account_id"\s*:\s*"([0-9a-f]{32})"/
+const ACCOUNT_ID = /^[0-9a-f]{32}$/
+// TOML: matched within the root table only (before the first `[table]` header), so an
+// `[env.staging]` account_id is never picked up.
 const TOML_ACCOUNT_ID = /^\s*account_id\s*=\s*["']([0-9a-f]{32})["']/m
 
-/** `account_id` from the wrangler config in `dir`, or undefined when there is none. */
+/** JSONC → JSON text: drops `//` and block comments outside strings, then trailing commas. */
+export function stripJsonc(text: string): string {
+  let out = ''
+  let i = 0
+  while (i < text.length) {
+    const c = text[i]!
+    if (c === '"') {
+      let j = i + 1
+      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1
+      out += text.slice(i, j + 1)
+      i = j + 1
+    } else if (c === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++
+    } else if (c === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2)
+      i = end === -1 ? text.length : end + 2
+    } else {
+      out += c
+      i++
+    }
+  }
+  // Trailing commas: strings are matched first so a `,]` inside one survives.
+  return out.replace(
+    /("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g,
+    (_m, str: string | undefined, close: string) => str ?? close,
+  )
+}
+
+function jsonAccountId(text: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(stripJsonc(text))
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+    const id = (parsed as Record<string, unknown>).account_id
+    return typeof id === 'string' && ACCOUNT_ID.test(id) ? id : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function tomlAccountId(text: string): string | undefined {
+  const header = /^\s*\[/m.exec(text)
+  const top = header ? text.slice(0, header.index) : text
+  return TOML_ACCOUNT_ID.exec(top)?.[1]
+}
+
+/** Top-level `account_id` from the wrangler config in `dir`, or undefined when there is none. */
 export function readAccountId(dir: string): { id?: string; file?: string } {
   for (const name of WRANGLER_FILES) {
     const file = join(dir, name)
     if (!existsSync(file)) continue
-    const re = name.endsWith('.toml') ? TOML_ACCOUNT_ID : JSON_ACCOUNT_ID
-    return { id: re.exec(readFileSync(file, 'utf8'))?.[1], file }
+    const text = readFileSync(file, 'utf8')
+    return { id: name.endsWith('.toml') ? tomlAccountId(text) : jsonAccountId(text), file }
   }
   return {}
 }
