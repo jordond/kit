@@ -18,6 +18,33 @@ export function checkEnv(config: KitConfig, name: string, env: string | undefine
   return env
 }
 
+/**
+ * `--env` across several targets: targets that declare `envs` get it (an unknown env is a usage
+ * error), targets without envs run their default. An env none of the targets declares is a usage error.
+ */
+export function envsFor(
+  config: KitConfig,
+  names: string[],
+  env: string | undefined,
+): Map<string, string | undefined> {
+  const out = new Map<string, string | undefined>()
+  if (!env) {
+    for (const n of names) out.set(n, undefined)
+    return out
+  }
+  const withEnvs = names.filter((n) => config.targets[n]?.envs)
+  if (!withEnvs.length) {
+    if (names.length === 1) checkEnv(config, names[0]!, env)
+    throw new KitError(
+      `--env ${env} applies to none of ${names.join(', ')}`,
+      'Add targets.<name>.envs in kit.config.ts',
+      ExitCode.usage,
+    )
+  }
+  for (const n of names) out.set(n, withEnvs.includes(n) ? checkEnv(config, n, env) : undefined)
+  return out
+}
+
 /** `deploy.before` entries are kit commands (`env sync`), run as child kit processes. */
 export function beforeCommands(config: KitConfig, name: string): string[][] {
   const d = config.targets[name]?.deploy
