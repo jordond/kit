@@ -75,7 +75,10 @@ export async function logSince(
 }
 
 /** Create a tag at HEAD (or `ref`); annotated when `message` is given. */
-export async function tag(name: string, opts: { cwd?: string; message?: string; ref?: string } = {}): Promise<void> {
+export async function tag(
+  name: string,
+  opts: { cwd?: string; message?: string; ref?: string } = {},
+): Promise<void> {
   const args = opts.message ? ['tag', '-a', name, '-m', opts.message] : ['tag', name]
   if (opts.ref) args.push(opts.ref)
   await read(args, opts.cwd ?? '.')

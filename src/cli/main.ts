@@ -8,7 +8,7 @@ import { installSignalHandlers, interrupted, runCleanup } from '../lib/cleanup'
 import { ExitCode, KitError } from '../lib/errors'
 import { log } from '../lib/log'
 import { builtins, groupDescriptions } from './builtins'
-import { type KitCommand, type Runtime, toGunshi } from './command'
+import { computeFlags, type KitCommand, type Runtime, toGunshi } from './command'
 import { importRepoCommand, listRepoCommands } from './discover'
 import { kitGlobals, SHOW_USAGE } from './plugin'
 import { renderUsage } from './usage'
@@ -157,6 +157,14 @@ async function main(argv: string[]): Promise<number> {
       target = m
       loaded.set(m, cmd)
     }
+  }
+
+  // setup: passthrough commands take every token after their path as-is, help flags included.
+  const picked = target && loaded.get(target)
+  if (target && picked?.passthrough) {
+    const rest = argv.slice(target.path.length)
+    await picked.run({ root, config, args: {}, positionals: [], rest, flags: computeFlags({}), log })
+    return process.exitCode === undefined ? 0 : Number(process.exitCode)
   }
 
   const wantsHelp = argv.includes('--help') || argv.includes('-h')

@@ -48,6 +48,9 @@ export interface KitCommand<A extends Args = Args> {
   requiresEnv?: string[]
   /** Repo commands only: replace the built-in with the same path. */
   override?: boolean
+  // setup
+  /** Every token after the command path reaches `run` as `rest`, untouched (`kit gradle --help`); kit parses no flags. */
+  passthrough?: boolean
   run(ctx: KitContext<A>): unknown | Promise<unknown>
 }
 
