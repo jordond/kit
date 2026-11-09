@@ -52,7 +52,14 @@ const workspace = z
 export const configSchema = z
   .object({
     name: z.string().min(1),
-    gradle: z.object({ root: z.string() }).strict().optional(),
+    gradle: z
+      .object({
+        root: z.string(),
+        /** Tasks `kit init` runs to fetch the wrapper and dependencies (`:shared:dependencies`). */
+        init: z.union([z.string(), z.array(z.string())]).optional(),
+      })
+      .strict()
+      .optional(),
     versions: z
       .object({
         file: z.string(),
@@ -70,6 +77,8 @@ export const configSchema = z
               .object({
                 pick: z.array(z.string()).optional(),
                 rename: z.record(z.string(), z.string()).optional(),
+                /** Static local-only lines (`ENVIRONMENT: 'dev'`); never pushed. */
+                vars: z.record(z.string(), z.string()).optional(),
               })
               .strict(),
           )
@@ -84,13 +93,27 @@ export const configSchema = z
     cloudflare: z
       .object({
         accountId: z.string().optional(),
-        d1: z.record(z.string(), z.object({ name: z.string(), target: z.string() }).strict()).optional(),
+        d1: z
+          .record(
+            z.string(),
+            z
+              .object({
+                name: z.string(),
+                target: z.string(),
+                /** Used when `kit db` gets no --db and several are configured. */
+                default: z.boolean().optional(),
+              })
+              .strict(),
+          )
+          .optional(),
       })
       .strict()
       .optional(),
     release: z
       .object({
         branches: z.array(z.string()).optional(),
+        /** Dir holding the app's one-line `fastlane/Fastfile`; default gradle.root, then the repo root. */
+        fastlaneDir: z.string().optional(),
         notes: z.object({ maxLength: z.number().int().positive().optional() }).strict().optional(),
         preflight: z.array(z.string()).optional(),
         ios: z
@@ -141,6 +164,14 @@ export const configSchema = z
           message: `Unknown target "${d.target}"`,
         })
       }
+    }
+    const defaults = Object.entries(c.cloudflare?.d1 ?? {}).filter(([, d]) => d.default)
+    if (defaults.length > 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['cloudflare', 'd1'],
+        message: `Only one database can be the default (${defaults.map(([k]) => k).join(', ')})`,
+      })
     }
     if (c.targets.workspace) {
       ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })

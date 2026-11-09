@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "gradlew $*" >> "$KIT_TEST_LOG"

@@ -1,4 +1,5 @@
 import { defineCommand } from '../cli/command'
+import type { KitConfig } from '../config/schema'
 
 /**
  * `kit doctor`: one line per check on stderr (✔ ok, ▲ warning, ✖ failure), `--json` on stdout.
@@ -230,7 +231,54 @@ export function checkCiPin(
   return { id: 'ci-pin', label, status: 'ok', detail: want }
 }
 
-// TODO(§13.2): check the version-catalog keys kit's Gradle plugins read, once the plugins define them.
+/** `[versions]` keys kit's Gradle plugins read from the `libs` catalog (PLAN §13.5): a contract. */
+export const CATALOG_KEYS = [
+  // namespace and BuildInfo package default
+  'app-name',
+  'app-android-sdk-compile',
+  'app-android-sdk-target',
+  'app-android-sdk-min',
+  'app-jvm-target',
+  'app-android-version',
+  'app-ios-version',
+] as const
+
+/** The catalog's path, repo-relative: `versions.file`, else `<gradle root>/gradle/libs.versions.toml`. */
+export function catalogPath(config: KitConfig | undefined): string | undefined {
+  if (!config?.gradle) return undefined
+  return config.versions?.file ?? `${config.gradle.root.replace(/\/+$/, '')}/gradle/libs.versions.toml`
+}
+
+/** Every key in CATALOG_KEYS under `[versions]`; `catalog` is the parsed TOML (undefined: no file). */
+export function checkCatalogKeys(
+  file: string | undefined,
+  catalog: Record<string, unknown> | undefined,
+): Check {
+  const label = 'catalog keys'
+  if (!file) return { id: 'catalog', label, status: 'skip', detail: 'no gradle root' }
+  if (!catalog) {
+    return {
+      id: 'catalog',
+      label,
+      status: 'fail',
+      detail: `${file} missing`,
+      hint: `Create it with [versions] ${CATALOG_KEYS.join(', ')}`,
+    }
+  }
+  const versions = catalog.versions
+  const have = versions && typeof versions === 'object' ? (versions as Record<string, unknown>) : {}
+  const absent = CATALOG_KEYS.filter((k) => have[k] === undefined)
+  if (absent.length) {
+    return {
+      id: 'catalog',
+      label,
+      status: 'fail',
+      detail: `${file} [versions] missing ${absent.join(', ')}`,
+      hint: `Add them under [versions] in ${file}; kit's Gradle plugins read them`,
+    }
+  }
+  return { id: 'catalog', label, status: 'ok', detail: file }
+}
 
 export default defineCommand({
   description: 'Check tools, versions and .env',
@@ -246,7 +294,7 @@ export default defineCommand({
     const { emitJson } = await import('../lib/log')
     const { runQuiet } = await import('../lib/proc')
     const { detectPackageManager, pmExec } = await import('../lib/pm')
-    const { readToml } = await import('../lib/toml')
+    const { parseToml, readToml } = await import('../lib/toml')
     const { ExitCode } = await import('../lib/errors')
 
     const root = ctx.root ?? process.cwd()
@@ -313,6 +361,15 @@ export default defineCommand({
     }
     const kitPin = pin?.devDependencies?.['@jordond/kit'] ?? pin?.dependencies?.['@jordond/kit']
 
+    const catalogFile = catalogPath(config)
+    let catalogCheck: Check
+    try {
+      const text = catalogFile ? read(catalogFile) : undefined
+      catalogCheck = checkCatalogKeys(catalogFile, text === undefined ? undefined : parseToml(text))
+    } catch (e) {
+      catalogCheck = checkUnreadable('catalog', 'catalog keys', catalogFile ?? '', e)
+    }
+
     const checks: Check[] = [
       checkBun(Bun.version),
       checkJava(java, gradle),
@@ -328,6 +385,7 @@ export default defineCommand({
       miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
       checkCiPin(workflows, kitPin, ctx.args.ci === true),
+      catalogCheck,
       ...(pkgCheck ? [pkgCheck] : []),
     ]
 

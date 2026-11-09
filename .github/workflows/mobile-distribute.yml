@@ -1,0 +1,198 @@
+name: mobile-distribute
+
+# Reusable workflow (PLAN §9.6): build and upload one mobile platform to one track with
+# `kit release`. Call it from the app repo, pinned by SHA, with named secrets only:
+#
+#   jobs:
+#     distribute:
+#       uses: jordond/kit/.github/workflows/mobile-distribute.yml@<sha> # vX.Y.Z
+#       permissions: { contents: write }
+#       with: { platform: ios, track: ${{ inputs.track }} }
+#       secrets:
+#         ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+#         ...
+#
+# Version names come from the catalog TOML at the dispatched ref (bump with `kit version bump`
+# first); build numbers come from the stores. prod runs in the `production` environment, so give
+# that environment required reviewers. Tags (`ios/v1.4.0+12`) are pushed after a successful upload.
+# The setup is inlined rather than using kit's composite action: a reusable workflow cannot
+# reference its own repo's action at its own SHA.
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: ios | android
+        required: true
+        type: string
+      track:
+        description: internal | alpha | beta | prod
+        required: true
+        type: string
+      build:
+        description: Build number / version code (empty = next from the store)
+        required: false
+        type: string
+        default: ''
+      notes:
+        description: Release notes (empty = commits since the last <platform>/v* tag; ios prod requires it)
+        required: false
+        type: string
+        default: ''
+      rollout:
+        description: Android prod staged-rollout fraction (empty = config or 0.1)
+        required: false
+        type: string
+        default: ''
+      draft:
+        description: Android draft release
+        required: false
+        type: boolean
+        default: false
+      skip:
+        description: Comma-separated release.preflight skipFlags
+        required: false
+        type: string
+        default: ''
+      bun-version:
+        required: false
+        type: string
+        default: 1.3.14
+      ruby-version:
+        required: false
+        type: string
+        default: '3.4'
+      java-version:
+        required: false
+        type: string
+        default: '21'
+      runs-on:
+        description: Runner (empty = macos-latest for ios, ubuntu-latest for android)
+        required: false
+        type: string
+        default: ''
+    secrets:
+      ASC_KEY_ID:
+        required: false
+      ASC_ISSUER_ID:
+        required: false
+      ASC_KEY_P8_BASE64:
+        required: false
+      MATCH_PASSWORD:
+        required: false
+      MATCH_GIT_URL:
+        required: false
+      MATCH_GIT_BASIC_AUTHORIZATION:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_ALIAS:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      PLAY_SERVICE_ACCOUNT_BASE64:
+        required: false
+      SENTRY_AUTH_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  distribute:
+    name: ${{ inputs.platform }} → ${{ inputs.track }}
+    runs-on: ${{ inputs.runs-on || (inputs.platform == 'ios' && 'macos-latest' || 'ubuntu-latest') }}
+    environment: ${{ inputs.track == 'prod' && 'production' || '' }}
+    timeout-minutes: 90
+    concurrency:
+      # Per track: GitHub keeps one pending run per group, so a later internal dispatch must not
+      # cancel a prod run waiting for approval.
+      group: mobile-distribute-${{ github.repository }}-${{ inputs.platform }}-${{ inputs.track }}
+      cancel-in-progress: false
+    steps:
+      - name: Validate inputs
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          TRACK: ${{ inputs.track }}
+        run: |
+          case "$PLATFORM" in ios|android) ;; *) echo "::error::platform must be ios or android, got '$PLATFORM'"; exit 2 ;; esac
+          case "$TRACK" in internal|alpha|beta|prod) ;; *) echo "::error::track must be internal|alpha|beta|prod, got '$TRACK'"; exit 2 ;; esac
+
+      # Full history: release notes come from `git describe --match '<platform>/v*'`.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Both platforms: the iOS archive builds the KMP framework with Gradle too.
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+
+      - name: Locate kit's fastlane Gemfile
+        run: |
+          gemfile=$PWD/node_modules/@jordond/kit/fastlane/Gemfile
+          [ -f "$gemfile" ] || { echo "::error::$gemfile not found: add @jordond/kit as a devDependency"; exit 1; }
+          {
+            echo "BUNDLE_GEMFILE=$gemfile"
+            echo "BUNDLE_PATH=$RUNNER_TEMP/kit-bundle"
+            echo "BUNDLE_FROZEN=true"
+            echo "KIT_OUTPUT_DIR=$RUNNER_TEMP/kit-out"
+          } >> "$GITHUB_ENV"
+      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1
+        with:
+          ruby-version: ${{ inputs.ruby-version }}
+          bundler-cache: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/kit-bundle
+          key: kit-bundle-${{ runner.os }}-${{ runner.arch }}-ruby${{ inputs.ruby-version }}-${{ hashFiles('node_modules/@jordond/kit/fastlane/Gemfile.lock') }}
+      - name: Install kit's fastlane bundle
+        run: bundle install --jobs 4
+
+      # Release tags are annotated, which needs an identity.
+      - name: Git identity for release tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: kit release
+        env:
+          CI: 'true'
+          PLATFORM: ${{ inputs.platform }}
+          TRACK: ${{ inputs.track }}
+          BUILD: ${{ inputs.build }}
+          NOTES: ${{ inputs.notes }}
+          ROLLOUT: ${{ inputs.rollout }}
+          DRAFT: ${{ inputs.draft }}
+          SKIP: ${{ inputs.skip }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          # `--flag=value`: a value starting with "-" (kit's own "- subject" notes) is not read as a flag.
+          args=(release "$PLATFORM" "--track=$TRACK" --yes)
+          if [ -n "$BUILD" ]; then
+            if [ "$PLATFORM" = ios ]; then args+=("--build=$BUILD"); else args+=("--code=$BUILD"); fi
+          fi
+          [ -n "$NOTES" ] && args+=("--notes=$NOTES")
+          [ -n "$ROLLOUT" ] && args+=("--rollout=$ROLLOUT")
+          [ "$DRAFT" = true ] && args+=(--draft)
+          [ -n "$SKIP" ] && args+=("--skip=$SKIP")
+          node_modules/.bin/kit "${args[@]}"

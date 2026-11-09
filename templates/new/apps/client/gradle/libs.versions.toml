@@ -1,0 +1,25 @@
+[versions]
+######## kit ########
+# kit's Gradle plugins read these keys by name (`kit doctor` checks them). Release versions are
+# bumped by `kit version bump`; build numbers come from the stores and are never committed.
+# Application id / namespace root (e.g. "com.example.app"): BuildInfo and module namespaces derive from it.
+app-name = "com.example.app"
+app-android-sdk-compile = "37"
+app-android-sdk-target = "37"
+app-android-sdk-min = "30"
+app-jvm-target = "21"
+app-android-version = "0.1.0"
+app-ios-version = "0.1.0"
+#####################
+agp = "9.4.1"
+kotlin = "2.4.21"
+compose-multiplatform = "1.12.2"
+
+[libraries]
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-kmp-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }

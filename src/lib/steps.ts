@@ -4,6 +4,7 @@ import pc from 'picocolors'
 import type { Flags } from '../cli/command'
 import { interrupted } from './cleanup'
 import { ProcError, type RunOptions, runLines } from './proc'
+import { redact } from './secrets'
 
 /**
  * Steps render as a listr2 tree on stderr (brewd `runSteps`, ported). Every step runs even after
@@ -72,7 +73,8 @@ export async function runSteps(
     skip: () => (opts.bail && failed) || interrupted(),
     task: async (_ctx, task) => {
       const start = performance.now()
-      const update = (line: string) => {
+      const update = (raw: string) => {
+        const line = redact(raw)
         if (streaming) stream.write(`${pc.dim('│')} ${line}\n`)
         else task.output = line
       }
@@ -86,8 +88,8 @@ export async function runSteps(
           title: s.title,
           ok: false,
           ms: performance.now() - start,
-          error: e instanceof Error ? e.message : String(e),
-          output: e instanceof ProcError ? e.output : undefined,
+          error: redact(e instanceof Error ? e.message : String(e)),
+          output: e instanceof ProcError && e.output ? redact(e.output) : undefined,
         })
         throw e
       }

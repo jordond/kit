@@ -72,6 +72,68 @@ describe('planInit', () => {
   })
 })
 
+describe('planInit native steps', () => {
+  const native = configSchema.parse({
+    name: 'N',
+    gradle: { root: 'apps/client', init: ':shared:dependencies' },
+    targets: { client: { kind: 'gradle', dir: 'apps/client' } },
+    release: {
+      android: { packageName: 'a.b', module: ':android' },
+      ios: { bundleIds: ['a.b'], project: 'p', scheme: 's', output: 'o.ipa' },
+    },
+  })
+  const files = ['apps/client/gradlew', 'apps/client/Gemfile', 'Gemfile']
+  const all = (bin: string) => ['java', 'bundle', 'xcodebuild'].includes(bin)
+  const nativeOf = (over: Partial<InitState>) =>
+    planInit(
+      state(files, { config: native, which: all, androidSdk: true, platform: 'darwin', ...over }),
+    ).slice(4)
+
+  test('gradle.init tasks through the wrapper, then bundle install where the Gemfile is (Gradle root first)', () => {
+    expect(nativeOf({})).toEqual([
+      {
+        kind: 'cmd',
+        title: 'gradle :shared:dependencies',
+        cmd: ['./gradlew', '--console=plain', '-q', ':shared:dependencies'],
+        cwd: '/r/apps/client',
+      },
+      {
+        kind: 'cmd',
+        title: 'bundle install (kit fastlane)',
+        cmd: ['bundle', 'install'],
+        cwd: '/r',
+        env: {},
+      },
+    ])
+  })
+
+  test('missing tools skip with a hint; --js-only skips both', () => {
+    const reasons = (over: Partial<InitState>) =>
+      nativeOf(over).map((a) => `${a.title}: ${a.kind === 'skip' ? a.reason : 'run'}`)
+    expect(reasons({ which: () => false })).toEqual([
+      'gradle :shared:dependencies: no java on PATH; install a JDK',
+      'bundle install (kit fastlane): no bundler on PATH; gem install bundler',
+      'Xcode: no xcodebuild on PATH; install Xcode for iOS builds',
+    ])
+    expect(reasons({ androidSdk: false })[0]).toContain('no Android SDK; set ANDROID_HOME')
+    expect(reasons({ jsOnly: true })).toEqual([
+      'gradle :shared:dependencies: --js-only',
+      'bundle install (kit fastlane): --js-only',
+    ])
+  })
+
+  test('no gradle.init and no Gemfile: no native steps', () => {
+    expect(planInit(state([], { which: all, androidSdk: true })).map((a) => a.title)).not.toContain(
+      'bundle install',
+    )
+    expect(nativeOf({ config: { ...native, gradle: { root: 'apps/client' } } })[0]?.title).toBe(
+      'bundle install (kit fastlane)',
+    )
+    const noRelease = { ...native, gradle: { root: 'apps/client' }, release: undefined }
+    expect(nativeOf({ config: noRelease })[0]?.title).toBe('bundle install (apps/client)')
+  })
+})
+
 describe('templates', () => {
   test('kitPackageRoot finds the templates', () => {
     const root = kitPackageRoot()

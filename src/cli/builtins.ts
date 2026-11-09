@@ -65,6 +65,30 @@ export const builtins: BuiltinEntry[] = [
     group: 'Release',
     load: () => import('../commands/release/android'),
   },
+  {
+    path: ['release', 'certs'],
+    description: 'Install App Store signing with match; --add creates what is missing',
+    group: 'Release',
+    load: () => import('../commands/release/certs'),
+  },
+  {
+    path: ['version', 'show'],
+    description: 'Show version names and last release tags',
+    group: 'Release',
+    load: () => import('../commands/version/show'),
+  },
+  {
+    path: ['version', 'bump'],
+    description: 'Bump a version name, commit and push',
+    group: 'Release',
+    load: () => import('../commands/version/bump'),
+  },
+  {
+    path: ['fastlane'],
+    description: "Run fastlane with kit's shared Fastfile",
+    group: 'Release',
+    load: () => import('../commands/fastlane'),
+  },
   // infra: env + db
   {
     path: ['env', 'sync'],
@@ -158,10 +182,17 @@ export const builtins: BuiltinEntry[] = [
     group: 'Setup',
     load: () => import('../commands/config'),
   },
+  {
+    path: ['completion'],
+    description: 'Print a shell completion script',
+    group: 'Setup',
+    load: () => import('../commands/completion'),
+  },
 ]
 
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
+  version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations and queries',
 }

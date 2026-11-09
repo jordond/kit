@@ -142,6 +142,16 @@ describe('render', () => {
     expect(all!.lines.map((l) => l.name)).toEqual(schema.keys.map((k) => k.name))
   })
 
+  test('vars: static local-only lines first, written as-is even when empty, never read from .env', () => {
+    const c = configSchema.parse({
+      name: 'T',
+      env: { outputs: { 'a/.dev.vars': { vars: { ENVIRONMENT: 'dev', AUD: '' }, pick: ['CAP'] } } },
+    })
+    const [o] = outputs(c, schema)
+    const out = render(o!, { ...values, ENVIRONMENT: 'prod' })
+    expect(out).toBe(`${GENERATED_BANNER}ENVIRONMENT=dev\nAUD=\nCAP=0\n`)
+  })
+
   test('multi-line values are quoted so dotenv keeps every line', () => {
     expect(render({ path: 'x', lines: [{ name: 'PEM', source: 'PEM' }] }, { PEM: 'a\nb' })).toContain(
       'PEM="a\\nb"\n',

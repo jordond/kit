@@ -18,14 +18,22 @@ export function findIosProject(root: string, config: KitConfig): string | undefi
   return pick ? join(ios, pick) : undefined
 }
 
+/** Xcode is installed: the app in /Applications, or `xcodebuild` on PATH. */
+export function hasXcode(
+  which: (bin: string) => boolean = (b) => Bun.which(b) !== null,
+  exists: (path: string) => boolean = existsSync,
+): boolean {
+  return exists('/Applications/Xcode.app') || which('xcodebuild')
+}
+
 export default defineCommand({
   description: 'Open the iOS project in Xcode',
   group: 'Develop',
-  examples: 'kit xcode',
+  examples: 'kit xcode\nkit xcode --dry-run --json',
   async run(ctx) {
     const { requireProject } = await import('../cli/command')
     const { ExitCode, KitError } = await import('../lib/errors')
-    const { run } = await import('../lib/proc')
+    const { run, runToStderr } = await import('../lib/proc')
     const { root, config } = requireProject(ctx)
     if (process.platform !== 'darwin') {
       throw new KitError('kit xcode requires macOS', undefined, ExitCode.precondition)
@@ -45,13 +53,20 @@ export default defineCommand({
         ExitCode.config,
       )
     }
+    if (!hasXcode()) {
+      throw new KitError('Xcode is not installed', 'Install it from the App Store', ExitCode.precondition)
+    }
     const cmd = ['open', '-a', 'Xcode', project]
+    const { emitJson } = await import('../lib/log')
     if (ctx.flags.dryRun) {
-      ctx.log.step(cmd.join(' '))
+      if (ctx.flags.json) emitJson({ project, opened: false, plan: [cmd] })
+      else ctx.log.step(cmd.join(' '))
       return
     }
-    const code = await run(cmd, { cwd: root })
+    // With --json, stdout is the one document: anything `open` prints goes to stderr.
+    const code = await (ctx.flags.json ? runToStderr : run)(cmd, { cwd: root })
     if (code !== 0) throw new KitError(`${cmd.join(' ')} failed (exit ${code})`, 'Is Xcode installed?')
-    ctx.log.success(`Opening ${project} in Xcode`)
+    if (ctx.flags.json) emitJson({ project, opened: true })
+    else ctx.log.success(`Opening ${project} in Xcode`)
   },
 })

@@ -1,0 +1,8 @@
+[versions]
+app-name = "com.example.setup"
+app-android-sdk-compile = "36"
+app-android-sdk-target = "36"
+app-android-sdk-min = "26"
+app-jvm-target = "21"
+app-android-version = "1.0.0"
+app-ios-version = "1.0.0"

@@ -43,7 +43,7 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
 
   const items: StepGroup[] = groups.map((g) => ({
     title: g.title,
-    steps: g.commands.map((c) => commandStep(c.title, c.cmd, { cwd: c.cwd, env: c.env })),
+    steps: g.commands.map((c) => commandStep(c.title, c.cmd, { cwd: c.cwd, env: c.env, mute: ctx.mute })),
   }))
   const results = await runSteps(items, ctx.flags, { bail: ctx.flags.bail })
   const code = ctx.flags.json

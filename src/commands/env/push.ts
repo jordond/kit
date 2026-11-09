@@ -6,12 +6,14 @@ export default defineCommand({
   args: {
     target: { type: 'string', short: 't', description: 'Only this worker target (env.workerSecrets)' },
     github: { type: 'boolean', description: 'Push env.githubSecrets with gh' },
+    all: { type: 'boolean', description: 'Every worker in env.workerSecrets and env.githubSecrets' },
   },
   examples: [
-    'kit env push                    # every target in env.workerSecrets',
+    'kit env push                    # every target in env.workerSecrets (not GitHub)',
     'kit env push --target edge',
     'kit env push --github           # GitHub Actions secrets only',
     'kit env push --target edge --github',
+    'kit env push --all --yes        # every worker and GitHub, no prompt (CI)',
     'kit env push --dry-run',
   ].join('\n'),
   async run(ctx) {
@@ -26,14 +28,20 @@ export default defineCommand({
     const state = await loadEnv(root, config)
     assertValid(state)
 
-    // No flags: every worker. --target: that worker. --github alone: GitHub only.
+    // No flags: every worker, GitHub skipped. --target: that worker. --github alone: GitHub only.
+    // --all: every worker and GitHub (when env.githubSecrets is set).
+    if (ctx.args.all && ctx.args.target) {
+      throw new KitError('--all and --target are exclusive', 'kit env push --all', ExitCode.usage)
+    }
     const workerNames = ctx.args.target
       ? [ctx.args.target]
-      : ctx.args.github
+      : ctx.args.github && !ctx.args.all
         ? []
         : Object.keys(config.env?.workerSecrets ?? {})
     const destinations = workerNames.map((t) => workerDestination(root, config, t))
-    if (ctx.args.github) {
+    if (ctx.args.all && config.env?.githubSecrets?.length) {
+      destinations.push(githubDestination(root, config.env.githubSecrets))
+    } else if (ctx.args.github && !ctx.args.all) {
       const keys = config.env?.githubSecrets ?? []
       if (!keys.length) {
         throw new KitError(

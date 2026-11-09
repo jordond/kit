@@ -6,7 +6,10 @@ import type { PackageManager } from '../lib/pm'
 
 /**
  * `kit init`, existing-repo mode (brewd `cli init` + WhaleSay `ws init`, generalized): `.env` from
- * `.env.example`, install, optional mise/lefthook scaffolds, `kit env sync`, `wrangler types`.
+ * `.env.example`, install, optional mise/lefthook scaffolds, `kit env sync`, `wrangler types`, then
+ * the native side: `gradle.init` tasks (needs java, and an Android SDK when release.android is set)
+ * and `bundle install` where a Gemfile is (the Gradle root, else the repo root). A missing tool
+ * skips its step with a hint instead of failing, so a JS-only machine still ends up set up.
  * Idempotent: whatever is already there is skipped. Every step runs even after a failure, so one
  * pass surfaces every problem; the exit code is 1 if any failed. New-repo scaffolding is Phase 2.
  */
@@ -31,6 +34,15 @@ export interface InitState {
   self: string[]
   /** A node_modules binary run with the package manager of `cwd` (`bun x wrangler …`). */
   exec: (cwd: string, bin: string, ...args: string[]) => string[]
+  /** Whether a tool is on PATH. Default: nothing is. */
+  which?: (bin: string) => boolean
+  /** Bundler env for kit's fastlane Gemfile. */
+  bundleEnv?: () => Record<string, string>
+  /** ANDROID_HOME / ANDROID_SDK_ROOT set, or sdk.dir in `<gradle root>/local.properties`. */
+  androidSdk?: boolean
+  platform?: NodeJS.Platform
+  /** `--js-only`: skip the Gradle and bundler steps. */
+  jsOnly?: boolean
 }
 
 export type InitAction =
@@ -77,6 +89,55 @@ export function planInit(s: InitState): InitAction[] {
     const cwd = join(s.root, t.dir)
     plan.push({ kind: 'cmd', title: `wrangler types (${name})`, cmd: s.exec(cwd, 'wrangler', 'types'), cwd })
   }
+  plan.push(...planNative(s))
+  return plan
+}
+
+function planNative(s: InitState): InitAction[] {
+  const plan: InitAction[] = []
+  const which = s.which ?? (() => false)
+  const gradle = s.config?.gradle
+  const init = gradle?.init === undefined ? [] : [gradle.init].flat()
+  if (gradle && init.length) {
+    const title = `gradle ${init.join(' ')}`
+    if (s.jsOnly) plan.push({ kind: 'skip', title, reason: '--js-only' })
+    else if (!which('java')) plan.push({ kind: 'skip', title, reason: 'no java on PATH; install a JDK' })
+    else if (s.config?.release?.android && !s.androidSdk) {
+      plan.push({
+        kind: 'skip',
+        title,
+        reason: `no Android SDK; set ANDROID_HOME, or sdk.dir in ${join(gradle.root, 'local.properties')}`,
+      })
+    } else {
+      const gradlew = s.exists(join(gradle.root, 'gradlew')) ? './gradlew' : 'gradle'
+      const cmd = [gradlew, '--console=plain', '-q', ...init]
+      plan.push({ kind: 'cmd', title, cmd, cwd: join(s.root, gradle.root) })
+    }
+  }
+  // Mobile releases use kit's own Gemfile (D7); otherwise install the app's Gemfile if it has one.
+  const kitBundle = !!(s.config?.release?.ios || s.config?.release?.android)
+  const gemDir = kitBundle
+    ? '.'
+    : [gradle?.root, '.'].find((d) => d !== undefined && s.exists(join(d, 'Gemfile')))
+  if (gemDir !== undefined) {
+    const title = kitBundle
+      ? 'bundle install (kit fastlane)'
+      : `bundle install${gemDir === '.' ? '' : ` (${gemDir})`}`
+    if (s.jsOnly) plan.push({ kind: 'skip', title, reason: '--js-only' })
+    else if (!which('bundle'))
+      plan.push({ kind: 'skip', title, reason: 'no bundler on PATH; gem install bundler' })
+    else
+      plan.push({
+        kind: 'cmd',
+        title,
+        cmd: ['bundle', 'install'],
+        cwd: join(s.root, gemDir),
+        ...(kitBundle ? { env: s.bundleEnv?.() ?? {} } : {}),
+      })
+  }
+  if (s.platform === 'darwin' && s.config?.release?.ios && !s.jsOnly && !which('xcodebuild')) {
+    plan.push({ kind: 'skip', title: 'Xcode', reason: 'no xcodebuild on PATH; install Xcode for iOS builds' })
+  }
   return plan
 }
 
@@ -92,14 +153,28 @@ export function kitPackageRoot(from: string = import.meta.dir): string {
   }
 }
 
+function hasAndroidSdk(root: string, config: KitConfig | undefined): boolean {
+  if (process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT) return true
+  const props = join(root, config?.gradle?.root ?? '.', 'local.properties')
+  return existsSync(props) && /^\s*sdk\.dir\s*=/m.test(readFileSync(props, 'utf8'))
+}
+
 export function renderTemplate(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{(\w+)\}\}/g, (m, k: string) => vars[k] ?? m)
 }
 
 export default defineCommand({
-  description: 'Set up a fresh clone: .env, install, optional mise/lefthook, env sync, wrangler types',
+  description: 'Set up a fresh clone: .env, install, env sync, wrangler types, Gradle and bundler deps',
   group: 'Setup',
-  examples: 'kit init\nkit init --dry-run\nkit init --yes   # also scaffold mise.toml and lefthook.yml',
+  args: {
+    'js-only': { type: 'boolean', description: 'Skip the Gradle and bundler steps' },
+  },
+  examples: [
+    'kit init',
+    'kit init --dry-run',
+    'kit init --yes       # also scaffold mise.toml and lefthook.yml',
+    'kit init --js-only   # JS workspace only: no Gradle, no bundle install',
+  ].join('\n'),
   async run(ctx) {
     const { chmodSync, writeFileSync } = await import('node:fs')
     const { relative } = await import('node:path')
@@ -128,6 +203,7 @@ export default defineCommand({
       }
     }
 
+    const { bundleEnv } = await import('../lib/fastlane')
     const plan = planInit({
       root,
       config: ctx.config,
@@ -137,6 +213,11 @@ export default defineCommand({
       declinedReason,
       self: [process.execPath, '--no-env-file', process.argv[1]!],
       exec: (cwd, bin, ...args) => pmExec(detectPackageManager(cwd, root), bin, ...args),
+      which: (bin) => Bun.which(bin) !== null,
+      androidSdk: hasAndroidSdk(root, ctx.config),
+      platform: process.platform,
+      bundleEnv,
+      jsOnly: ctx.args['js-only'] === true,
     })
 
     const where = (cwd: string) => relative(root, cwd) || '.'

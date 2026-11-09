@@ -1,0 +1,6 @@
+[versions]
+# app versions (kit version bump edits these lines only)
+app-ios-version = "1.4.0"
+app-android-version = "1.4.0" # trailing comment
+api-version = '2.0.1'
+kotlin = "2.4.21"

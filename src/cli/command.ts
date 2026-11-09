@@ -37,6 +37,22 @@ export interface KitContext<A extends Args = Args> {
   rest: string[]
   flags: Flags
   log: Logger
+  /** Child-output lines to drop, set through `ctx.builtin(path, { mute })`; built-ins pass it to their steps. */
+  mute?: RegExp
+  /**
+   * Run the built-in at `path` (`'test'`, `'release ios'`) with this context: how an `override: true`
+   * repo command wraps the built-in it replaces.
+   */
+  builtin(path: string | string[], options?: BuiltinOptions): Promise<void>
+}
+
+/** What `ctx.builtin` changes for the built-in it runs; each field defaults to the caller's. */
+export interface BuiltinOptions {
+  /** Drop matching child-output lines (linker noise) from the step tree and failure reports. */
+  mute?: RegExp
+  args?: Record<string, unknown>
+  positionals?: string[]
+  rest?: string[]
 }
 
 export interface KitCommand<A extends Args = Args> {
@@ -61,6 +77,29 @@ export function defineCommand<const A extends Args>(command: KitCommand<A>): Kit
 export interface Runtime {
   root: string | undefined
   config: KitConfig | undefined
+}
+
+/** Complete a context with `builtin`. */
+export function withBuiltin(base: Omit<KitContext, 'builtin'>): KitContext {
+  return {
+    ...base,
+    async builtin(path, options = {}) {
+      const want = (typeof path === 'string' ? path.split(' ') : path).filter(Boolean)
+      const { builtins } = await import('./builtins')
+      const entry = builtins.find((b) => b.path.join(' ') === want.join(' '))
+      if (!entry) throw new KitError(`No built-in \`kit ${want.join(' ')}\``, 'Run `kit --help` to list them')
+      const cmd = (await entry.load()).default
+      await cmd.run(
+        withBuiltin({
+          ...base,
+          args: (options.args ?? base.args) as ArgValues<Args>,
+          positionals: options.positionals ?? base.positionals,
+          rest: options.rest ?? base.rest,
+          mute: options.mute ?? base.mute,
+        }),
+      )
+    },
+  }
 }
 
 /** gunshi includes the subcommand tokens in positionals; drop them. */
@@ -100,14 +139,19 @@ export function computeFlags(values: Record<string, unknown>): Flags {
   }
 }
 
+/** A gunshi command plus what kit's usage renderer reads. */
+export type KitGunshiCommand = Command & { group?: string; passthrough?: boolean }
+
 /** Adapt a kit command to a gunshi command. */
-export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): Command & { group?: string } {
+export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): KitGunshiCommand {
   return {
     name,
     description: cmd.description,
     examples: cmd.examples,
-    args: { ...globalArgs, ...(cmd.args ?? {}) },
+    // A passthrough parses no flags of its own; gunshi only sees it for `kit <path> --help`.
+    args: cmd.passthrough ? {} : { ...globalArgs, ...(cmd.args ?? {}) },
     group: cmd.group,
+    passthrough: cmd.passthrough,
     run: async (ctx) => {
       const missing = (cmd.requiresEnv ?? []).filter((k) => !process.env[k])
       if (missing.length) {
@@ -117,15 +161,17 @@ export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): Comm
           ExitCode.config,
         )
       }
-      await cmd.run({
-        root: rt.root,
-        config: rt.config,
-        args: ctx.values as ArgValues<Args>,
-        positionals: stripPath(ctx.positionals, ctx.commandPath),
-        rest: ctx.rest,
-        flags: computeFlags(ctx.values),
-        log,
-      })
+      await cmd.run(
+        withBuiltin({
+          root: rt.root,
+          config: rt.config,
+          args: ctx.values as ArgValues<Args>,
+          positionals: stripPath(ctx.positionals, ctx.commandPath),
+          rest: ctx.rest,
+          flags: computeFlags(ctx.values),
+          log,
+        }),
+      )
     },
-  } as Command & { group?: string }
+  } as KitGunshiCommand
 }

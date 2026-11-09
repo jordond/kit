@@ -4,7 +4,7 @@ export default defineCommand({
   description: 'Run ./gradlew in the Gradle root (arguments pass through)',
   group: 'Develop',
   passthrough: true,
-  examples: 'kit gradle assembleDebug\nkit gradle :shared:test --info\nkit gradle --help',
+  examples: 'kit gradle assembleDebug\nkit gradle :shared:test --info\nkit gradle help --task assembleDebug',
   async run(ctx) {
     const { existsSync } = await import('node:fs')
     const { join } = await import('node:path')

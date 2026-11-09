@@ -119,12 +119,17 @@ describe('verbs', () => {
     const r = await fx.kit(['deploy', 'web', '--env', 'staging', '--json'])
     expect(r.code).toBe(0)
     expect(JSON.parse(r.stdout)).toEqual({
-      target: 'web',
-      env: 'staging',
       ok: true,
-      steps: [
-        { title: 'kit --version', code: 0 },
-        { title: expect.any(String), code: 0 },
+      deploys: [
+        {
+          target: 'web',
+          env: 'staging',
+          ok: true,
+          steps: [
+            { title: 'kit --version', code: 0 },
+            { title: expect.any(String), code: 0 },
+          ],
+        },
       ],
     })
     expect(r.stderr).toContain('astro ok')
@@ -137,8 +142,37 @@ describe('verbs', () => {
     expect(r.code).toBe(1)
     const doc = JSON.parse(r.stdout)
     expect(doc.ok).toBe(false)
-    expect(doc.steps.at(-1).code).toBe(3)
+    expect(doc.deploys[0].steps.at(-1).code).toBe(3)
     expect(r.stderr).toContain('deploy broke')
+  })
+
+  test('deploy several targets in order; --env goes to the ones that declare it', async () => {
+    const r = await fx.kit(['deploy', 'web', 'api', '--env', 'staging'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual(['./apps/api wrangler deploy', './apps/web astro deploy staging'])
+  })
+
+  test('deploy stops at the first failed target and names the skipped ones', async () => {
+    fx.fail('wrangler', 4)
+    const r = await fx.kit(['deploy', 'api', 'web'])
+    expect(r.code).toBe(1)
+    expect(summary()).toEqual(['./apps/api wrangler deploy'])
+    expect(r.stderr).toContain('deploy api failed (exit 4); skipped web')
+  })
+
+  test('deploy needs a target; --dry-run --json plans every one and runs nothing', async () => {
+    expect((await fx.kit(['deploy'])).code).toBe(2)
+    expect((await fx.kit(['deploy', 'api', '--env', 'staging'])).code).toBe(2)
+    const r = await fx.kit(['deploy', 'api', 'web', '--dry-run', '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout)).toEqual({
+      dryRun: true,
+      deploys: [
+        { target: 'api', plan: ['bun x wrangler deploy'] },
+        { target: 'web', plan: ['bun run deploy'] },
+      ],
+    })
+    expect(fx.calls()).toEqual([])
   })
 
   test('outside a project: exit 3', async () => {

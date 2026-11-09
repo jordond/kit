@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
 // setup-repo has a pnpm lockfile, so install and `pnpm exec wrangler` go through recording fakes.
-const BINS = ['fake-gradlew', 'pnpm', 'wrangler', 'open', 'java', 'ruby', 'xcodebuild']
+const BINS = ['fake-gradlew', 'pnpm', 'wrangler', 'open', 'java', 'ruby', 'xcodebuild', 'bundle']
 let fx: Fixture
 
 beforeEach(() => {
@@ -33,15 +33,23 @@ describe('passthroughs', () => {
     expect(summary()).toEqual(['./apps/api pnpm exec wrangler d1 list --json'])
   })
 
-  test('wrangler --help / -h: usage on stdout, exit 0, nothing run', async () => {
+  test.each([
+    ['wrangler', "Run wrangler in a worker target's directory", 'kit wrangler api whoami'],
+    ['gradle', 'Run ./gradlew in the Gradle root', 'kit gradle assembleDebug'],
+  ])('%s --help / -h: kit usage on stdout, exit 0, nothing run', async (cmd, description, example) => {
     for (const flag of ['--help', '-h']) {
-      const r = await fx.kit(['wrangler', flag])
+      const r = await fx.kit([cmd, flag])
       expect(r.code).toBe(0)
-      expect(r.stdout).toContain("Run wrangler in a worker target's directory")
-      expect(r.stdout).toContain('kit wrangler api whoami')
-      expect(r.stdout).toContain('Worker targets: api')
+      expect(r.stdout).toContain(description)
+      expect(r.stdout).toContain(example)
+      expect(r.stdout).toContain('no --json')
     }
     expect(fx.calls()).toEqual([])
+  })
+
+  test('gradle: --help after a task still passes through', async () => {
+    expect((await fx.kit(['gradle', 'tasks', '--help'])).code).toBe(0)
+    expect(summary()).toEqual(['./apps/client fake-gradlew tasks --help'])
   })
 
   test('wrangler: a target first still passes --help through', async () => {
@@ -63,6 +71,24 @@ describe('passthroughs', () => {
       const r = await fx.kit(['xcode'])
       expect(r.code).toBe(0)
       expect(summary()).toEqual(['. open -a Xcode apps/client/ios/iosApp.xcodeproj'])
+    },
+  )
+
+  test.skipIf(process.platform !== 'darwin')(
+    'xcode --json: one document; --dry-run opens nothing',
+    async () => {
+      const dry = await fx.kit(['xcode', '--dry-run', '--json'])
+      expect(dry.code).toBe(0)
+      expect(JSON.parse(dry.stdout)).toEqual({
+        project: 'apps/client/ios/iosApp.xcodeproj',
+        opened: false,
+        plan: [['open', '-a', 'Xcode', 'apps/client/ios/iosApp.xcodeproj']],
+      })
+      expect(fx.calls()).toEqual([])
+      const r = await fx.kit(['xcode', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toEqual({ project: 'apps/client/ios/iosApp.xcodeproj', opened: true })
+      expect(r.stderr).toContain('open ok')
     },
   )
 
@@ -132,6 +158,20 @@ describe('doctor', () => {
     expect(r.stderr).toMatch(/✖ java\s+not found/)
   })
 
+  test('catalog keys: a key missing from the Gradle root catalog fails, named', async () => {
+    writeFileSync(join(fx.dir, '.env'), 'API_KEY=x\nOTHER_KEY=y\n')
+    const catalog = join(fx.dir, 'apps/client/gradle/libs.versions.toml')
+    expect(JSON.parse((await fx.kit(['doctor', '--json'], { env: env() })).stdout).checks).toContainEqual(
+      expect.objectContaining({ id: 'catalog', status: 'ok' }),
+    )
+    writeFileSync(catalog, readFileSync(catalog, 'utf8').replace(/^app-jvm-target.*\n/m, ''))
+    const r = await fx.kit(['doctor'], { env: env() })
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('✖ catalog keys')
+    expect(r.stderr).toContain('[versions] missing app-jvm-target')
+    expect(r.stderr).toContain('Add them under [versions]')
+  })
+
   test('works outside a project', async () => {
     const r = await fx.kit(['doctor', '--json'], { cwd: '..' })
     expect(JSON.parse(r.stdout).checks.length).toBeGreaterThan(0)
@@ -149,7 +189,9 @@ describe('init', () => {
       'skip mise.toml',
       'skip lefthook.yml',
       'cmd wrangler types (api)',
+      'cmd bundle install (kit fastlane)',
     ])
+    expect(plan[5]).toMatchObject({ cmd: ['bundle', 'install'], cwd: '.' })
     expect(plan[4]).toMatchObject({ cmd: ['pnpm', 'exec', 'wrangler', 'types'], cwd: 'apps/api' })
     expect(fx.calls()).toEqual([])
     expect(existsSync(join(fx.dir, '.env'))).toBe(false)
@@ -158,7 +200,7 @@ describe('init', () => {
   test('creates .env, installs, runs wrangler types; no scaffolds without a terminal', async () => {
     const r = await fx.kit(['init'])
     expect(r.code).toBe(0)
-    expect(summary()).toEqual(['. pnpm install', './apps/api pnpm exec wrangler types'])
+    expect(summary()).toEqual(['. pnpm install', './apps/api pnpm exec wrangler types', '. bundle install'])
     expect(readFileSync(join(fx.dir, '.env'), 'utf8')).toBe(
       readFileSync(join(fx.dir, '.env.example'), 'utf8'),
     )
@@ -183,11 +225,49 @@ describe('init', () => {
     expect(readFileSync(join(fx.dir, 'mise.toml'), 'utf8')).toBe('[tools]\n')
   })
 
+  test("gradle.init runs from the Gradle root, then kit's fastlane bundle; --js-only skips them", async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(
+      cfg,
+      readFileSync(cfg, 'utf8').replace(
+        "gradle: { root: 'apps/client' }",
+        "gradle: { root: 'apps/client', init: [':shared:dependencies'] }",
+      ),
+    )
+    writeFileSync(join(fx.dir, 'apps/client/Gemfile'), "source 'https://rubygems.org'\n")
+    const r = await fx.kit(['init'], { env: { ANDROID_HOME: '/sdk' } })
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual([
+      '. pnpm install',
+      './apps/api pnpm exec wrangler types',
+      './apps/client fake-gradlew --console=plain -q :shared:dependencies',
+      '. bundle install',
+    ])
+    const js = await fx.kit(['init', '--js-only', '--dry-run', '--json'], { env: { ANDROID_HOME: '/sdk' } })
+    const plan = JSON.parse(js.stdout).plan as { kind: string; title: string; reason?: string }[]
+    expect(plan.slice(-2)).toEqual([
+      { kind: 'skip', title: 'gradle :shared:dependencies', reason: '--js-only' },
+      { kind: 'skip', title: 'bundle install (kit fastlane)', reason: '--js-only' },
+    ])
+  })
+
+  test('no Android SDK: the Gradle step is skipped with a hint, not failed', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(
+      cfg,
+      readFileSync(cfg, 'utf8').replace("root: 'apps/client' }", "root: 'apps/client', init: 'help' }"),
+    )
+    const r = await fx.kit(['init'], { env: { ANDROID_HOME: '', ANDROID_SDK_ROOT: '' } })
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('gradle help  no Android SDK')
+    expect(summary().some((s) => s.includes('fake-gradlew'))).toBe(false)
+  })
+
   test('a failed step keeps going and exits 1', async () => {
     fx.fail('pnpm')
     const r = await fx.kit(['init'])
     expect(r.code).toBe(1)
-    expect(summary()).toHaveLength(2)
+    expect(summary()).toHaveLength(3)
     expect(r.stderr).toContain('init failed: pnpm install, wrangler types (api)')
   })
 
