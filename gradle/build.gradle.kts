@@ -17,6 +17,11 @@ subprojects {
                 name = "kit"
                 url = uri(rootProject.layout.projectDirectory.dir("maven"))
             }
+            // Functional tests resolve the plugins from here, the same way apps resolve gradle/maven.
+            maven {
+                name = "kitTest"
+                url = uri(rootProject.layout.buildDirectory.dir("kit-test-repo"))
+            }
         }
     }
 }
@@ -25,4 +30,11 @@ subprojects {
 tasks.register("publishKit") {
     group = "publishing"
     dependsOn(subprojects.map { "${it.path}:publishAllPublicationsToKitRepository" })
+}
+
+// `./gradlew kitMatrix [-Pkit.matrix=min|max|all]`: the TestKit matrix CI calls.
+tasks.register("kitMatrix") {
+    group = "verification"
+    description = "Runs the TestKit functional tests across the AGP/Kotlin matrix (-Pkit.matrix=min|max|all)."
+    dependsOn(":kit-plugins:functionalTest")
 }
