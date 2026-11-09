@@ -158,6 +158,12 @@ export const builtins: BuiltinEntry[] = [
     group: 'Setup',
     load: () => import('../commands/config'),
   },
+  {
+    path: ['completion'],
+    description: 'Print a shell completion script',
+    group: 'Setup',
+    load: () => import('../commands/completion'),
+  },
 ]
 
 export const groupDescriptions: Record<string, string> = {

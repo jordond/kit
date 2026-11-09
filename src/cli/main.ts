@@ -13,6 +13,9 @@ import { importRepoCommand, listRepoCommands } from './discover'
 import { kitGlobals, SHOW_USAGE } from './plugin'
 import { renderUsage } from './usage'
 
+/** Shells `kit completion` supports (mirrors src/commands/completion.ts, kept here so help stays lazy). */
+const SHELLS = ['zsh', 'bash', 'fish']
+
 interface Leaf {
   path: string[]
   description: string
@@ -121,13 +124,20 @@ async function main(argv: string[]): Promise<number> {
   const leaves = await collectLeaves(root, config?.name)
   const tokens = commandTokens(argv)
 
-  if (tokens[0] === 'complete') {
+  const wantsHelp = argv.includes('--help') || argv.includes('-h')
+
+  // `kit completion <shell>` prints a script; the script calls back `kit complete -- <words>`.
+  const script = tokens[0] === 'completion' && SHELLS.includes(tokens[1] ?? '') && !wantsHelp
+  if (tokens[0] === 'complete' || script) {
     // Completion needs the whole tree with args, so load every command. Only on this path.
     const { default: completion } = await import('@gunshi/plugin-completion')
     const all = new Map<Leaf, KitCommand<Args>>()
     await Promise.all(leaves.map(async (l) => all.set(l, await l.load())))
+    // The plugin bakes this process's `bun <entry>` into the script; call back through the `kit` on
+    // PATH instead, so the launcher picks each project's pinned kit (and works outside a project).
+    if (script) Object.defineProperty(process, 'execPath', { value: 'kit', configurable: true })
     await cli(
-      argv,
+      script ? ['complete', tokens[1]!] : argv,
       { name: 'kit', run: () => {} },
       {
         name: 'kit',
@@ -172,7 +182,6 @@ async function main(argv: string[]): Promise<number> {
     return process.exitCode === undefined ? 0 : Number(process.exitCode)
   }
 
-  const wantsHelp = argv.includes('--help') || argv.includes('-h')
   if (!target || wantsHelp) {
     // Help or unknown: load repo leaves at this level so their descriptions show.
     const level = leaves.filter(
