@@ -33,6 +33,22 @@ describe('passthroughs', () => {
     expect(summary()).toEqual(['./apps/api pnpm exec wrangler d1 list --json'])
   })
 
+  test('wrangler --help / -h: usage on stdout, exit 0, nothing run', async () => {
+    for (const flag of ['--help', '-h']) {
+      const r = await fx.kit(['wrangler', flag])
+      expect(r.code).toBe(0)
+      expect(r.stdout).toContain("Run wrangler in a worker target's directory")
+      expect(r.stdout).toContain('kit wrangler api whoami')
+      expect(r.stdout).toContain('Worker targets: api')
+    }
+    expect(fx.calls()).toEqual([])
+  })
+
+  test('wrangler: a target first still passes --help through', async () => {
+    expect((await fx.kit(['wrangler', 'api', '--help'])).code).toBe(0)
+    expect(summary()).toEqual(['./apps/api pnpm exec wrangler --help'])
+  })
+
   test('wrangler: needs a worker target', async () => {
     expect((await fx.kit(['wrangler'])).code).toBe(2)
     const r = await fx.kit(['wrangler', 'client', 'whoami'])
