@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  CATALOG_KEYS,
+  catalogPath,
   checkAndroidSdk,
+  checkCatalogKeys,
   checkCiPin,
   checkEnvFile,
   checkJava,
@@ -14,6 +17,7 @@ import {
   parseMiseTools,
   versionMatches,
 } from '../../src/commands/doctor'
+import type { KitConfig } from '../../src/config/schema'
 
 const out = (output: string, code = 0) => ({ code, output })
 
@@ -170,5 +174,39 @@ describe('CI pin', () => {
       detail: 'android.yml v1.1.0 ≠ package.json 1.2.0',
     })
     expect(checkCiPin([wf('1.1.0')], '1.2.0', true).status).toBe('fail')
+  })
+})
+
+describe('catalog keys (§13.5)', () => {
+  const full = { versions: Object.fromEntries(CATALOG_KEYS.map((k) => [k, '1'])) }
+  const cfg = (extra: object = {}) =>
+    ({ name: 'x', targets: {}, gradle: { root: 'apps/client' }, ...extra }) as unknown as KitConfig
+
+  test('path: versions.file, else <gradle root>/gradle/libs.versions.toml; none without a gradle root', () => {
+    expect(catalogPath(cfg())).toBe('apps/client/gradle/libs.versions.toml')
+    expect(catalogPath(cfg({ versions: { file: 'gradle/libs.versions.toml', keys: {} } }))).toBe(
+      'gradle/libs.versions.toml',
+    )
+    expect(catalogPath({ name: 'x', targets: {} } as unknown as KitConfig)).toBeUndefined()
+  })
+
+  test('skip without a gradle root, ok with every key', () => {
+    expect(checkCatalogKeys(undefined, undefined).status).toBe('skip')
+    expect(checkCatalogKeys('c.toml', full)).toMatchObject({ status: 'ok', detail: 'c.toml' })
+  })
+
+  test('missing keys fail, named with a hint', () => {
+    const { 'app-jvm-target': _jvm, 'app-ios-version': _ios, ...rest } = full.versions
+    expect(checkCatalogKeys('c.toml', { versions: rest })).toMatchObject({
+      id: 'catalog',
+      status: 'fail',
+      detail: 'c.toml [versions] missing app-jvm-target, app-ios-version',
+      hint: "Add them under [versions] in c.toml; kit's Gradle plugins read them",
+    })
+    expect(checkCatalogKeys('c.toml', {}).detail).toContain(CATALOG_KEYS.join(', '))
+  })
+
+  test('a missing catalog fails', () => {
+    expect(checkCatalogKeys('c.toml', undefined)).toMatchObject({ status: 'fail', detail: 'c.toml missing' })
   })
 })

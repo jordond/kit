@@ -140,6 +140,20 @@ describe('doctor', () => {
     expect(r.stderr).toMatch(/✖ java\s+not found/)
   })
 
+  test('catalog keys: a key missing from the Gradle root catalog fails, named', async () => {
+    writeFileSync(join(fx.dir, '.env'), 'API_KEY=x\nOTHER_KEY=y\n')
+    const catalog = join(fx.dir, 'apps/client/gradle/libs.versions.toml')
+    expect(JSON.parse((await fx.kit(['doctor', '--json'], { env: env() })).stdout).checks).toContainEqual(
+      expect.objectContaining({ id: 'catalog', status: 'ok' }),
+    )
+    writeFileSync(catalog, readFileSync(catalog, 'utf8').replace(/^app-jvm-target.*\n/m, ''))
+    const r = await fx.kit(['doctor'], { env: env() })
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('✖ catalog keys')
+    expect(r.stderr).toContain('[versions] missing app-jvm-target')
+    expect(r.stderr).toContain('Add them under [versions]')
+  })
+
   test('works outside a project', async () => {
     const r = await fx.kit(['doctor', '--json'], { cwd: '..' })
     expect(JSON.parse(r.stdout).checks.length).toBeGreaterThan(0)
