@@ -1,0 +1,108 @@
+name: kit setup
+description: Bun, the repo's dependencies, and optionally Java/Gradle, Ruby with kit's fastlane bundle, and mise.
+
+inputs:
+  bun-version:
+    description: Bun version. Empty reads package.json `packageManager` (bun@x) or `devEngines.packageManager`, else 1.3.14.
+    required: false
+    default: ''
+  java:
+    description: "'false' (default), 'true' (Temurin 21), or a Java version. Also sets up Gradle."
+    required: false
+    default: 'false'
+  ruby:
+    description: "'false' (default), 'true' (Ruby 3.4), or a Ruby version. Installs kit's fastlane bundle (needs install)."
+    required: false
+    default: 'false'
+  mise:
+    description: "'true' installs the tools in mise.toml."
+    required: false
+    default: 'false'
+  install:
+    description: "'true' (default) runs `bun install --frozen-lockfile`."
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve tool versions
+      id: versions
+      shell: bash
+      env:
+        BUN_INPUT: ${{ inputs.bun-version }}
+        JAVA_INPUT: ${{ inputs.java }}
+        RUBY_INPUT: ${{ inputs.ruby }}
+      run: |
+        bun=$BUN_INPUT
+        if [ -z "$bun" ] && [ -f package.json ]; then
+          bun=$(jq -r '
+            (.packageManager // "" | select(startswith("bun@")) | sub("^bun@"; "") | sub("\\+.*$"; ""))
+            // ([.devEngines.packageManager] | flatten | map(select(.name == "bun")) | .[0].version // empty)
+            // empty' package.json)
+        fi
+        echo "bun=${bun:-1.3.14}" >> "$GITHUB_OUTPUT"
+        case $JAVA_INPUT in
+          false|'') ;;
+          true) echo "java=21" >> "$GITHUB_OUTPUT" ;;
+          *) echo "java=$JAVA_INPUT" >> "$GITHUB_OUTPUT" ;;
+        esac
+        case $RUBY_INPUT in
+          false|'') ;;
+          true) echo "ruby=3.4" >> "$GITHUB_OUTPUT" ;;
+          *) echo "ruby=$RUBY_INPUT" >> "$GITHUB_OUTPUT" ;;
+        esac
+
+    - if: inputs.mise == 'true'
+      uses: jdx/mise-action@v3
+
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: ${{ steps.versions.outputs.bun }}
+
+    - if: inputs.install == 'true'
+      name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    - if: steps.versions.outputs.java != ''
+      uses: actions/setup-java@v5
+      with:
+        java-version: ${{ steps.versions.outputs.java }}
+        distribution: temurin
+
+    - if: steps.versions.outputs.java != ''
+      uses: gradle/actions/setup-gradle@v5
+
+    # kit's fastlane bundle (D7): the Gemfile ships in the kit package, gems live outside node_modules.
+    - if: steps.versions.outputs.ruby != ''
+      name: Locate kit's fastlane Gemfile
+      shell: bash
+      run: |
+        gemfile=$PWD/node_modules/@jordond/kit/fastlane/Gemfile
+        if [ ! -f "$gemfile" ]; then
+          echo "::error::$gemfile not found. ruby needs @jordond/kit installed (install: 'true')."
+          exit 1
+        fi
+        {
+          echo "BUNDLE_GEMFILE=$gemfile"
+          echo "BUNDLE_PATH=$RUNNER_TEMP/kit-bundle"
+          echo "BUNDLE_FROZEN=true"
+        } >> "$GITHUB_ENV"
+
+    - if: steps.versions.outputs.ruby != ''
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ steps.versions.outputs.ruby }}
+        bundler-cache: false
+
+    - if: steps.versions.outputs.ruby != ''
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/kit-bundle
+        key: kit-bundle-${{ runner.os }}-${{ runner.arch }}-ruby${{ steps.versions.outputs.ruby }}-${{ hashFiles('node_modules/@jordond/kit/fastlane/Gemfile.lock') }}
+
+    - if: steps.versions.outputs.ruby != ''
+      name: Install kit's fastlane bundle
+      shell: bash
+      run: bundle install --jobs 4
