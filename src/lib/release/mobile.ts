@@ -374,8 +374,12 @@ export async function releaseMobile(
         }),
         (o) => {
           // Gradle writes into the module's build/outputs; KIT_OUTPUT_DIR gets a copy (CI uploads it).
-          const keep = (p: string) =>
-            process.env.KIT_OUTPUT_DIR ? (copyFileSync(p, join(out, basename(p))), join(out, basename(p))) : p
+          const keep = (p: string) => {
+            if (!process.env.KIT_OUTPUT_DIR) return p
+            const dest = join(out, basename(p))
+            copyFileSync(p, dest)
+            return dest
+          }
           if (o.ARTIFACT_AAB) artifacts.aab = keep(o.ARTIFACT_AAB)
           if (o.ARTIFACT_APK) artifacts.apk = keep(o.ARTIFACT_APK)
         },
