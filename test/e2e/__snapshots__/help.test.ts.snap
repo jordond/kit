@@ -1,0 +1,720 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`help kit --help 1`] = `
+"kit
+
+Usage
+  kit <command> [options]
+
+Develop
+  dev         Run a dev server
+  build       Build every target
+  deploy      Deploy a target
+  gradle      Run ./gradlew in the Gradle root
+  wrangler    Run wrangler in a worker target's directory
+  xcode       Open the iOS project in Xcode
+
+Quality
+  lint        Lint every target
+  format      Format every target
+  typecheck   Typecheck every target
+  check       Lint and typecheck every target
+  test        Run the test suites
+
+Release
+  release     Ship to the stores …
+
+Infra
+  env         Render, check and push env from .env …
+  db          Cloudflare D1 migrations and queries …
+
+Setup
+  doctor      Check tools, versions and .env
+  init        Set up a fresh clone
+  deps        List or update npm dependencies (catalog-aware)
+  config      Print the resolved kit.config.ts
+  completion  Print a shell completion script
+
+"
+`;
+
+exports[`help kit db --help 1`] = `
+"Cloudflare D1 migrations and queries
+
+Usage
+  kit db <command> [options]
+
+Commands
+  migrate  Apply pending D1 migrations
+  list     List D1 migrations
+  create   Create a D1 migration
+  exec     Run SQL against D1
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit env --help 1`] = `
+"Render, check and push env from .env
+
+Usage
+  kit env <command> [options]
+
+Commands
+  sync   Render env outputs (.dev.vars) from .env
+  check  Validate .env and check outputs for drift
+  push   Push secrets with wrangler and gh
+  init   Create .env and ask for missing keys
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit release --help 1`] = `
+"Ship to the stores
+
+Usage
+  kit release <command> [options]
+
+Commands
+  ios      Build and upload iOS to a track
+  android  Build and upload Android to a track
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit build --help 1`] = `
+"Build every target
+
+Usage
+  kit build [options]
+
+Examples
+  kit build
+  kit build api admin
+  kit build client --release
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --release  Gradle: the signed release bundle (AAB)
+      --apk      Gradle: the signed release APK
+
+"
+`;
+
+exports[`help kit check --help 1`] = `
+"Lint and typecheck every target
+
+Usage
+  kit check [options]
+
+Examples
+  kit check
+  kit check api admin web
+  kit check --fix
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+  -f, --fix      Format instead of lint, then typecheck
+
+"
+`;
+
+exports[`help kit completion --help 1`] = `
+"Print a shell completion script
+
+Usage
+  kit completion <shell> [options]
+
+Examples
+  # zsh: add to ~/.zshrc (after compinit)
+  source <(kit completion zsh)
+  # bash: add to ~/.bashrc
+  source <(kit completion bash)
+  # fish
+  kit completion fish > ~/.config/fish/completions/kit.fish
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+  <shell>        zsh, bash or fish
+
+"
+`;
+
+exports[`help kit config --help 1`] = `
+"Print the resolved kit.config.ts
+
+Usage
+  kit config [options]
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit db create --help 1`] = `
+"Create a new D1 migration file
+
+Usage
+  kit db create [options]
+
+Examples
+  kit db create add_widgets
+  kit db create add_events --db analytics
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --db <string>  cloudflare.d1 key or database name (default: the only one)
+
+"
+`;
+
+exports[`help kit db exec --help 1`] = `
+"Run SQL against a D1 database (local by default)
+
+Usage
+  kit db exec [options]
+
+Examples
+  kit db exec "SELECT count(*) FROM users"
+  kit db exec --remote "SELECT 1" --json
+  kit db exec --file seed.sql
+
+Options
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --db <string>    cloudflare.d1 key or database name (default: the only one)
+      --remote         Deployed D1 (default: local)
+  -f, --file <string>  Run a .sql file instead of a statement
+
+"
+`;
+
+exports[`help kit db list --help 1`] = `
+"List applied and pending D1 migrations
+
+Usage
+  kit db list [options]
+
+Examples
+  kit db list
+  kit db list --remote --db analytics
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --db <string>  cloudflare.d1 key or database name (default: the only one)
+      --remote       Deployed D1 (default: local)
+
+"
+`;
+
+exports[`help kit db migrate --help 1`] = `
+"Apply pending D1 migrations (local by default)
+
+Usage
+  kit db migrate [options]
+
+Examples
+  kit db migrate
+  kit db migrate --remote
+  kit db migrate --db analytics --dry-run
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --db <string>  cloudflare.d1 key or database name (default: the only one)
+      --remote       Deployed D1 (default: local)
+
+"
+`;
+
+exports[`help kit deploy --help 1`] = `
+"Deploy a target
+
+Usage
+  kit deploy [options]
+
+Examples
+  kit deploy api
+  kit deploy web --env staging
+  kit deploy api --dry-run
+
+Options
+  -h, --help          Show help
+  -V, --version       Show kit version
+      --json          Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run       Plan and run read-only steps; skip mutations
+  -y, --yes           Accept confirmations (never skips prod)
+  -v, --verbose       Stream all child output
+  -q, --quiet         Errors and summary only
+      --bail          Stop at the first failure
+  -e, --env <string>  Environment (when the target has envs)
+
+"
+`;
+
+exports[`help kit deps --help 1`] = `
+"List or update npm dependencies across the workspace (catalog-aware)
+
+Usage
+  kit deps [options]
+
+Examples
+  kit deps                     # list everything with a newer version
+  kit deps update              # newest versions the declared ranges allow (bun.lock only)
+  kit deps latest wrangler     # rewrite ranges to latest (catalog entry first), then install
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit dev --help 1`] = `
+"Run a dev server (Ctrl-C to stop)
+
+Usage
+  kit dev [options]
+
+Examples
+  kit dev api
+  kit dev web --env staging
+
+Options
+  -h, --help          Show help
+  -V, --version       Show kit version
+      --json          Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run       Plan and run read-only steps; skip mutations
+  -y, --yes           Accept confirmations (never skips prod)
+  -v, --verbose       Stream all child output
+  -q, --quiet         Errors and summary only
+      --bail          Stop at the first failure
+  -e, --env <string>  Environment (when the target has envs)
+
+"
+`;
+
+exports[`help kit doctor --help 1`] = `
+"Check tools, versions and .env
+
+Usage
+  kit doctor [options]
+
+Examples
+  kit doctor
+  kit doctor --json
+  kit doctor --ci
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --ci       Fail when CI workflow pins drift from the package.json pin
+
+"
+`;
+
+exports[`help kit env check --help 1`] = `
+"Validate .env against the schema and check outputs for drift
+
+Usage
+  kit env check [options]
+
+Examples
+  kit env check
+  kit env check --schema-only
+  kit env check --json
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --schema-only  Validate .env only; skip output drift (CI)
+
+"
+`;
+
+exports[`help kit env init --help 1`] = `
+"Create .env from .env.example and ask for missing required keys
+
+Usage
+  kit env init [options]
+
+Examples
+  kit env init
+  kit env init --dry-run
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit env push --help 1`] = `
+"Push secrets to Cloudflare workers (wrangler) and GitHub Actions (gh)
+
+Usage
+  kit env push [options]
+
+Examples
+  kit env push                    # every target in env.workerSecrets
+  kit env push --target edge
+  kit env push --github           # GitHub Actions secrets only
+  kit env push --target edge --github
+  kit env push --dry-run
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+  -t, --target <string>  Only this worker target (env.workerSecrets)
+      --github           Push env.githubSecrets with gh
+
+"
+`;
+
+exports[`help kit env sync --help 1`] = `
+"Render env outputs (.dev.vars) from .env
+
+Usage
+  kit env sync [options]
+
+Examples
+  kit env sync
+  kit env sync --dry-run
+  kit env sync --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit format --help 1`] = `
+"Format every target
+
+Usage
+  kit format [options]
+
+Examples
+  kit format
+  kit format client
+  kit format --check
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --check    Check only (runs each target's lint command)
+      --staged   Only targets with staged files; workspace commands get the files
+
+"
+`;
+
+exports[`help kit gradle --help 1`] = `
+"Run ./gradlew in the Gradle root (arguments pass through)
+
+Usage
+  kit gradle [args…]
+
+Every argument passes through untouched; kit parses no flags here (no --json).
+Only a leading -h/--help shows this; \`kit gradle <args> --help\` reaches the tool.
+
+Examples
+  kit gradle assembleDebug
+  kit gradle :shared:test --info
+  kit gradle help --task assembleDebug
+
+"
+`;
+
+exports[`help kit init --help 1`] = `
+"Set up a fresh clone: .env, install, optional mise/lefthook, env sync, wrangler types
+
+Usage
+  kit init [options]
+
+Examples
+  kit init
+  kit init --dry-run
+  kit init --yes   # also scaffold mise.toml and lefthook.yml
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit lint --help 1`] = `
+"Lint every target
+
+Usage
+  kit lint [options]
+
+Examples
+  kit lint
+  kit lint api web
+  kit lint --staged --fix
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+  -f, --fix      Apply fixes (runs each target's format command)
+      --staged   Only targets with staged files; workspace commands get the files
+
+"
+`;
+
+exports[`help kit release android --help 1`] = `
+"Build and upload Android to a track
+
+Usage
+  kit release android [options]
+
+Examples
+  kit release android --track beta
+  kit release android --track internal --dry-run
+
+Options
+  -h, --help            Show help
+  -V, --version         Show kit version
+      --json            Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run         Plan and run read-only steps; skip mutations
+  -y, --yes             Accept confirmations (never skips prod)
+  -v, --verbose         Stream all child output
+  -q, --quiet           Errors and summary only
+      --bail            Stop at the first failure
+      --track <enum>    Store track
+      --build <number>  Override the store build number
+
+"
+`;
+
+exports[`help kit release ios --help 1`] = `
+"Build and upload iOS to a track
+
+Usage
+  kit release ios [options]
+
+Examples
+  kit release ios --track beta
+  kit release ios --track internal --dry-run
+
+Options
+  -h, --help            Show help
+  -V, --version         Show kit version
+      --json            Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run         Plan and run read-only steps; skip mutations
+  -y, --yes             Accept confirmations (never skips prod)
+  -v, --verbose         Stream all child output
+  -q, --quiet           Errors and summary only
+      --bail            Stop at the first failure
+      --track <enum>    Store track
+      --build <number>  Override the store build number
+
+"
+`;
+
+exports[`help kit test --help 1`] = `
+"Run the test suites
+
+Usage
+  kit test [options]
+
+Examples
+  kit test
+  kit test api
+  kit test client -- --rerun
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit typecheck --help 1`] = `
+"Typecheck every target
+
+Usage
+  kit typecheck [options]
+
+Examples
+  kit typecheck
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit wrangler --help 1`] = `
+"Run wrangler in a worker target's directory (arguments pass through)
+
+Usage
+  kit wrangler [args…]
+
+Every argument passes through untouched; kit parses no flags here (no --json).
+Only a leading -h/--help shows this; \`kit wrangler <args> --help\` reaches the tool.
+
+Examples
+  kit wrangler api whoami
+  kit wrangler api d1 list
+  kit wrangler api deploy --dry-run
+
+"
+`;
+
+exports[`help kit xcode --help 1`] = `
+"Open the iOS project in Xcode
+
+Usage
+  kit xcode [options]
+
+Examples
+  kit xcode
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
