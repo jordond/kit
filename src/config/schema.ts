@@ -52,7 +52,14 @@ const workspace = z
 export const configSchema = z
   .object({
     name: z.string().min(1),
-    gradle: z.object({ root: z.string() }).strict().optional(),
+    gradle: z
+      .object({
+        root: z.string(),
+        /** Tasks `kit init` runs to fetch the wrapper and dependencies (`:shared:dependencies`). */
+        init: z.union([z.string(), z.array(z.string())]).optional(),
+      })
+      .strict()
+      .optional(),
     versions: z
       .object({
         file: z.string(),
