@@ -48,7 +48,8 @@ internal object SigningEnv {
  * - AGP < 9.4 has no lazy signing API, so there the same ValueSource is read in finalizeDsl and fed to a
  *   `kitRelease` DSL signing config (a configuration input; the decode still happens in the task).
  *
- * - allowDebugFallback signs with AGP's own `debug` signing config (AGP creates its keystore on demand).
+ * - allowDebugFallback signs with AGP's own `debug` signing config (AGP creates its keystore on demand);
+ *   with it on, signing resolves at configuration time on every AGP version.
  * - The decoded keystore is deleted when the build finishes ([KitKeystoreCleanup]).
  *
  * A signing config the app sets on the release build type itself, or Studio's injected signing
@@ -60,7 +61,7 @@ internal class ReleaseSigning(
 ) {
     private val decodedKeystore = project.layout.buildDirectory.file("kit/signing/release.jks")
     private var appOwnsSigning = false
-    private var debugKeystore: KitKeystore? = null
+    private var eager = false
 
     /**
      * Android Studio's "Generate Signed Bundle / APK" injects its own signing through these
@@ -93,26 +94,13 @@ internal class ReleaseSigning(
         val release = dsl.buildTypes.findByName(KitReleasePlugin.RELEASE) ?: return
         appOwnsSigning = release.signingConfig != null || injectedSigning
         if (appOwnsSigning) return
-        val debug = dsl.signingConfigs.getByName("debug")
         val fallback = kit.allowDebugFallback.get()
+        // Lazy path: AGP 9.4+, no fallback. The fallback must hand AGP its own `debug` DSL config, the
+        // only one whose missing keystore validateSigning creates (a lazily supplied copy fails on a fresh
+        // ANDROID_USER_HOME), so it resolves at configuration time like AGP < 9.4.
+        eager = fallback || !supportsLazySigning
+        if (!eager) return
 
-        if (supportsLazySigning) {
-            // AGP's own debug config: its validateSigning task creates the default debug keystore
-            // when missing (fresh CI), which it only does for that exact store file.
-            val storeFile = debug.storeFile
-            if (fallback && storeFile != null) {
-                debugKeystore =
-                    KitKeystore(
-                        storeFile,
-                        debug.keyAlias ?: "androiddebugkey",
-                        debug.storePassword ?: "android",
-                        debug.keyPassword ?: "android",
-                    )
-            }
-            return
-        }
-
-        // AGP < 9.4: no lazy signing API, so resolve now (a configuration-cache input).
         val resolved = keystore.orNull
         release.signingConfig =
             when {
@@ -123,18 +111,14 @@ internal class ReleaseSigning(
                         keyAlias = resolved.keyAlias
                         keyPassword = resolved.keyPassword
                     }
-                fallback -> debug
+                fallback -> dsl.signingConfigs.getByName("debug")
                 else -> null
             }
     }
 
     fun wire(variant: ApplicationVariant) {
         if (appOwnsSigning) return
-        if (supportsLazySigning) {
-            val debug = debugKeystore
-            val source = if (debug != null) keystore.orElse(debug) else keystore
-            fromProvider!!.invoke(variant.signingConfig, source.map(ToSigningConfigInfo()))
-        }
+        if (!eager) fromProvider!!.invoke(variant.signingConfig, keystore.map(ToSigningConfigInfo()))
         val v = variant.name.replaceFirstChar { it.uppercase() }
         val gated = setOf("validateSigning$v", "package$v", "package${v}Bundle", "sign${v}Bundle")
         project.tasks.named { it in gated }.configureEach { dependsOn(task) }

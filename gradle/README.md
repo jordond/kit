@@ -87,7 +87,8 @@ Settings: `kit { extraRepos { ivy(…) { … } } }` appends to `dependencyResolu
 - Without signing, a release build fails with
   `kit.release: no signing config; set ANDROID_KEYSTORE_* or pass -Pkit.keystoreFile`, unless
   `kit { allowDebugFallback = true }`, which signs with AGP's own `debug` signing config (AGP creates
-  the debug keystore if it is missing). A keystore path, base64 without alias or password fails naming
+  the debug keystore if it is missing; with the fallback on, signing resolves at configuration time on
+  every AGP version). A keystore path or base64 without alias or password fails naming
   the missing variables. Debug builds, lint and unit tests never need signing.
 - BuildInfo (`kitGenerateBuildInfo`, in commonMain):
   - `VERSION_NAME` = Xcode `MARKETING_VERSION` ?: `-Pkit.versionName` ?: `app-android-version`
