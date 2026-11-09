@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Keep the setup action on the same version as @jordond/kit in bun.lock; `kit doctor --ci` checks it.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jordond/kit/.github/actions/setup@v{{kitVersion}} # v{{kitVersion}}
+        with:
+          java: true
+      - run: ./node_modules/.bin/kit check
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jordond/kit/.github/actions/setup@v{{kitVersion}} # v{{kitVersion}}
+        with:
+          java: true
+      - run: ./node_modules/.bin/kit test
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jordond/kit/.github/actions/setup@v{{kitVersion}} # v{{kitVersion}}
+        with:
+          java: true
+      - run: ./node_modules/.bin/kit build

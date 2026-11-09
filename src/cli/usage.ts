@@ -3,15 +3,18 @@ import pc from 'picocolors'
 
 const GROUP_ORDER = ['Develop', 'Quality', 'Release', 'Infra', 'Setup']
 
-type AnyCommand = Command & { group?: string }
+type AnyCommand = Command & { group?: string; passthrough?: boolean }
 
-function childrenOf(ctx: Readonly<CommandContext>): Map<string, AnyCommand> {
+/** The command at `ctx.commandPath` (undefined at the root) and its children. */
+function lookup(ctx: Readonly<CommandContext>): { cmd?: AnyCommand; children: Map<string, AnyCommand> } {
   let level = ctx.env.subCommands as Map<string, AnyCommand> | undefined
+  let cmd: AnyCommand | undefined
   for (const seg of ctx.commandPath ?? []) {
-    const next = level?.get(seg)?.subCommands
+    cmd = level?.get(seg)
+    const next = cmd?.subCommands
     level = next ? new Map(Object.entries(next) as [string, AnyCommand][]) : undefined
   }
-  return level ?? new Map()
+  return { cmd, children: level ?? new Map() }
 }
 
 /** Grouped, colourised usage: built-in groups first, then the app's own group. */
@@ -20,9 +23,29 @@ export async function renderUsage(ctx: Readonly<CommandContext>): Promise<string
   const lines: string[] = []
   if (ctx.description) lines.push(ctx.description, '')
 
-  const children = childrenOf(ctx)
+  const { cmd: self, children } = lookup(ctx)
   const hasRun = typeof (ctx as unknown as { env: unknown }) === 'object' && ctx.commandPath.length > 0
-  lines.push(pc.bold('Usage'), `  ${pc.cyan(path)}${children.size ? ' <command>' : ''} [options]`, '')
+  const positionals = Object.entries(ctx.args ?? {})
+    .filter(([, a]) => a.type === 'positional')
+    .map(([name]) => ` <${name}>`)
+    .join('')
+  const tail = self?.passthrough ? ' [args…]' : `${children.size ? ' <command>' : ''}${positionals} [options]`
+  lines.push(pc.bold('Usage'), `  ${pc.cyan(path)}${tail}`, '')
+  if (self?.passthrough) {
+    // kit parses nothing after the path, so its global flags (--json, --dry-run, …) don't apply.
+    lines.push(
+      'Every argument passes through untouched; kit parses no flags here (no --json).',
+      `Only a leading -h/--help shows this; \`${path} <args> --help\` reaches the tool.`,
+      '',
+    )
+  }
+
+  const examples = typeof self?.examples === 'string' ? self.examples : ''
+  if (examples) {
+    lines.push(pc.bold('Examples'))
+    for (const e of examples.split('\n')) lines.push(`  ${e.startsWith('#') ? pc.dim(e) : e}`)
+    lines.push('')
+  }
 
   if (children.size) {
     const groups = new Map<string, [string, AnyCommand][]>()
@@ -48,7 +71,7 @@ export async function renderUsage(ctx: Readonly<CommandContext>): Promise<string
   }
 
   const args = Object.entries(ctx.args ?? {})
-  if (args.length && (hasRun || !children.size)) {
+  if (args.length && (hasRun || !children.size) && !self?.passthrough) {
     lines.push(pc.bold('Options'))
     const rows = args.map(([name, a]) => {
       const flag = a.type === 'positional' ? `<${name}>` : `${a.short ? `-${a.short}, ` : '    '}--${name}`

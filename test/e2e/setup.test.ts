@@ -33,15 +33,23 @@ describe('passthroughs', () => {
     expect(summary()).toEqual(['./apps/api pnpm exec wrangler d1 list --json'])
   })
 
-  test('wrangler --help / -h: usage on stdout, exit 0, nothing run', async () => {
+  test.each([
+    ['wrangler', "Run wrangler in a worker target's directory", 'kit wrangler api whoami'],
+    ['gradle', 'Run ./gradlew in the Gradle root', 'kit gradle assembleDebug'],
+  ])('%s --help / -h: kit usage on stdout, exit 0, nothing run', async (cmd, description, example) => {
     for (const flag of ['--help', '-h']) {
-      const r = await fx.kit(['wrangler', flag])
+      const r = await fx.kit([cmd, flag])
       expect(r.code).toBe(0)
-      expect(r.stdout).toContain("Run wrangler in a worker target's directory")
-      expect(r.stdout).toContain('kit wrangler api whoami')
-      expect(r.stdout).toContain('Worker targets: api')
+      expect(r.stdout).toContain(description)
+      expect(r.stdout).toContain(example)
+      expect(r.stdout).toContain('no --json')
     }
     expect(fx.calls()).toEqual([])
+  })
+
+  test('gradle: --help after a task still passes through', async () => {
+    expect((await fx.kit(['gradle', 'tasks', '--help'])).code).toBe(0)
+    expect(summary()).toEqual(['./apps/client fake-gradlew tasks --help'])
   })
 
   test('wrangler: a target first still passes --help through', async () => {
@@ -148,6 +156,20 @@ describe('doctor', () => {
     const r = await fx.kit(['doctor'], { env: env() })
     expect(r.code).toBe(4)
     expect(r.stderr).toMatch(/✖ java\s+not found/)
+  })
+
+  test('catalog keys: a key missing from the Gradle root catalog fails, named', async () => {
+    writeFileSync(join(fx.dir, '.env'), 'API_KEY=x\nOTHER_KEY=y\n')
+    const catalog = join(fx.dir, 'apps/client/gradle/libs.versions.toml')
+    expect(JSON.parse((await fx.kit(['doctor', '--json'], { env: env() })).stdout).checks).toContainEqual(
+      expect.objectContaining({ id: 'catalog', status: 'ok' }),
+    )
+    writeFileSync(catalog, readFileSync(catalog, 'utf8').replace(/^app-jvm-target.*\n/m, ''))
+    const r = await fx.kit(['doctor'], { env: env() })
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('✖ catalog keys')
+    expect(r.stderr).toContain('[versions] missing app-jvm-target')
+    expect(r.stderr).toContain('Add them under [versions]')
   })
 
   test('works outside a project', async () => {

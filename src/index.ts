@@ -1,6 +1,6 @@
 import type { KitConfigInput } from './config/schema'
 
-export type { Group, KitCommand, KitContext } from './cli/command'
+export type { BuiltinOptions, Flags, Group, KitCommand, KitContext } from './cli/command'
 export { defineCommand } from './cli/command'
 export type { KitConfig, KitConfigInput } from './config/schema'
 export { onCleanup } from './lib/cleanup'
