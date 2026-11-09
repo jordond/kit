@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
@@ -123,6 +123,7 @@ describe('init', () => {
     expect(readFileSync(join(fx.dir, '.env'), 'utf8')).toBe(
       readFileSync(join(fx.dir, '.env.example'), 'utf8'),
     )
+    expect(statSync(join(fx.dir, '.env')).mode & 0o777).toBe(0o600)
     expect(existsSync(join(fx.dir, 'mise.toml'))).toBe(false)
     expect(r.stderr).toContain('re-run with --yes')
   })
