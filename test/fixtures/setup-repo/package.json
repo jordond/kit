@@ -1,0 +1,7 @@
+{
+  "name": "setup-repo",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}

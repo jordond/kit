@@ -1,0 +1,6 @@
+# Tool versions for this repo (https://mise.jdx.dev). `mise install` sets them up;
+# `kit doctor` warns when the active versions drift from these.
+[tools]
+bun = "{{bun}}"
+java = "temurin-21"
+# ruby = "3.3"  # for fastlane (kit release)
