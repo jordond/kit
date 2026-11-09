@@ -52,72 +52,119 @@ export function beforeCommands(config: KitConfig, name: string): string[][] {
   return before.map((s) => s.trim().split(/\s+/))
 }
 
+interface DeployResult {
+  target: string
+  env?: string
+  ok: boolean
+  steps: { title: string; code: number }[]
+}
+
 export default defineCommand({
-  description: 'Deploy a target',
+  description: 'Deploy one or more targets, in order (deploy.before first)',
   group: 'Develop',
   args: {
-    env: { type: 'string', short: 'e', description: 'Environment (when the target has envs)' },
+    env: { type: 'string', short: 'e', description: 'Environment, for targets that declare envs' },
   },
-  examples: 'kit deploy api\nkit deploy web --env staging\nkit deploy api --dry-run',
+  examples: [
+    'kit deploy api',
+    'kit deploy api admin web          # in order; stops at the first failure',
+    'kit deploy web --env staging',
+    'kit deploy api web --env staging  # the env goes to the targets that declare it',
+    'kit deploy api --dry-run --json',
+  ].join('\n'),
   async run(ctx) {
     const { requireProject } = await import('../cli/command')
-    const { singleTarget } = await import('./_verb')
-    const { targetCommands } = await import('../lib/targets')
+    const { selectTargets, targetCommands } = await import('../lib/targets')
     const { run, runToStderr } = await import('../lib/proc')
     const { emitJson } = await import('../lib/log')
     const { root, config } = requireProject(ctx)
-    if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
-    const name = singleTarget(ctx, 'deploy')
-    const env = checkEnv(config, name, ctx.args.env)
-    const cmds = targetCommands(root, config, name, 'deploy', { env, extra: ctx.rest })
-    if (!cmds) {
+    const names = ctx.positionals.length ? selectTargets(config, ctx.positionals).targets.map(([n]) => n) : []
+    // Deploying everything by leaving out an argument is not a thing.
+    if (!names.length) {
       throw new KitError(
-        `Target "${name}" has no deploy command`,
-        `Set targets.${name}.deploy in kit.config.ts`,
+        'kit deploy needs at least one target',
+        `Targets: ${Object.keys(config.targets).join(', ')}`,
         ExitCode.usage,
       )
     }
+    if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+    const envs = envsFor(config, names, ctx.args.env)
     const self = [process.execPath, '--no-env-file', process.argv[1]!]
-    const before = beforeCommands(config, name).map((args) => ({
-      title: `kit ${args.join(' ')}`,
-      cmd: [...self, ...args, ...(ctx.flags.yes ? ['--yes'] : [])],
-    }))
-    const plan = [...before.map((b) => b.title), ...cmds.map((c) => c.cmd.join(' '))]
-    if (ctx.flags.dryRun) {
-      if (ctx.flags.json) emitJson({ target: name, env, plan })
-      else for (const p of plan) ctx.log.step(p)
-      return
-    }
-    // --json: children print to stderr and the one document comes last.
-    const exec = ctx.flags.json ? runToStderr : run
-    const steps: { title: string; code: number }[] = []
-    const report = (ok: boolean) => {
-      if (ctx.flags.json) emitJson({ target: name, env, ok, steps })
-    }
-    for (const b of before) {
-      ctx.log.step(b.title)
-      const code = await exec(b.cmd, { cwd: root, env: { KIT_ROOT: root } })
-      steps.push({ title: b.title, code })
-      if (code !== 0) {
-        report(false)
+    const seen = new Set<string>()
+    const deploys = names.map((name) => {
+      const env = envs.get(name)
+      const cmds = targetCommands(root, config, name, 'deploy', { env, extra: ctx.rest })
+      if (!cmds) {
         throw new KitError(
-          `${b.title} failed (exit ${code}); not deploying`,
-          undefined,
-          ExitCode.precondition,
+          `Target "${name}" has no deploy command`,
+          `Set targets.${name}.deploy in kit.config.ts`,
+          ExitCode.usage,
         )
       }
+      // A before step several targets share (`env sync`) runs once, ahead of the first.
+      const before = beforeCommands(config, name)
+        .filter((args) => {
+          const key = args.join(' ')
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        .map((args) => ({
+          title: `kit ${args.join(' ')}`,
+          cmd: [...self, ...args, ...(ctx.flags.yes ? ['--yes'] : [])],
+        }))
+      return { name, env, before, cmds }
+    })
+
+    if (ctx.flags.dryRun) {
+      const plans = deploys.map((d) => ({
+        target: d.name,
+        env: d.env,
+        plan: [...d.before.map((b) => b.title), ...d.cmds.map((c) => c.cmd.join(' '))],
+      }))
+      if (ctx.flags.json) emitJson({ dryRun: true, deploys: plans })
+      else for (const p of plans) for (const step of p.plan) ctx.log.step(`${p.target}  ${step}`)
+      return
     }
-    for (const c of cmds) {
-      ctx.log.step(c.title)
-      const code = await exec(c.cmd, { cwd: c.cwd, env: c.env })
-      steps.push({ title: c.title, code })
-      if (code !== 0) {
-        report(false)
-        process.exitCode = ExitCode.failed
-        return
+
+    // --json: children print to stderr and the one document comes last.
+    const exec = ctx.flags.json ? runToStderr : run
+    const results: DeployResult[] = []
+    const report = () => {
+      if (ctx.flags.json) emitJson({ ok: results.every((r) => r.ok), deploys: results })
+    }
+    for (const [i, d] of deploys.entries()) {
+      const result: DeployResult = { target: d.name, env: d.env, ok: false, steps: [] }
+      results.push(result)
+      const skipped = names.slice(i + 1)
+      const and = skipped.length ? `; skipped ${skipped.join(', ')}` : ''
+      for (const b of d.before) {
+        ctx.log.step(b.title)
+        const code = await exec(b.cmd, { cwd: root, env: { KIT_ROOT: root } })
+        result.steps.push({ title: b.title, code })
+        if (code !== 0) {
+          report()
+          throw new KitError(
+            `${b.title} failed (exit ${code}); not deploying ${d.name}${and}`,
+            undefined,
+            ExitCode.precondition,
+          )
+        }
       }
+      for (const c of d.cmds) {
+        ctx.log.step(`${d.name}: ${c.title}`)
+        const code = await exec(c.cmd, { cwd: c.cwd, env: c.env })
+        result.steps.push({ title: c.title, code })
+        if (code !== 0) {
+          report()
+          if (!ctx.flags.json) ctx.log.error(`deploy ${d.name} failed (exit ${code})${and}`)
+          process.exitCode = ExitCode.failed
+          return
+        }
+      }
+      result.ok = true
+      ctx.log.success(`deployed ${d.name}${d.env ? ` (${d.env})` : ''}`)
     }
-    report(true)
-    ctx.log.success(`deployed ${name}${env ? ` (${env})` : ''}`)
+    report()
   },
 })
