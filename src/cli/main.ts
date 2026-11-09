@@ -8,7 +8,7 @@ import { installSignalHandlers, interrupted, runCleanup } from '../lib/cleanup'
 import { ExitCode, KitError } from '../lib/errors'
 import { log } from '../lib/log'
 import { builtins, groupDescriptions } from './builtins'
-import { computeFlags, type KitCommand, type Runtime, toGunshi } from './command'
+import { computeFlags, type KitCommand, type Runtime, toGunshi, withBuiltin } from './command'
 import { importRepoCommand, listRepoCommands } from './discover'
 import { kitGlobals, SHOW_USAGE } from './plugin'
 import { renderUsage } from './usage'
@@ -180,7 +180,9 @@ async function main(argv: string[]): Promise<number> {
   if (target && picked?.passthrough) {
     const rest = argv.slice(target.path.length)
     if (rest[0] !== '-h' && rest[0] !== '--help') {
-      await picked.run({ root, config, args: {}, positionals: [], rest, flags: computeFlags({}), log })
+      await picked.run(
+        withBuiltin({ root, config, args: {}, positionals: [], rest, flags: computeFlags({}), log }),
+      )
       return process.exitCode === undefined ? 0 : Number(process.exitCode)
     }
   }
