@@ -36,7 +36,8 @@ function commandTokens(argv: string[]): string[] {
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((s, i) => s === b[i])
 const startsWith = (a: string[], prefix: string[]) => prefix.every((s, i) => a[i] === s)
 
-async function collectLeaves(root: string | undefined, appName: string | undefined): Promise<Leaf[]> {
+async function collectLeaves(root: string | undefined, config: KitConfig | undefined): Promise<Leaf[]> {
+  const appName = config?.name
   const leaves: Leaf[] = builtins.map((b) => ({
     path: b.path,
     description: b.description,
@@ -45,6 +46,17 @@ async function collectLeaves(root: string | undefined, appName: string | undefin
     load: async () => (await b.load()).default,
   }))
   if (!root) return leaves
+  // `kit release <service>` for each release.services entry.
+  for (const name of Object.keys(config?.release?.services ?? {})) {
+    if (leaves.some((l) => l.path[0] === 'release' && l.path[1] === name)) continue
+    leaves.push({
+      path: ['release', name],
+      description: `Release the ${name} service`,
+      group: 'Release',
+      source: 'builtin',
+      load: async () => (await import('../commands/release/service')).serviceCommand(name),
+    })
+  }
   for (const f of listRepoCommands(root)) {
     leaves.push({
       path: f.path,
@@ -118,7 +130,7 @@ async function main(argv: string[]): Promise<number> {
     config = await loadConfig(root)
   }
   const rt: Runtime = { root, config }
-  const leaves = await collectLeaves(root, config?.name)
+  const leaves = await collectLeaves(root, config)
   const tokens = commandTokens(argv)
 
   if (tokens[0] === 'complete') {

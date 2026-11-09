@@ -15,6 +15,12 @@ export {
   runOrThrow,
   runQuiet,
 } from './lib/proc'
+export {
+  definePreflight,
+  type Preflight,
+  type PreflightContext,
+  type PreflightInfo,
+} from './lib/release/preflight'
 export { commandStep, runSteps, type Step, type StepGroup, type StepResult } from './lib/steps'
 
 /** Typed identity helper for `kit.config.ts`. Validation happens when kit loads the file. */

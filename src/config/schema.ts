@@ -91,6 +91,8 @@ export const configSchema = z
     release: z
       .object({
         branches: z.array(z.string()).optional(),
+        /** Dir holding the app's one-line `fastlane/Fastfile`; default gradle.root, then the repo root. */
+        fastlaneDir: z.string().optional(),
         notes: z.object({ maxLength: z.number().int().positive().optional() }).strict().optional(),
         preflight: z.array(z.string()).optional(),
         ios: z

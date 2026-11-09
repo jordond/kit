@@ -1,0 +1,405 @@
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
+import pc from 'picocolors'
+import type { Flags, KitContext } from '../../cli/command'
+import type { KitConfig, Track } from '../../config/schema'
+import { ExitCode, KitError } from '../errors'
+import { appFastlaneDir, runLane } from '../fastlane'
+import { currentBranch, dirtyFiles, push, tag } from '../git'
+import { emitJson } from '../log'
+import { confirm, text } from '../prompt'
+import { commandStep, runSteps, type Step, type StepResult, summarize } from '../steps'
+import { appleCreds, keystoreCreds, playCreds } from './creds'
+import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
+import { loadPreflights } from './preflight'
+import { readVersion } from './version'
+
+/**
+ * `kit release ios|android --track …` (PLAN §9.3):
+ *   preconditions → preflight + resolve (tree) → confirm → build + upload + post (tree) → tag → summary.
+ * The working tree is never modified: version and build reach the build as lane inputs.
+ */
+
+export type Platform = 'ios' | 'android'
+
+export interface MobileOptions {
+  platform: Platform
+  track: Track
+  build?: number
+  notes?: string
+  /** Android prod staged-rollout fraction. */
+  rollout?: number
+  /** Android: upload as a draft release. */
+  draft?: boolean
+  /** `--skip` values: preflight skipFlags. */
+  skip: string[]
+}
+
+export interface MobileResult {
+  platform: Platform
+  track: Track
+  version: string
+  build: number
+  notes: string
+  dryRun: boolean
+  artifacts: Record<string, string>
+  uploaded: boolean
+  tag?: string
+  tagPushed?: boolean
+}
+
+const APP_STORE_WHATS_NEW_MAX = 4000
+export const DEFAULT_BRANCHES = ['main', 'release/*']
+
+/** Branch allowed by `release.branches` (globs). In CI a detached HEAD falls back to GITHUB_REF_NAME. */
+export async function checkBranch(root: string, config: KitConfig): Promise<string> {
+  let branch = await currentBranch(root)
+  if (branch === 'HEAD' && process.env.GITHUB_REF_NAME) branch = process.env.GITHUB_REF_NAME
+  const allowed = config.release?.branches ?? DEFAULT_BRANCHES
+  if (!allowed.some((g) => new Bun.Glob(g).match(branch))) {
+    throw new KitError(
+      `Releases run from ${allowed.join(', ')}; you are on "${branch}"`,
+      'Switch branch, or add it to release.branches in kit.config.ts',
+      ExitCode.precondition,
+    )
+  }
+  return branch
+}
+
+export async function checkClean(root: string): Promise<void> {
+  const dirty = await dirtyFiles(root)
+  if (dirty.length) {
+    throw new KitError(
+      `Working tree is not clean:\n${dirty
+        .slice(0, 20)
+        .map((l) => `    ${l}`)
+        .join('\n')}`,
+      'Commit or stash first',
+      ExitCode.precondition,
+    )
+  }
+}
+
+const abs = (root: string, p: string) => (isAbsolute(p) ? p : resolve(root, p))
+
+function outputDir(): string {
+  if (process.env.KIT_OUTPUT_DIR) {
+    mkdirSync(process.env.KIT_OUTPUT_DIR, { recursive: true })
+    return process.env.KIT_OUTPUT_DIR
+  }
+  return mkdtempSync(join(tmpdir(), 'kit-release-'))
+}
+
+function laneStep(
+  title: string,
+  appRoot: string,
+  platform: Platform,
+  lane: string,
+  env: () => Record<string, string>,
+  onOutputs: (o: Record<string, string>) => void = () => {},
+): Step {
+  return {
+    title,
+    task: async (update) => {
+      const r = await runLane(appRoot, platform, lane, { env: env(), onLine: update })
+      if (r.code !== 0) {
+        const { ProcError } = await import('../proc')
+        throw new ProcError(['fastlane', platform, lane], r.code, r.output)
+      }
+      onOutputs(r.outputs)
+    },
+  }
+}
+
+function failed(results: StepResult[]): boolean {
+  return results.some((r) => !r.ok)
+}
+
+/** Ask per §9.1. Returns false when the user declines. */
+async function confirmTrack(flags: Flags, track: Track, summary: string): Promise<boolean> {
+  if (flags.dryRun || track === 'internal') return true
+  if (track !== 'prod') return confirm(flags, `Release ${summary}?`)
+  // prod: CI runs in the `production` environment, which needs reviewer approval (§9.6).
+  if (flags.ci) return true
+  const typed = await text({ ...flags, yes: false }, `Type "prod" to release ${summary} to production`, {
+    hint: 'Production releases need a terminal (or CI with the production environment)',
+  })
+  return typed.trim() === 'prod'
+}
+
+export async function releaseMobile(
+  ctx: Pick<KitContext, 'root' | 'config' | 'flags' | 'log'>,
+  opts: MobileOptions,
+): Promise<void> {
+  const started = performance.now()
+  const { root, config } = ctx as { root: string; config: KitConfig }
+  const { platform, track } = opts
+  const flags = ctx.flags
+  const ios = config.release?.ios
+  const android = config.release?.android
+  if (platform === 'ios' && !ios) {
+    throw new KitError('No release.ios in kit.config.ts', undefined, ExitCode.config)
+  }
+  if (platform === 'android' && !android) {
+    throw new KitError('No release.android in kit.config.ts', undefined, ExitCode.config)
+  }
+  if (platform === 'android' && !config.gradle) {
+    throw new KitError('Android releases need gradle.root in kit.config.ts', undefined, ExitCode.config)
+  }
+  if (platform === 'ios' && process.platform !== 'darwin') {
+    throw new KitError('iOS releases need macOS (xcodebuild)', undefined, ExitCode.precondition)
+  }
+
+  // ---- preconditions
+  let notes = opts.notes?.trim()
+  if (platform === 'ios' && track === 'prod' && !flags.dryRun) {
+    if (!notes) {
+      throw new KitError(
+        '--track prod needs --notes "<What\'s New>"',
+        'App Store Connect rejects an update without it, and users read it',
+        ExitCode.usage,
+      )
+    }
+    if (notes.length > APP_STORE_WHATS_NEW_MAX) {
+      throw new KitError(`--notes is ${notes.length} chars; the App Store allows ${APP_STORE_WHATS_NEW_MAX}`)
+    }
+  }
+  const rollout = opts.rollout ?? android?.prodRollout ?? 0.1
+  if (!(rollout > 0 && rollout <= 1)) {
+    throw new KitError(`--rollout must be in (0, 1], got ${rollout}`, undefined, ExitCode.usage)
+  }
+  if (opts.build !== undefined && !(Number.isInteger(opts.build) && opts.build > 0)) {
+    throw new KitError(`--build must be a positive integer, got ${opts.build}`, undefined, ExitCode.usage)
+  }
+  await checkClean(root)
+  const branch = await checkBranch(root, config)
+  const version = readVersion(root, config, platform)
+  const appRoot = appFastlaneDir(root, config)
+
+  // ---- secrets (before any lane: next_build needs the ASC key)
+  const secrets: Record<string, string> =
+    platform === 'ios'
+      ? appleCreds({ match: true, ci: flags.ci }).env
+      : { ...playCreds(), ...keystoreCreds() }
+
+  const common: Record<string, string> =
+    platform === 'ios'
+      ? {
+          ...secrets,
+          KIT_IOS_BUNDLE_IDS: ios!.bundleIds.join(','),
+          KIT_IOS_BUNDLE_ID: ios!.bundleIds[0]!,
+          ...(ios!.teamId ? { KIT_IOS_TEAM_ID: ios!.teamId } : {}),
+        }
+      : {
+          ...secrets,
+          KIT_ANDROID_PACKAGE: android!.packageName,
+          KIT_ANDROID_MODULE: android!.module,
+          KIT_GRADLE_ROOT: abs(root, config.gradle!.root),
+        }
+
+  // ---- preflight + resolve
+  const preflights = (await loadPreflights(root, config)).filter(
+    (p) => !p.platforms || p.platforms.includes(platform),
+  )
+  const pre: Step[] = []
+  for (const p of preflights) {
+    if (p.skipFlag && opts.skip.includes(p.skipFlag)) {
+      ctx.log.warn(`skipped preflight: ${p.title} (--skip ${p.skipFlag})`)
+      continue
+    }
+    pre.push({
+      title: p.title,
+      task: () => p.check({ root, config, flags, log: ctx.log }, { platform, track, version }),
+    })
+  }
+  if (platform === 'android') {
+    for (const g of android!.gates ?? []) {
+      if (!g.tracks.includes(track)) continue
+      pre.push(commandStep(`gate ${g.task}`, ['./gradlew', g.task], { cwd: abs(root, config.gradle!.root) }))
+    }
+  }
+  let build = opts.build
+  if (build === undefined) {
+    const lane = platform === 'ios' ? 'next_build' : 'next_code'
+    pre.push(
+      laneStep(
+        `next ${platform === 'ios' ? 'build number' : 'version code'}`,
+        appRoot,
+        platform,
+        lane,
+        () => common,
+        (o) => {
+          const n = Number(o[platform === 'ios' ? 'NEXT_BUILD' : 'NEXT_CODE'])
+          if (!Number.isInteger(n) || n <= 0)
+            throw new KitError(`fastlane ${platform} ${lane} reported no number`)
+          build = n
+        },
+      ),
+    )
+  }
+  if (pre.length) {
+    const results = await runSteps([{ title: 'preflight', steps: pre }], flags, { bail: true })
+    if (failed(results)) {
+      const code = summarize('preflight', results, started, `Pass --build/--code to skip the store lookup`)
+      if (flags.json) emitJson({ platform, track, ok: false, stage: 'preflight', results })
+      process.exitCode = code === 130 ? 130 : ExitCode.precondition
+      return
+    }
+  }
+  if (build === undefined) throw new KitError('No build number resolved')
+
+  if (!notes) {
+    const r = await releaseNotes(platform, root)
+    notes = r.notes || `${platform} ${version} (${build})`
+  }
+  if (platform === 'android') notes = clampNotes(notes, config.release?.notes?.maxLength ?? PLAY_NOTES_MAX)
+
+  // ---- confirm
+  const where =
+    platform === 'ios'
+      ? track === 'prod'
+        ? 'App Store (phased, manual release)'
+        : track === 'internal'
+          ? 'TestFlight internal'
+          : `TestFlight group "${ios!.testflightGroups?.[track] ?? track}"`
+      : `Play ${track === 'prod' ? 'production' : track}${track === 'prod' ? ` (rollout ${rollout})` : ''}${opts.draft ? ' as draft' : ''}`
+  const summary = `${config.name} ${platform} ${version} (${build}) → ${where}`
+  if (!flags.json) {
+    process.stderr.write(
+      `\n${pc.bold(summary)}${flags.dryRun ? pc.yellow('  [dry run: build only, no upload]') : ''}\n${pc.dim(`branch ${branch}`)}\n${pc.dim(notes.replace(/^/gm, '  '))}\n\n`,
+    )
+  }
+  if (!(await confirmTrack(flags, track, summary))) {
+    throw new KitError('Release cancelled', undefined, ExitCode.interrupted)
+  }
+
+  // ---- build + upload + post
+  const out = outputDir()
+  const artifacts: Record<string, string> = {}
+  const steps: Step[] = []
+  if (platform === 'ios') {
+    steps.push(
+      laneStep(
+        'build',
+        appRoot,
+        'ios',
+        'build',
+        () => ({
+          ...common,
+          KIT_IOS_PROJECT: abs(root, ios!.project),
+          KIT_IOS_SCHEME: ios!.scheme,
+          KIT_IOS_VERSION: version,
+          KIT_IOS_BUILD: String(build),
+          KIT_IOS_OUTPUT: join(out, ios!.output),
+        }),
+        (o) => {
+          if (o.ARTIFACT_IPA) artifacts.ipa = o.ARTIFACT_IPA
+          if (o.ARTIFACT_DSYM) artifacts.dsym = o.ARTIFACT_DSYM
+        },
+      ),
+    )
+    if (!flags.dryRun) {
+      const groups = track === 'alpha' || track === 'beta' ? (ios!.testflightGroups?.[track] ?? track) : ''
+      steps.push(
+        laneStep(
+          track === 'prod' ? 'upload App Store' : 'upload TestFlight',
+          appRoot,
+          'ios',
+          track === 'prod' ? 'upload_appstore' : 'upload_testflight',
+          () => ({
+            ...common,
+            KIT_IOS_IPA: required(artifacts.ipa, 'ipa'),
+            KIT_TESTFLIGHT_GROUPS: groups,
+            KIT_RELEASE_NOTES: notes!,
+          }),
+        ),
+      )
+      if (ios!.sentry) {
+        steps.push(
+          laneStep('upload dSYMs', appRoot, 'ios', 'upload_symbols', () => ({
+            ...common,
+            KIT_IOS_DSYM: required(artifacts.dsym, 'dSYM'),
+            KIT_SENTRY_ORG: ios!.sentry!.org,
+            KIT_SENTRY_PROJECT: ios!.sentry!.project,
+          })),
+        )
+      }
+    }
+  } else {
+    steps.push(
+      laneStep(
+        'build',
+        appRoot,
+        'android',
+        'build',
+        () => ({
+          ...common,
+          KIT_ANDROID_VERSION: version,
+          KIT_ANDROID_CODE: String(build),
+        }),
+        (o) => {
+          if (o.ARTIFACT_AAB) artifacts.aab = o.ARTIFACT_AAB
+          if (o.ARTIFACT_APK) artifacts.apk = o.ARTIFACT_APK
+        },
+      ),
+    )
+    if (!flags.dryRun) {
+      steps.push(
+        laneStep(`upload Play ${track}`, appRoot, 'android', 'upload_play', () => ({
+          ...common,
+          KIT_ANDROID_AAB: required(artifacts.aab, 'aab'),
+          KIT_ANDROID_CODE: String(build),
+          KIT_PLAY_TRACK: track,
+          ...(track === 'prod' ? { KIT_PLAY_ROLLOUT: String(rollout) } : {}),
+          ...(opts.draft ? { KIT_PLAY_DRAFT: '1' } : {}),
+          KIT_RELEASE_NOTES: notes!,
+        })),
+      )
+    }
+  }
+  const results = await runSteps([{ title: `${platform} ${track}`, steps }], flags, { bail: true })
+  const result: MobileResult = {
+    platform,
+    track,
+    version,
+    build,
+    notes,
+    dryRun: flags.dryRun,
+    artifacts,
+    uploaded: false,
+  }
+  if (failed(results)) {
+    if (flags.json) emitJson({ ...result, ok: false, results })
+    process.exitCode = summarize(`release ${platform}`, results, started)
+    return
+  }
+  result.uploaded = !flags.dryRun
+
+  // ---- tag (only after a successful upload; never forced)
+  if (!flags.dryRun) {
+    const name = mobileTag(platform, version, build)
+    result.tag = name
+    try {
+      await tag(name, { cwd: root, message: `${platform} ${version} (${build}) → ${track}` })
+      await push([`refs/tags/${name}`], { cwd: root })
+      result.tagPushed = true
+    } catch (e) {
+      result.tagPushed = false
+      ctx.log.warn(`uploaded, but tagging ${name} failed: ${e instanceof Error ? e.message : String(e)}`)
+      ctx.log.dim(`  › git tag -a ${name} -m "${platform} ${version} (${build})" && git push origin ${name}`)
+    }
+  }
+
+  if (flags.json) emitJson({ ...result, ok: true })
+  summarize(`release ${platform}`, results, started)
+  if (!flags.json) {
+    for (const [k, v] of Object.entries(artifacts)) ctx.log.dim(`  ${k}: ${v}`)
+    if (result.tag) ctx.log.dim(`  tag: ${result.tag}${result.tagPushed ? '' : ' (not pushed)'}`)
+  }
+}
+
+function required(value: string | undefined, what: string): string {
+  if (!value) throw new KitError(`The build lane reported no ${what}`)
+  return value
+}
