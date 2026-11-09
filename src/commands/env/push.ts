@@ -59,6 +59,8 @@ export default defineCommand({
     const toPush = plans.flatMap((p) =>
       p.items.filter((i) => i.status === 'new' || i.status === 'overwrite' || i.status === 'unknown'),
     )
+    // A remote kit could not list (bad wrangler or gh auth) is a failure, even if nothing else is left to push.
+    const listFailed = plans.filter((p) => p.items.some((i) => i.status === 'list-failed'))
 
     if (!ctx.flags.json) {
       for (const p of plans) {
@@ -66,8 +68,7 @@ export default defineCommand({
         if (p.listError) ctx.log.warn(`could not list existing secrets: ${p.listError}`)
         for (const i of p.items) ctx.log.dim(`  ${i.key}  ${i.status}`)
       }
-      const skippedList = plans.filter((p) => p.items.some((i) => i.status === 'list-failed'))
-      if (skippedList.length)
+      if (listFailed.length)
         ctx.log.warn('Skipping remotes kit could not list; re-run with --yes to push anyway')
     }
 
@@ -75,14 +76,23 @@ export default defineCommand({
       if (ctx.flags.json) emitJson({ dryRun: ctx.flags.dryRun, ok, outcomes })
     }
 
+    const failListed = () => {
+      if (!listFailed.length) return
+      if (!ctx.flags.json) {
+        ctx.log.error(`could not list secrets on ${listFailed.map((p) => p.destination.name).join(', ')}`)
+      }
+      process.exitCode = ExitCode.failed
+    }
+
     if (ctx.flags.dryRun || !toPush.length) {
       report(
         plans.flatMap((p) =>
           p.items.map((i) => ({ destination: p.destination.name, key: i.key, status: i.status })),
         ),
-        true,
+        !listFailed.length,
       )
-      if (!ctx.flags.json && !toPush.length) ctx.log.warn('Nothing to push')
+      if (!ctx.flags.json && !toPush.length && !listFailed.length) ctx.log.warn('Nothing to push')
+      failListed()
       return
     }
 
@@ -95,7 +105,7 @@ export default defineCommand({
       if (!ctx.flags.json) ctx.log.step(`${key} → ${dest}`)
     })
     const failed = outcomes.find((o) => o.status === 'failed')
-    report(outcomes, !failed)
+    report(outcomes, !failed && !listFailed.length)
     if (failed) {
       if (!ctx.flags.json) {
         ctx.log.error(`push ${failed.key} → ${failed.destination} failed`)
@@ -108,5 +118,6 @@ export default defineCommand({
       const pushed = outcomes.filter((o) => o.status === 'pushed').length
       ctx.log.success(`pushed ${pushed}, skipped ${outcomes.length - pushed}`)
     }
+    failListed()
   },
 })
