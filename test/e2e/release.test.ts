@@ -141,6 +141,7 @@ describe('kit release android', () => {
       KIT_PLAY_ROLLOUT: '0.25',
       KIT_ANDROID_CODE: '100',
     })
+    expect(calls[0]!.env.KIT_INTERNAL).toBeUndefined()
     expect(readFileSync(join(f.dir, '.gradle.log'), 'utf8')).toContain(
       'gradlew :android:verifyBaselineProfile',
     )
