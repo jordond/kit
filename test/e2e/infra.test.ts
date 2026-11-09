@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -113,6 +113,21 @@ describe('env push', () => {
     ])
   })
 
+  test('--all pushes every worker and GitHub; --all with --target is a usage error', async () => {
+    const r = await fx.kit(['env', 'push', '--all', '--yes', '--json'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual([
+      './apps/edge wrangler secret list --format json',
+      './apps/admin wrangler secret list --format json',
+      '. gh secret list --json name',
+      './apps/edge wrangler secret put API_SECRET',
+      './apps/admin wrangler secret put API_SECRET',
+      '. gh secret set DEPLOY_TOKEN',
+    ])
+    expect(JSON.parse(r.stdout).ok).toBe(true)
+    expect((await fx.kit(['env', 'push', '--all', '--target', 'edge'])).code).toBe(2)
+  })
+
   test('--dry-run lists but pushes nothing', async () => {
     const r = await fx.kit(['env', 'push', '--dry-run'])
     expect(r.code).toBe(0)
@@ -207,6 +222,14 @@ describe('db', () => {
     expect(fx.calls()).toEqual([])
     expect((await fx.kit(['db', 'migrate', '--db', 'analytics', '--remote', '--yes'])).code).toBe(0)
     expect(summary()).toEqual(['./apps/analytics wrangler d1 migrations apply infra-analytics --remote'])
+  })
+
+  test('a default: true database is used without --db', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(cfg, read('kit.config.ts').replace("target: 'edge' }", "target: 'edge', default: true }"))
+    const r = await fx.kit(['db', 'migrate'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual(['./apps/edge wrangler d1 migrations apply infra-db --local'])
   })
 
   test('list is read-only: --remote needs no confirmation', async () => {

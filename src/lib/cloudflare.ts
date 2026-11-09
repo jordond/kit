@@ -178,11 +178,12 @@ export interface D1Database {
   /** Database name wrangler knows. */
   name: string
   target: string
+  default?: boolean
 }
 
 /**
- * The database for `--db`: a `cloudflare.d1` key or database name. Without `--db` the only one;
- * with several, a usage error listing them.
+ * The database for `--db`: a `cloudflare.d1` key or database name. Without `--db` the only one, or
+ * the one marked `default: true`; with several and no default, a usage error listing them.
  */
 export function resolveD1(config: KitConfig, db: string | undefined): D1Database {
   const all = Object.entries(config.cloudflare?.d1 ?? {}).map(([key, d]) => ({ key, ...d }))
@@ -196,6 +197,8 @@ export function resolveD1(config: KitConfig, db: string | undefined): D1Database
   const names = all.map((d) => (d.key === d.name ? d.key : `${d.key} (${d.name})`)).join(', ')
   if (db === undefined || db === '') {
     if (all.length === 1) return all[0]!
+    const fallback = all.find((d) => d.default)
+    if (fallback) return fallback
     throw new KitError(`Several D1 databases; pick one with --db`, `Databases: ${names}`, ExitCode.usage)
   }
   const found = all.find((d) => d.key === db) ?? all.find((d) => d.name === db)
@@ -236,7 +239,10 @@ export function d1Args(db: D1Database, action: D1Action): string[] {
 
 /** Flags every `kit db` command takes. */
 export const dbArgs = {
-  db: { type: 'string', description: 'cloudflare.d1 key or database name (default: the only one)' },
+  db: {
+    type: 'string',
+    description: 'cloudflare.d1 key or database name (default: the only one, or the default: true one)',
+  },
 } as const
 
 export const remoteArg = {

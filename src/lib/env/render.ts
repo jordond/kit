@@ -9,8 +9,9 @@ import type { EnvSchema, EnvValues } from './schema'
  * `env.outputs[path] = { pick?, rename? }`:
  * - `pick`: source keys written under their own name.
  * - `rename`: `{ OUTPUT_NAME: 'SOURCE_KEY' }`, e.g. admin binds INTERNAL_ADMIN_SECRET as X_INTERNAL_SECRET.
- * - neither: every schema key.
- * Lines follow pick order, then rename order. Files are `.dev.vars` format, written atomically at 0600.
+ * - `vars`: static `{ NAME: 'value' }` lines for local dev only (never pushed), e.g. `ENVIRONMENT=dev`.
+ * - neither pick nor rename: every schema key.
+ * Lines follow vars order, then pick order, then rename order. Files are `.dev.vars` format, written atomically at 0600.
  * A blank value renders as a commented `# KEY=` so the file documents the key and dev servers still boot.
  */
 
@@ -22,6 +23,8 @@ export interface OutputLine {
   name: string
   /** Key in `.env`. */
   source: string
+  /** Static value from `vars`; written as-is, even when empty. */
+  value?: string
 }
 
 export interface Output {
@@ -33,6 +36,7 @@ export interface Output {
 export function outputs(config: KitConfig, schema: EnvSchema): Output[] {
   return Object.entries(config.env?.outputs ?? {}).map(([path, o]) => {
     const lines: OutputLine[] = []
+    for (const [name, value] of Object.entries(o.vars ?? {})) lines.push({ name, source: name, value })
     for (const k of o.pick ?? []) lines.push({ name: k, source: k })
     for (const [name, source] of Object.entries(o.rename ?? {})) lines.push({ name, source })
     if (!o.pick && !o.rename) for (const k of schema.keys) lines.push({ name: k.name, source: k.name })
@@ -41,8 +45,9 @@ export function outputs(config: KitConfig, schema: EnvSchema): Output[] {
 }
 
 /** One `.dev.vars` line. Multi-line values (a PEM) are double-quoted with `\n`, which dotenv expands. */
-function line(name: string, value: string | undefined): string {
-  if (value === undefined || value === '') return `# ${name}=\n`
+function line(name: string, value: string | undefined, literal = false): string {
+  if (!literal && (value === undefined || value === '')) return `# ${name}=\n`
+  value ??= ''
   if (/[\r\n]/.test(value)) return `${name}="${value.replace(/\r?\n/g, '\\n')}"\n`
   return `${name}=${value}\n`
 }
@@ -50,7 +55,8 @@ function line(name: string, value: string | undefined): string {
 /** Render an output. Pure. */
 export function render(output: Output, values: EnvValues): string {
   let out = GENERATED_BANNER
-  for (const l of output.lines) out += line(l.name, values[l.source])
+  for (const l of output.lines)
+    out += l.value === undefined ? line(l.name, values[l.source]) : line(l.name, l.value, true)
   return out
 }
 

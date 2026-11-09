@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
 // setup-repo has a pnpm lockfile, so install and `pnpm exec wrangler` go through recording fakes.
-const BINS = ['fake-gradlew', 'pnpm', 'wrangler', 'open', 'java', 'ruby', 'xcodebuild']
+const BINS = ['fake-gradlew', 'pnpm', 'wrangler', 'open', 'java', 'ruby', 'xcodebuild', 'bundle']
 let fx: Fixture
 
 beforeEach(() => {
@@ -63,6 +63,24 @@ describe('passthroughs', () => {
       const r = await fx.kit(['xcode'])
       expect(r.code).toBe(0)
       expect(summary()).toEqual(['. open -a Xcode apps/client/ios/iosApp.xcodeproj'])
+    },
+  )
+
+  test.skipIf(process.platform !== 'darwin')(
+    'xcode --json: one document; --dry-run opens nothing',
+    async () => {
+      const dry = await fx.kit(['xcode', '--dry-run', '--json'])
+      expect(dry.code).toBe(0)
+      expect(JSON.parse(dry.stdout)).toEqual({
+        dryRun: true,
+        project: 'apps/client/ios/iosApp.xcodeproj',
+        cmd: ['open', '-a', 'Xcode', 'apps/client/ios/iosApp.xcodeproj'],
+      })
+      expect(fx.calls()).toEqual([])
+      const r = await fx.kit(['xcode', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toEqual({ ok: true, project: 'apps/client/ios/iosApp.xcodeproj' })
+      expect(r.stderr).toContain('open ok')
     },
   )
 
@@ -181,6 +199,44 @@ describe('init', () => {
     const r = await fx.kit(['init', '--yes'])
     expect(r.stderr).toContain('mise.toml exists')
     expect(readFileSync(join(fx.dir, 'mise.toml'), 'utf8')).toBe('[tools]\n')
+  })
+
+  test('gradle.init and bundle install run from the Gradle root; --js-only skips them', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(
+      cfg,
+      readFileSync(cfg, 'utf8').replace(
+        "gradle: { root: 'apps/client' }",
+        "gradle: { root: 'apps/client', init: [':shared:dependencies'] }",
+      ),
+    )
+    writeFileSync(join(fx.dir, 'apps/client/Gemfile'), "source 'https://rubygems.org'\n")
+    const r = await fx.kit(['init'], { env: { ANDROID_HOME: '/sdk' } })
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual([
+      '. pnpm install',
+      './apps/api pnpm exec wrangler types',
+      './apps/client fake-gradlew --console=plain -q :shared:dependencies',
+      './apps/client bundle install',
+    ])
+    const js = await fx.kit(['init', '--js-only', '--dry-run', '--json'], { env: { ANDROID_HOME: '/sdk' } })
+    const plan = JSON.parse(js.stdout).plan as { kind: string; title: string; reason?: string }[]
+    expect(plan.slice(-2)).toEqual([
+      { kind: 'skip', title: 'gradle :shared:dependencies', reason: '--js-only' },
+      { kind: 'skip', title: 'bundle install (apps/client)', reason: '--js-only' },
+    ])
+  })
+
+  test('no Android SDK: the Gradle step is skipped with a hint, not failed', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(
+      cfg,
+      readFileSync(cfg, 'utf8').replace("root: 'apps/client' }", "root: 'apps/client', init: 'help' }"),
+    )
+    const r = await fx.kit(['init'], { env: { ANDROID_HOME: '', ANDROID_SDK_ROOT: '' } })
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('gradle help  no Android SDK')
+    expect(summary().some((s) => s.includes('fake-gradlew'))).toBe(false)
   })
 
   test('a failed step keeps going and exits 1', async () => {

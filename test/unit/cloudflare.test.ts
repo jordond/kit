@@ -142,6 +142,19 @@ describe('resolveD1', () => {
     expect(resolveD1(one, undefined).name).toBe('only')
   })
 
+  test('several with one default: true; no --db picks it, --db still picks any', () => {
+    const d1 = {
+      main: { name: 'main-db', target: 'edge', default: true },
+      analytics: { name: 'infra-analytics', target: 'analytics' },
+    }
+    const c = withCloudflare({ d1 })
+    expect(resolveD1(c, undefined).name).toBe('main-db')
+    expect(resolveD1(c, 'analytics').name).toBe('infra-analytics')
+    const two = { ...config, cloudflare: { d1: { ...d1, analytics: { ...d1.analytics, default: true } } } }
+    const issue = configSchema.safeParse(two).error?.issues[0]?.message
+    expect(issue).toMatch(/Only one database can be the default/)
+  })
+
   test('rejects an unknown --db rather than guessing; none configured is exit 3', () => {
     expect(() => resolveD1(config, 'nope')).toThrow(/Unknown D1 database "nope"/)
     expect(() => resolveD1(withCloudflare(undefined), undefined)).toThrow(
