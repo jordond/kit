@@ -10,17 +10,6 @@ export default defineCommand({
   passthrough: true,
   examples: EXAMPLES,
   async run(ctx) {
-    const first = ctx.rest[0]
-    if (first === '-h' || first === '--help') {
-      process.stdout.write(
-        `${DESCRIPTION}\n\nUsage: kit fastlane [fastlane args…]\n\nRuns \`bundle exec fastlane\` in the app's fastlane dir with KIT_FASTFILE,\nBUNDLE_GEMFILE and the ASC/Play key files set from .env.\n\nExamples:\n${EXAMPLES.split(
-          '\n',
-        )
-          .map((e) => `  ${e}`)
-          .join('\n')}\n`,
-      )
-      return
-    }
     const { requireProject } = await import('../cli/command')
     const { appFastlaneDir, ensureBundle, fastlaneEnv } = await import('../lib/fastlane')
     const { optionalLaneCreds } = await import('../lib/release/creds')

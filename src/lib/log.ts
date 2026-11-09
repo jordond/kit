@@ -18,6 +18,12 @@ export const log = {
 export type Logger = typeof log
 
 /** Write exactly one JSON document to stdout. */
+let emitted = false
+
+/** Whether a JSON document was already written this run. */
+export const jsonEmitted = (): boolean => emitted
+
 export function emitJson(value: unknown): void {
+  emitted = true
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }

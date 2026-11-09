@@ -23,6 +23,8 @@ Quality
 
 Release
   release     Ship to the stores …
+  version     Version names in the catalog TOML …
+  fastlane    Run fastlane with kit's shared Fastfile
 
 Infra
   env         Render, check and push env from .env …
@@ -85,6 +87,24 @@ Usage
 Commands
   ios      Build and upload iOS to a track
   android  Build and upload Android to a track
+  certs    Install App Store signing with match; --add creates what is missing
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit version --help 1`] = `
+"Version names in the catalog TOML
+
+Usage
+  kit version <command> [options]
+
+Commands
+  show  Show version names and last release tags
+  bump  Bump a version name, commit and push
 
 Options
   -h, --help     Show help
@@ -210,7 +230,7 @@ Options
   -v, --verbose      Stream all child output
   -q, --quiet        Errors and summary only
       --bail         Stop at the first failure
-      --db <string>  cloudflare.d1 key or database name (default: the only one)
+      --db <string>  cloudflare.d1 key or database name (default: the only one, or the default: true one)
 
 "
 `;
@@ -235,7 +255,7 @@ Options
   -v, --verbose        Stream all child output
   -q, --quiet          Errors and summary only
       --bail           Stop at the first failure
-      --db <string>    cloudflare.d1 key or database name (default: the only one)
+      --db <string>    cloudflare.d1 key or database name (default: the only one, or the default: true one)
       --remote         Deployed D1 (default: local)
   -f, --file <string>  Run a .sql file instead of a statement
 
@@ -261,7 +281,7 @@ Options
   -v, --verbose      Stream all child output
   -q, --quiet        Errors and summary only
       --bail         Stop at the first failure
-      --db <string>  cloudflare.d1 key or database name (default: the only one)
+      --db <string>  cloudflare.d1 key or database name (default: the only one, or the default: true one)
       --remote       Deployed D1 (default: local)
 
 "
@@ -274,7 +294,7 @@ Usage
   kit db migrate [options]
 
 Examples
-  kit db migrate
+  kit db migrate                 # the only database, or the default: true one
   kit db migrate --remote
   kit db migrate --db analytics --dry-run
 
@@ -287,22 +307,24 @@ Options
   -v, --verbose      Stream all child output
   -q, --quiet        Errors and summary only
       --bail         Stop at the first failure
-      --db <string>  cloudflare.d1 key or database name (default: the only one)
+      --db <string>  cloudflare.d1 key or database name (default: the only one, or the default: true one)
       --remote       Deployed D1 (default: local)
 
 "
 `;
 
 exports[`help kit deploy --help 1`] = `
-"Deploy a target
+"Deploy one or more targets, in order (deploy.before first)
 
 Usage
   kit deploy [options]
 
 Examples
   kit deploy api
+  kit deploy api admin web          # in order; stops at the first failure
   kit deploy web --env staging
-  kit deploy api --dry-run
+  kit deploy api web --env staging  # the env goes to the targets that declare it
+  kit deploy api --dry-run --json
 
 Options
   -h, --help          Show help
@@ -313,7 +335,7 @@ Options
   -v, --verbose       Stream all child output
   -q, --quiet         Errors and summary only
       --bail          Stop at the first failure
-  -e, --env <string>  Environment (when the target has envs)
+  -e, --env <string>  Environment, for targets that declare envs
 
 "
 `;
@@ -343,14 +365,17 @@ Options
 `;
 
 exports[`help kit dev --help 1`] = `
-"Run a dev server (Ctrl-C to stop)
+"Run dev servers: one target, several, or every target with a dev command (Ctrl-C stops all)
 
 Usage
   kit dev [options]
 
 Examples
-  kit dev api
+  kit dev                  # workspace.dev and every target with a dev command, together
+  kit dev api              # one dev server, attached to the terminal
+  kit dev api admin        # several, output prefixed by target
   kit dev web --env staging
+  kit dev --dry-run --json
 
 Options
   -h, --help          Show help
@@ -361,7 +386,7 @@ Options
   -v, --verbose       Stream all child output
   -q, --quiet         Errors and summary only
       --bail          Stop at the first failure
-  -e, --env <string>  Environment (when the target has envs)
+  -e, --env <string>  Environment, for targets that declare envs
 
 "
 `;
@@ -446,10 +471,11 @@ Usage
   kit env push [options]
 
 Examples
-  kit env push                    # every target in env.workerSecrets
+  kit env push                    # every target in env.workerSecrets (not GitHub)
   kit env push --target edge
   kit env push --github           # GitHub Actions secrets only
   kit env push --target edge --github
+  kit env push --all --yes        # every worker and GitHub, no prompt (CI)
   kit env push --dry-run
 
 Options
@@ -463,6 +489,7 @@ Options
       --bail             Stop at the first failure
   -t, --target <string>  Only this worker target (env.workerSecrets)
       --github           Push env.githubSecrets with gh
+      --all              Every worker in env.workerSecrets and env.githubSecrets
 
 "
 `;
@@ -487,6 +514,23 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit fastlane --help 1`] = `
+"Run fastlane with kit's shared Fastfile and Gemfile (arguments pass through)
+
+Usage
+  kit fastlane [args…]
+
+Every argument passes through untouched; kit parses no flags here (no --json).
+Only a leading -h/--help shows this; \`kit fastlane <args> --help\` reaches the tool.
+
+Examples
+  kit fastlane lanes
+  kit fastlane ios next_build
+  kit fastlane run sentry_check_cli_installed
 
 "
 `;
@@ -535,7 +579,7 @@ Examples
 `;
 
 exports[`help kit init --help 1`] = `
-"Set up a fresh clone: .env, install, optional mise/lefthook, env sync, wrangler types
+"Set up a fresh clone: .env, install, env sync, wrangler types, Gradle and bundler deps
 
 Usage
   kit init [options]
@@ -543,7 +587,8 @@ Usage
 Examples
   kit init
   kit init --dry-run
-  kit init --yes   # also scaffold mise.toml and lefthook.yml
+  kit init --yes       # also scaffold mise.toml and lefthook.yml
+  kit init --js-only   # JS workspace only: no Gradle, no bundle install
 
 Options
   -h, --help     Show help
@@ -554,6 +599,7 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
+      --js-only  Skip the Gradle and bundler steps
 
 "
 `;
@@ -585,26 +631,56 @@ Options
 `;
 
 exports[`help kit release android --help 1`] = `
-"Build and upload Android to a track
+"Build and upload Android to a Play track
 
 Usage
   kit release android [options]
 
 Examples
-  kit release android --track beta
+  kit release android --track internal
+  kit release android --track prod --rollout 0.2
+  kit release android --track alpha --draft
   kit release android --track internal --dry-run
 
 Options
-  -h, --help            Show help
-  -V, --version         Show kit version
-      --json            Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run         Plan and run read-only steps; skip mutations
-  -y, --yes             Accept confirmations (never skips prod)
-  -v, --verbose         Stream all child output
-  -q, --quiet           Errors and summary only
-      --bail            Stop at the first failure
-      --track <enum>    Store track
-      --build <number>  Override the store build number
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+  -t, --track <enum>      Play internal testing · closed (alpha) · open (beta) · production (prod)
+      --code <number>     Version code (default: max across Play tracks + 1)
+      --notes <string>    Release notes (default: commits since the last android/v* tag; clamped to 500)
+      --rollout <number>  prod staged-rollout fraction, 0 < r <= 1 (default release.android.prodRollout or 0.1)
+      --draft             Upload as a draft release (required while the Play app is a draft)
+      --skip <string>     Skip release.preflight checks by skipFlag (comma-separated)
+
+"
+`;
+
+exports[`help kit release certs --help 1`] = `
+"Install App Store signing with match (readonly); --add creates what is missing
+
+Usage
+  kit release certs [options]
+
+Examples
+  kit release certs
+  kit release certs --add
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --add      Create missing certificates/profiles for this app's bundle ids and team only (never nuke)
 
 "
 `;
@@ -616,7 +692,9 @@ Usage
   kit release ios [options]
 
 Examples
-  kit release ios --track beta
+  kit release ios --track internal
+  kit release ios --track beta --yes
+  kit release ios --track prod --notes "Bug fixes"
   kit release ios --track internal --dry-run
 
 Options
@@ -628,8 +706,10 @@ Options
   -v, --verbose         Stream all child output
   -q, --quiet           Errors and summary only
       --bail            Stop at the first failure
-      --track <enum>    Store track
-      --build <number>  Override the store build number
+  -t, --track <enum>    internal: TestFlight internal · alpha/beta: TestFlight group · prod: App Store
+      --build <number>  Build number (default: max in App Store Connect + 1)
+      --notes <string>  Release notes (default: commits since the last ios/v* tag); prod: What's New, required
+      --skip <string>   Skip release.preflight checks by skipFlag (comma-separated)
 
 "
 `;
@@ -680,6 +760,58 @@ Options
 "
 `;
 
+exports[`help kit version bump --help 1`] = `
+"Bump a version name in the catalog TOML, commit, and push
+
+Usage
+  kit version bump [options]
+
+Examples
+  kit version bump patch
+  kit version bump minor --platform ios
+  kit version bump patch --platform api --no-push
+  kit version bump minor --pr
+
+Options
+  -h, --help               Show help
+  -V, --version            Show kit version
+      --json               Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run            Plan and run read-only steps; skip mutations
+  -y, --yes                Accept confirmations (never skips prod)
+  -v, --verbose            Stream all child output
+  -q, --quiet              Errors and summary only
+      --bail               Stop at the first failure
+  -p, --platform <string>  ios | android | all (ios + android) | a service key from versions.keys
+      --no-push            Commit only; do not push
+      --pr                 Commit on a new branch, push it and open a PR (gh)
+
+"
+`;
+
+exports[`help kit version show --help 1`] = `
+"Show version names (from the catalog TOML) and the last release tags
+
+Usage
+  kit version show [options]
+
+Examples
+  kit version show
+  kit version show ios
+  kit version show --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
 exports[`help kit wrangler --help 1`] = `
 "Run wrangler in a worker target's directory (arguments pass through)
 
@@ -705,6 +837,7 @@ Usage
 
 Examples
   kit xcode
+  kit xcode --dry-run --json
 
 Options
   -h, --help     Show help

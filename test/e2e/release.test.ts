@@ -324,7 +324,18 @@ describe('kit fastlane', () => {
   test('-h prints kit usage without running fastlane', async () => {
     const r = await run(['fastlane', '--help'])
     expect(r.code).toBe(0)
-    expect(r.stdout).toContain('Usage: kit fastlane')
+    expect(r.stdout).toContain('kit fastlane [args…]')
     expect(lanes()).toEqual([])
   })
+})
+
+test('--json failures still write one document', async () => {
+  const f2 = fixture('release', [])
+  try {
+    const r = await f2.kit(['version', 'bump', 'huge', '--json'])
+    expect(r.code).toBe(2)
+    expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, exitCode: 2 })
+  } finally {
+    f2.cleanup()
+  }
 })

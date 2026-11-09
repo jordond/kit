@@ -6,7 +6,7 @@ import { findRoot, loadConfig, loadDotEnv } from '../config/load'
 import type { KitConfig } from '../config/schema'
 import { installSignalHandlers, interrupted, runCleanup } from '../lib/cleanup'
 import { ExitCode, KitError } from '../lib/errors'
-import { log } from '../lib/log'
+import { emitJson, jsonEmitted, log } from '../lib/log'
 import { builtins, groupDescriptions } from './builtins'
 import { computeFlags, type KitCommand, type Runtime, toGunshi, withBuiltin } from './command'
 import { importRepoCommand, listRepoCommands } from './discover'
@@ -252,6 +252,17 @@ installSignalHandlers()
 try {
   process.exitCode = await main(process.argv.slice(2))
 } catch (e) {
+  // --json promises exactly one document on stdout, failures included.
+  const argv = process.argv.slice(2)
+  const dashdash = argv.indexOf('--')
+  if ((dashdash < 0 ? argv : argv.slice(0, dashdash)).includes('--json') && !jsonEmitted()) {
+    emitJson({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+      ...(e instanceof KitError && e.hint ? { hint: e.hint } : {}),
+      exitCode: e instanceof KitError ? e.exitCode : ExitCode.failed,
+    })
+  }
   if (e instanceof KitError) {
     log.error(e.message, e.hint)
     process.exitCode = e.exitCode
