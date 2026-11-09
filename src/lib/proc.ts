@@ -29,12 +29,12 @@ export function childEnv(env: Env = {}): Record<string, string | undefined> {
 function spawn(
   cmd: readonly string[],
   opts: RunOptions,
-  stdio: { stdin: 'inherit' | 'ignore'; stdout: 'inherit' | 'pipe'; stderr: 'inherit' | 'pipe' },
+  stdio: { stdin: 'inherit' | 'ignore' | Blob; stdout: 'inherit' | 'pipe'; stderr: 'inherit' | 'pipe' },
 ) {
   if (!cmd.length) throw new Error('proc: empty command')
   // Children that don't touch the terminal get their own process group, so an interrupt reaches the
   // whole tree (sh -c → gradlew → java) and no grandchild keeps a pipe open after kit gives up.
-  const detached = stdio.stdin === 'ignore' && stdio.stdout === 'pipe'
+  const detached = stdio.stdin !== 'inherit' && stdio.stdout === 'pipe'
   const proc = Bun.spawn([...cmd], { cwd: opts.cwd ?? '.', env: childEnv(opts.env), ...stdio, detached })
   trackChild(proc, detached)
   return proc
@@ -62,6 +62,20 @@ export async function runQuiet(
     new Response(proc.stderr).text(),
   ])
   return { code: await proc.exited, output: `${stdout}${stderr}` }
+}
+
+/** Capture stdout and stderr separately; optional `input` goes to stdin (e.g. a secret value). */
+export async function runPiped(
+  cmd: readonly string[],
+  opts: RunOptions & { input?: string } = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const stdin = opts.input === undefined ? 'ignore' : new Blob([opts.input])
+  const proc = spawn(cmd, opts, { stdin, stdout: 'pipe', stderr: 'pipe' })
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ])
+  return { code: await proc.exited, stdout, stderr }
 }
 
 /** Capture stdout for post-processing; stderr passes through. */

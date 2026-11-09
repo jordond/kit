@@ -2,8 +2,8 @@ import { Buffer } from 'node:buffer'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { onCleanup, trackChild } from './cleanup'
-import { childEnv, type Env } from './proc'
+import { onCleanup } from './cleanup'
+import { type Env, runPiped } from './proc'
 
 /**
  * Secret material for one kit run.
@@ -92,19 +92,7 @@ export async function pipeSecret(
   opts: { cwd?: string; env?: Env } = {},
 ): Promise<PipeResult> {
   registerSecret(input)
-  const proc = Bun.spawn([...cmd], {
-    cwd: opts.cwd ?? '.',
-    env: childEnv(opts.env),
-    stdin: new Blob([input]),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  trackChild(proc)
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  const code = await proc.exited
+  const { code, stdout, stderr } = await runPiped(cmd, { ...opts, input })
   const output = code !== 0 ? `${stderr}${stdout ? `\n${stdout}` : ''}` : stderr
   return { code, output: redact(output) }
 }

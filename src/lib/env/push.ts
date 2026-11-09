@@ -1,8 +1,7 @@
 import type { KitConfig } from '../../config/schema'
-import { trackChild } from '../cleanup'
 import { parseSecretNames, wrangler, wranglerSecretPut } from '../cloudflare'
 import { ExitCode, KitError } from '../errors'
-import { childEnv } from '../proc'
+import { runPiped } from '../proc'
 import { type PipeResult, pipeSecret, redact } from '../secrets'
 import type { EnvValues } from './schema'
 
@@ -123,13 +122,7 @@ async function capture(
   cmd: string[],
   cwd: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
-  const proc = Bun.spawn(cmd, { cwd, env: childEnv(), stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' })
-  trackChild(proc)
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  return { code: await proc.exited, stdout, stderr }
+  return runPiped(cmd, { cwd })
 }
 
 /** A worker target's secrets via wrangler, run from the target's dir. */
