@@ -9,3 +9,6 @@ build/
 # local-only: planning docs, agent handoffs, spike notes
 docs/
 spikes/
+
+# agent worktrees
+.claude/worktrees/
