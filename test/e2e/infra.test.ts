@@ -113,6 +113,21 @@ describe('env push', () => {
     ])
   })
 
+  test('--all pushes every worker and GitHub; --all with --target is a usage error', async () => {
+    const r = await fx.kit(['env', 'push', '--all', '--yes', '--json'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual([
+      './apps/edge wrangler secret list --format json',
+      './apps/admin wrangler secret list --format json',
+      '. gh secret list --json name',
+      './apps/edge wrangler secret put API_SECRET',
+      './apps/admin wrangler secret put API_SECRET',
+      '. gh secret set DEPLOY_TOKEN',
+    ])
+    expect(JSON.parse(r.stdout).ok).toBe(true)
+    expect((await fx.kit(['env', 'push', '--all', '--target', 'edge'])).code).toBe(2)
+  })
+
   test('--dry-run lists but pushes nothing', async () => {
     const r = await fx.kit(['env', 'push', '--dry-run'])
     expect(r.code).toBe(0)

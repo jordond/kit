@@ -70,6 +70,8 @@ export const configSchema = z
               .object({
                 pick: z.array(z.string()).optional(),
                 rename: z.record(z.string(), z.string()).optional(),
+                /** Static local-only lines (`ENVIRONMENT: 'dev'`); never pushed. */
+                vars: z.record(z.string(), z.string()).optional(),
               })
               .strict(),
           )
