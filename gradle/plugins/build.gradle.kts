@@ -51,6 +51,7 @@ testing {
                     val repo = rootProject.layout.buildDirectory.dir("kit-test-repo")
                     systemProperty("kit.testRepo", repo.get().asFile.absolutePath)
                     systemProperty("kit.version", project.version.toString())
+                    systemProperty("kit.fixturesDir", layout.buildDirectory.dir("kit-fixtures").get().asFile.absolutePath)
                     systemProperty("kit.matrix", providers.gradleProperty("kit.matrix").getOrElse("all"))
                     // Reuse the caller's Gradle user home so AGP/KGP/Compose aren't downloaded per run.
                     systemProperty("kit.testKitDir", gradle.gradleUserHomeDir.absolutePath)
