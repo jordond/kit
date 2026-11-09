@@ -215,7 +215,7 @@ class Fixture(
                 }
             }
             dependencies {
-                implementation(project(":shared"))
+                implementation(projects.shared) // typesafe accessors come from kit.settings
             }
             """,
         )
