@@ -102,6 +102,9 @@ abstract class KitExtension
         /** Extra spotless target excludes (globs relative to each project). */
         abstract val excludes: ListProperty<String>
 
+        /** Also lint the root build.gradle.kts and settings.gradle.kts (default false). */
+        abstract val lintRootScripts: Property<Boolean>
+
         // --- jvm.app -------------------------------------------------------------------------------
 
         /** JVM toolchain/target; defaults to catalog `app-jvm-target`. */
@@ -116,6 +119,7 @@ abstract class KitExtension
             desugaring.convention(false)
             device.convention("Pixel 6")
             deviceApi.convention(34)
+            lintRootScripts.convention(false)
         }
     }
 
