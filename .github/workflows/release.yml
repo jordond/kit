@@ -1,6 +1,6 @@
 name: release
 
-# Publishes @jordond/kit to npm with provenance when a `v<version>` tag is pushed.
+# Publishes @jordond/kit to npm when a `v<version>` tag is pushed, via npm trusted publishing (OIDC).
 on:
   push:
     tags: ['v*']
@@ -37,7 +37,10 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+      # npm trusted publishing (OIDC, no token) needs npm >= 11.5.1. No registry-url above: the .npmrc
+      # it writes expects NODE_AUTH_TOKEN and gets in the way of OIDC.
+      - name: Update npm
+        run: npm install -g npm@11
 
       # The Gradle plugins ship inside the npm tarball as a file Maven repo (gradle/maven).
       - name: Setup Java
@@ -72,7 +75,6 @@ jobs:
             || { echo "::error::gradle/maven is missing from the tarball"; exit 1; }
           rm pack.json
 
+      # Trusted publisher on npmjs.com: GitHub Actions, jordond/kit, release.yml. Provenance is automatic.
       - name: Publish
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
