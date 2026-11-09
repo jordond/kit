@@ -167,7 +167,9 @@ describe('init', () => {
       'skip mise.toml',
       'skip lefthook.yml',
       'cmd wrangler types (api)',
+      'cmd bundle install (kit fastlane)',
     ])
+    expect(plan[5]).toMatchObject({ cmd: ['bundle', 'install'], cwd: '.' })
     expect(plan[4]).toMatchObject({ cmd: ['pnpm', 'exec', 'wrangler', 'types'], cwd: 'apps/api' })
     expect(fx.calls()).toEqual([])
     expect(existsSync(join(fx.dir, '.env'))).toBe(false)
@@ -176,7 +178,7 @@ describe('init', () => {
   test('creates .env, installs, runs wrangler types; no scaffolds without a terminal', async () => {
     const r = await fx.kit(['init'])
     expect(r.code).toBe(0)
-    expect(summary()).toEqual(['. pnpm install', './apps/api pnpm exec wrangler types'])
+    expect(summary()).toEqual(['. pnpm install', './apps/api pnpm exec wrangler types', '. bundle install'])
     expect(readFileSync(join(fx.dir, '.env'), 'utf8')).toBe(
       readFileSync(join(fx.dir, '.env.example'), 'utf8'),
     )
@@ -201,7 +203,7 @@ describe('init', () => {
     expect(readFileSync(join(fx.dir, 'mise.toml'), 'utf8')).toBe('[tools]\n')
   })
 
-  test('gradle.init and bundle install run from the Gradle root; --js-only skips them', async () => {
+  test("gradle.init runs from the Gradle root, then kit's fastlane bundle; --js-only skips them", async () => {
     const cfg = join(fx.dir, 'kit.config.ts')
     writeFileSync(
       cfg,
@@ -217,13 +219,13 @@ describe('init', () => {
       '. pnpm install',
       './apps/api pnpm exec wrangler types',
       './apps/client fake-gradlew --console=plain -q :shared:dependencies',
-      './apps/client bundle install',
+      '. bundle install',
     ])
     const js = await fx.kit(['init', '--js-only', '--dry-run', '--json'], { env: { ANDROID_HOME: '/sdk' } })
     const plan = JSON.parse(js.stdout).plan as { kind: string; title: string; reason?: string }[]
     expect(plan.slice(-2)).toEqual([
       { kind: 'skip', title: 'gradle :shared:dependencies', reason: '--js-only' },
-      { kind: 'skip', title: 'bundle install (apps/client)', reason: '--js-only' },
+      { kind: 'skip', title: 'bundle install (kit fastlane)', reason: '--js-only' },
     ])
   })
 
@@ -243,7 +245,7 @@ describe('init', () => {
     fx.fail('pnpm')
     const r = await fx.kit(['init'])
     expect(r.code).toBe(1)
-    expect(summary()).toHaveLength(2)
+    expect(summary()).toHaveLength(3)
     expect(r.stderr).toContain('init failed: pnpm install, wrangler types (api)')
   })
 

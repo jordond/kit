@@ -99,9 +99,10 @@ describe('planInit native steps', () => {
       },
       {
         kind: 'cmd',
-        title: 'bundle install (apps/client)',
+        title: 'bundle install (kit fastlane)',
         cmd: ['bundle', 'install'],
-        cwd: '/r/apps/client',
+        cwd: '/r',
+        env: {},
       },
     ])
   })
@@ -111,13 +112,13 @@ describe('planInit native steps', () => {
       nativeOf(over).map((a) => `${a.title}: ${a.kind === 'skip' ? a.reason : 'run'}`)
     expect(reasons({ which: () => false })).toEqual([
       'gradle :shared:dependencies: no java on PATH; install a JDK',
-      'bundle install (apps/client): no bundler on PATH; gem install bundler',
+      'bundle install (kit fastlane): no bundler on PATH; gem install bundler',
       'Xcode: no xcodebuild on PATH; install Xcode for iOS builds',
     ])
     expect(reasons({ androidSdk: false })[0]).toContain('no Android SDK; set ANDROID_HOME')
     expect(reasons({ jsOnly: true })).toEqual([
       'gradle :shared:dependencies: --js-only',
-      'bundle install (apps/client): --js-only',
+      'bundle install (kit fastlane): --js-only',
     ])
   })
 
@@ -126,8 +127,10 @@ describe('planInit native steps', () => {
       'bundle install',
     )
     expect(nativeOf({ config: { ...native, gradle: { root: 'apps/client' } } })[0]?.title).toBe(
-      'bundle install (apps/client)',
+      'bundle install (kit fastlane)',
     )
+    const noRelease = { ...native, gradle: { root: 'apps/client' }, release: undefined }
+    expect(nativeOf({ config: noRelease })[0]?.title).toBe('bundle install (apps/client)')
   })
 })
 

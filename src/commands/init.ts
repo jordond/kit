@@ -36,6 +36,8 @@ export interface InitState {
   exec: (cwd: string, bin: string, ...args: string[]) => string[]
   /** Whether a tool is on PATH. Default: nothing is. */
   which?: (bin: string) => boolean
+  /** Bundler env for kit's fastlane Gemfile. */
+  bundleEnv?: () => Record<string, string>
   /** ANDROID_HOME / ANDROID_SDK_ROOT set, or sdk.dir in `<gradle root>/local.properties`. */
   androidSdk?: boolean
   platform?: NodeJS.Platform
@@ -112,13 +114,26 @@ function planNative(s: InitState): InitAction[] {
       plan.push({ kind: 'cmd', title, cmd, cwd: join(s.root, gradle.root) })
     }
   }
-  const gemDir = [gradle?.root, '.'].find((d) => d !== undefined && s.exists(join(d, 'Gemfile')))
+  // Mobile releases use kit's own Gemfile (D7); otherwise install the app's Gemfile if it has one.
+  const kitBundle = !!(s.config?.release?.ios || s.config?.release?.android)
+  const gemDir = kitBundle
+    ? '.'
+    : [gradle?.root, '.'].find((d) => d !== undefined && s.exists(join(d, 'Gemfile')))
   if (gemDir !== undefined) {
-    const title = `bundle install${gemDir === '.' ? '' : ` (${gemDir})`}`
+    const title = kitBundle
+      ? 'bundle install (kit fastlane)'
+      : `bundle install${gemDir === '.' ? '' : ` (${gemDir})`}`
     if (s.jsOnly) plan.push({ kind: 'skip', title, reason: '--js-only' })
     else if (!which('bundle'))
       plan.push({ kind: 'skip', title, reason: 'no bundler on PATH; gem install bundler' })
-    else plan.push({ kind: 'cmd', title, cmd: ['bundle', 'install'], cwd: join(s.root, gemDir) })
+    else
+      plan.push({
+        kind: 'cmd',
+        title,
+        cmd: ['bundle', 'install'],
+        cwd: join(s.root, gemDir),
+        ...(kitBundle ? { env: s.bundleEnv?.() ?? {} } : {}),
+      })
   }
   if (s.platform === 'darwin' && s.config?.release?.ios && !s.jsOnly && !which('xcodebuild')) {
     plan.push({ kind: 'skip', title: 'Xcode', reason: 'no xcodebuild on PATH; install Xcode for iOS builds' })
@@ -188,6 +203,7 @@ export default defineCommand({
       }
     }
 
+    const { bundleEnv } = await import('../lib/fastlane')
     const plan = planInit({
       root,
       config: ctx.config,
@@ -200,6 +216,7 @@ export default defineCommand({
       which: (bin) => Bun.which(bin) !== null,
       androidSdk: hasAndroidSdk(root, ctx.config),
       platform: process.platform,
+      bundleEnv,
       jsOnly: ctx.args['js-only'] === true,
     })
 

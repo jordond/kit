@@ -59,15 +59,21 @@ function runReportDir(): string {
   return dir
 }
 
+/** Bundler env for kit's Gemfile: frozen, installed outside node_modules (D7). */
+export function bundleEnv(): Record<string, string> {
+  return {
+    BUNDLE_GEMFILE: join(kitDir(), 'fastlane', 'Gemfile'),
+    BUNDLE_FROZEN: 'true',
+    BUNDLE_PATH: bundlePath(),
+    BUNDLE_APP_CONFIG: join(dirname(bundlePath()), 'bundle-config'),
+  }
+}
+
 /** The environment every fastlane run gets (D7 + S4). `appRoot` is the dir holding `fastlane/`. */
 export function fastlaneEnv(appRoot: string): Record<string, string> {
   const kit = kitDir()
-  const cache = dirname(bundlePath())
   return {
-    BUNDLE_GEMFILE: join(kit, 'fastlane', 'Gemfile'),
-    BUNDLE_FROZEN: 'true',
-    BUNDLE_PATH: bundlePath(),
-    BUNDLE_APP_CONFIG: join(cache, 'bundle-config'),
+    ...bundleEnv(),
     KIT_FASTFILE: join(kit, 'fastlane', 'Fastfile'),
     KIT_APP_ROOT: appRoot,
     FASTLANE_SKIP_DOCS: '1',
