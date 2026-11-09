@@ -86,7 +86,19 @@ export const configSchema = z
     cloudflare: z
       .object({
         accountId: z.string().optional(),
-        d1: z.record(z.string(), z.object({ name: z.string(), target: z.string() }).strict()).optional(),
+        d1: z
+          .record(
+            z.string(),
+            z
+              .object({
+                name: z.string(),
+                target: z.string(),
+                /** Used when `kit db` gets no --db and several are configured. */
+                default: z.boolean().optional(),
+              })
+              .strict(),
+          )
+          .optional(),
       })
       .strict()
       .optional(),
@@ -143,6 +155,14 @@ export const configSchema = z
           message: `Unknown target "${d.target}"`,
         })
       }
+    }
+    const defaults = Object.entries(c.cloudflare?.d1 ?? {}).filter(([, d]) => d.default)
+    if (defaults.length > 1) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['cloudflare', 'd1'],
+        message: `Only one database can be the default (${defaults.map(([k]) => k).join(', ')})`,
+      })
     }
     if (c.targets.workspace) {
       ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })

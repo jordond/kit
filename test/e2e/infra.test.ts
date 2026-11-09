@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -222,6 +222,14 @@ describe('db', () => {
     expect(fx.calls()).toEqual([])
     expect((await fx.kit(['db', 'migrate', '--db', 'analytics', '--remote', '--yes'])).code).toBe(0)
     expect(summary()).toEqual(['./apps/analytics wrangler d1 migrations apply infra-analytics --remote'])
+  })
+
+  test('a default: true database is used without --db', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(cfg, read('kit.config.ts').replace("target: 'edge' }", "target: 'edge', default: true }"))
+    const r = await fx.kit(['db', 'migrate'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual(['./apps/edge wrangler d1 migrations apply infra-db --local'])
   })
 
   test('list is read-only: --remote needs no confirmation', async () => {
