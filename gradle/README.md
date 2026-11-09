@@ -50,18 +50,26 @@ Optional: `app-name` (default namespace `<app-name>.<module path>`, applicationI
 | `targets { android(); ios(); jvm(); js() }`             | kmp.library         | none: declare them                                       |
 | `ios { frameworkName = "Shared"; isStatic = true }`     | kmp.library         | module name capitalised, static                          |
 | `explicitApi = true`                                    | kmp.library         | `false`                                                  |
-| `optIns += "…"`                                         | kmp.library         | kit's shared set                                         |
+| `optIns.add("…")`                                        | kmp.library         | kit's shared set                                         |
 | `resources = false`                                     | compose             | `true` (adds components-resources)                       |
 | `hotReload = true`                                      | compose             | `false`; applies `org.jetbrains.compose.hot-reload`      |
 | `applicationId`, `namespace`                            | android.application | namespace = `app-name`; applicationId = namespace        |
 | `desugaring = true`                                     | android.application | `false`                                                  |
-| `packagingExcludes += "…"`                              | android.application | `/META-INF/{AL2.0,LGPL2.1}` only                          |
+| `packagingExcludes.add("…")`                             | android.application | `/META-INF/{AL2.0,LGPL2.1}` only                          |
 | `producer = ":android:baseline"`                        | android.baseline    | none                                                     |
 | `baselineContract.from(…)`, `baselineStamp = file(…)`   | android.baseline    | empty; `<producer dir>/baseline-profile.stamp`           |
 | `device = "Pixel 6"`, `deviceApi = 34`                  | android.baseline    | Pixel 6, API 34, AOSP image (`pixel6Api34`)              |
-| `ktlintVersion`, `excludes += "…"`                      | lint (root)         | catalog `ktlint`, else 1.8.0; none                       |
+| `ktlintVersion`, `excludes.add("…")`                     | lint (root)         | catalog `ktlint`, else 1.8.0; none                       |
 | `lintRootScripts = true`                                | lint (root)         | `false`: subprojects only                                |
 | `jvmTarget = 25`, `application("pkg.MainKt")`           | jvm.app             | catalog `app-jvm-target`; library                        |
+
+List options are Gradle `ListProperty`s: use `.add(…)` / `.addAll(…)` (`+=` does not compile in the Kotlin DSL).
+
+**Android targets in `kmp.library`:** keep `alias(libs.plugins.android.kotlin.multiplatform.library)` in the
+module's `plugins { }`. kit's `targets { android() }` configures it (namespace, SDKs, JVM target), but a
+plugin applied from the script body comes too late for Gradle to generate the Kotlin DSL accessors
+(`kotlin { android { withHostTest { } } }`, `androidRuntimeClasspath`). Without the alias, `android()`
+applies it itself, which is fine for modules that don't configure the target further.
 
 Settings: `kit { extraRepos { ivy(…) { … } } }` appends to `dependencyResolutionManagement`.
 

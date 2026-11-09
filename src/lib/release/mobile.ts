@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import pc from 'picocolors'
 import type { Flags, KitContext } from '../../cli/command'
 import type { KitConfig, Track } from '../../config/schema'
@@ -8,7 +8,7 @@ import { interrupted, onCleanup } from '../cleanup'
 import { ExitCode, KitError } from '../errors'
 import { appFastlaneDir, runLane } from '../fastlane'
 import { currentBranch, dirtyFiles, push, tag } from '../git'
-import { emitJson } from '../log'
+import { emitJson, withStdoutOnStderr } from '../log'
 import { confirm, text } from '../prompt'
 import { commandStep, runSteps, type Step, type StepResult, summarize } from '../steps'
 import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
@@ -264,7 +264,9 @@ export async function releaseMobile(
     )
   }
   if (pre.length) {
-    const results = await runSteps([{ title: 'preflight', steps: pre }], flags, { bail: true })
+    const results = await withStdoutOnStderr(() =>
+      runSteps([{ title: 'preflight', steps: pre }], flags, { bail: true }),
+    )
     if (failed(results)) {
       const code = summarize('preflight', results, started, `Pass --build/--code to skip the store lookup`)
       if (flags.json) emitJson({ platform, track, ok: false, stage: 'preflight', results })
@@ -371,8 +373,11 @@ export async function releaseMobile(
           ...internalFlag,
         }),
         (o) => {
-          if (o.ARTIFACT_AAB) artifacts.aab = o.ARTIFACT_AAB
-          if (o.ARTIFACT_APK) artifacts.apk = o.ARTIFACT_APK
+          // Gradle writes into the module's build/outputs; KIT_OUTPUT_DIR gets a copy (CI uploads it).
+          const keep = (p: string) =>
+            process.env.KIT_OUTPUT_DIR ? (copyFileSync(p, join(out, basename(p))), join(out, basename(p))) : p
+          if (o.ARTIFACT_AAB) artifacts.aab = keep(o.ARTIFACT_AAB)
+          if (o.ARTIFACT_APK) artifacts.apk = keep(o.ARTIFACT_APK)
         },
       ),
     )

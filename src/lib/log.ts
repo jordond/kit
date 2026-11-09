@@ -27,3 +27,21 @@ export function emitJson(value: unknown): void {
   emitted = true
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
+
+/**
+ * Run `fn` with stdout pointed at stderr: repo code (preflight modules) may `console.log`, and under
+ * --json stdout must hold only the one document.
+ */
+export async function withStdoutOnStderr<T>(fn: () => Promise<T>): Promise<T> {
+  const saved = { log: console.log, info: console.info, debug: console.debug, write: process.stdout.write }
+  console.log = console.info = console.debug = (...a: unknown[]) => console.error(...a)
+  process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write
+  try {
+    return await fn()
+  } finally {
+    console.log = saved.log
+    console.info = saved.info
+    console.debug = saved.debug
+    process.stdout.write = saved.write
+  }
+}
