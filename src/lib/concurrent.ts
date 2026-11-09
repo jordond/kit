@@ -90,5 +90,15 @@ export async function runConcurrent(
     return { name: lane.name, code: stopping || interrupted() ? 0 : code }
   }
 
-  return await Promise.all(lanes.map(runLane))
+  const safeLane = async (lane: Lane, i: number): Promise<LaneResult> => {
+    try {
+      return await runLane(lane, i)
+    } catch (e) {
+      // A spawn that throws (bad cwd, missing binary) must still stop the other servers.
+      write(`${lane.name} ${pc.red(e instanceof Error ? e.message : String(e))}\n`)
+      stopOthers()
+      return { name: lane.name, code: 1 }
+    }
+  }
+  return await Promise.all(lanes.map(safeLane))
 }

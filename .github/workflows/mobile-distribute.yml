@@ -184,12 +184,13 @@ jobs:
           PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
-          args=(release "$PLATFORM" --track "$TRACK" --yes)
+          # `--flag=value`: a value starting with "-" (kit's own "- subject" notes) is not read as a flag.
+          args=(release "$PLATFORM" "--track=$TRACK" --yes)
           if [ -n "$BUILD" ]; then
-            if [ "$PLATFORM" = ios ]; then args+=(--build "$BUILD"); else args+=(--code "$BUILD"); fi
+            if [ "$PLATFORM" = ios ]; then args+=("--build=$BUILD"); else args+=("--code=$BUILD"); fi
           fi
-          [ -n "$NOTES" ] && args+=(--notes "$NOTES")
-          [ -n "$ROLLOUT" ] && args+=(--rollout "$ROLLOUT")
+          [ -n "$NOTES" ] && args+=("--notes=$NOTES")
+          [ -n "$ROLLOUT" ] && args+=("--rollout=$ROLLOUT")
           [ "$DRAFT" = true ] && args+=(--draft)
-          [ -n "$SKIP" ] && args+=(--skip "$SKIP")
+          [ -n "$SKIP" ] && args+=("--skip=$SKIP")
           node_modules/.bin/kit "${args[@]}"

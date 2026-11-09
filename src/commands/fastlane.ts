@@ -13,11 +13,14 @@ export default defineCommand({
     const { requireProject } = await import('../cli/command')
     const { appFastlaneDir, ensureBundle, fastlaneEnv } = await import('../lib/fastlane')
     const { optionalLaneCreds } = await import('../lib/release/creds')
+    const { laneConfigEnv } = await import('../lib/release/mobile')
     const { run } = await import('../lib/proc')
     const { root, config } = requireProject(ctx)
     const appRoot = appFastlaneDir(root, config)
     await ensureBundle(appRoot, (l) => process.stderr.write(`${l}\n`))
-    const env = { ...fastlaneEnv(appRoot), ...optionalLaneCreds() }
+    // Same inputs `kit release` passes; stdio stays inherited so match/fastlane prompts work, which
+    // means output here is not redacted.
+    const env = { ...fastlaneEnv(appRoot), ...laneConfigEnv(root, config), ...optionalLaneCreds() }
     process.exitCode = await run(['bundle', 'exec', 'fastlane', ...ctx.rest], { cwd: appRoot, env })
   },
 })

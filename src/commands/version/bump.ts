@@ -64,6 +64,12 @@ export default defineCommand({
 
     await checkClean(root)
     const base = await checkBranch(root, config)
+    // Ask before touching anything: a refusal (no terminal) must not leave a commit behind that a
+    // re-run would bump again.
+    const pushIt =
+      !ctx.args['no-push'] &&
+      (ctx.args.pr ||
+        (await confirm(ctx.flags, `Commit and push the bump to origin/${base}?`, { initial: true })))
     const git = async (...args: string[]) => {
       const r = await runPiped(['git', ...args], { cwd: root })
       if (r.code !== 0) throw new ProcError(['git', ...args], r.code, `${r.stdout}${r.stderr}`)
@@ -84,13 +90,9 @@ export default defineCommand({
     for (const c of changes) ctx.log.success(`${c.name} ${c.from} → ${c.to}`)
     ctx.log.dim(`  committed ${sha} on ${branch}: ${subject}`)
 
-    if (ctx.args['no-push']) {
+    if (!pushIt) {
       json({ sha, branch, pushed: false })
-      return
-    }
-    if (!ctx.args.pr && !(await confirm(ctx.flags, `Push ${branch} to origin?`, { initial: true }))) {
-      json({ sha, branch, pushed: false })
-      ctx.log.dim(`  not pushed; run \`git push origin ${branch}\``)
+      if (!ctx.args['no-push']) ctx.log.dim(`  not pushed; run \`git push origin ${branch}\``)
       return
     }
     try {

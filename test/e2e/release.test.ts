@@ -43,7 +43,9 @@ function lanes(): LaneCall[] {
 }
 
 const run = (args: string[], env: Record<string, string> = {}) =>
-  f.kit(args, { env: { ...SECRETS, KIT_TEST_LOG: join(f.dir, '.gradle.log'), ...env } })
+  f.kit(args, {
+    env: { ...SECRETS, GITHUB_ACTIONS: '', KIT_TEST_LOG: join(f.dir, '.gradle.log'), ...env },
+  })
 
 beforeEach(() => {
   f = fixture('release', ['bundle'])
@@ -124,8 +126,13 @@ describe('kit release android', () => {
     expect(sh(['git', 'status', '--porcelain'])).toBe('')
   })
 
-  test('prod in CI: rollout from flag, gate runs, no prompt', async () => {
-    const r = await run(['release', 'android', '-t', 'prod', '--rollout', '0.25', '--code', '100', '--json'])
+  test('prod on GitHub Actions: rollout from flag, gate runs, no prompt', async () => {
+    const r = await run(
+      ['release', 'android', '-t', 'prod', '--rollout', '0.25', '--code', '100', '--json'],
+      {
+        GITHUB_ACTIONS: 'true',
+      },
+    )
     expect(r.code).toBe(0)
     const calls = lanes()
     expect(calls.map((c) => c.argv.slice(2).join(' '))).toEqual(['android build', 'android upload_play'])
@@ -137,6 +144,13 @@ describe('kit release android', () => {
     expect(readFileSync(join(f.dir, '.gradle.log'), 'utf8')).toContain(
       'gradlew :android:verifyBaselineProfile',
     )
+  })
+
+  test('prod with CI=true but not on GitHub Actions still needs a typed "prod", --yes or not', async () => {
+    const r = await run(['release', 'android', '-t', 'prod', '--code', '100', '--yes'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('Production releases need a terminal')
+    expect(lanes()).toEqual([])
   })
 
   test('alpha needs --yes off a terminal', async () => {
@@ -265,6 +279,14 @@ describe('kit version', () => {
     expect(sh(['git', 'rev-parse', 'origin/main'])).toBe(sh(['git', 'rev-parse', 'HEAD']))
   })
 
+  test('bump without --yes off a terminal refuses before writing anything', async () => {
+    const head = sh(['git', 'rev-parse', 'HEAD'])
+    const r = await run(['version', 'bump', 'patch'])
+    expect(r.code).toBe(2)
+    expect(sh(['git', 'rev-parse', 'HEAD'])).toBe(head)
+    expect(sh(['git', 'status', '--porcelain'])).toBe('')
+  })
+
   test('bump patch --platform api --no-push keeps single quotes', async () => {
     const r = await run(['version', 'bump', 'patch', '--platform', 'api', '--no-push'])
     expect(r.code).toBe(0)
@@ -338,4 +360,28 @@ test('--json failures still write one document', async () => {
   } finally {
     f2.cleanup()
   }
+})
+
+describe.if(process.platform === 'darwin')('kit release ios post steps', () => {
+  test('a failed dSYM upload warns; the release is tagged and exits 0', async () => {
+    f.script(
+      'bundle',
+      `case "$*" in
+  *next_build*) echo KIT_NEXT_BUILD=9 ;;
+  *"ios build"*) echo KIT_ARTIFACT_IPA=/tmp/App.ipa; echo KIT_ARTIFACT_DSYM=/tmp/App.dSYM.zip ;;
+  *upload_symbols*) echo "sentry down"; exit 1 ;;
+esac
+exit 0`,
+    )
+    const r = await run(['release', 'ios', '--track', 'internal', '--json'])
+    expect(r.code).toBe(0)
+    const doc = JSON.parse(r.stdout)
+    expect(doc).toMatchObject({
+      uploaded: true,
+      tag: 'ios/v1.4.0+9',
+      post: [{ title: 'upload dSYMs', ok: false }],
+    })
+    expect(r.stderr).toContain('upload dSYMs failed after the upload')
+    expect(sh(['git', 'tag'])).toBe('ios/v1.4.0+9')
+  })
 })

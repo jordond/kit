@@ -14,7 +14,7 @@ export default defineCommand({
   async run(ctx) {
     const { requireProject } = await import('../../cli/command')
     const { ExitCode, KitError } = await import('../../lib/errors')
-    const { appleCreds } = await import('../../lib/release/creds')
+    const { appleCreds, onGitHubActions } = await import('../../lib/release/creds')
     const { appFastlaneDir, runLane } = await import('../../lib/fastlane')
     const { confirm } = await import('../../lib/prompt')
     const { emitJson } = await import('../../lib/log')
@@ -40,7 +40,7 @@ export default defineCommand({
     }
     const appRoot = appFastlaneDir(root, config)
     const env = {
-      ...appleCreds({ match: true, ci: ctx.flags.ci }).env,
+      ...appleCreds({ match: true, ci: onGitHubActions() }).env,
       KIT_IOS_BUNDLE_IDS: ios.bundleIds.join(','),
       KIT_IOS_BUNDLE_ID: ios.bundleIds[0]!,
       ...(ios.teamId ? { KIT_IOS_TEAM_ID: ios.teamId } : {}),

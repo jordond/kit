@@ -1,16 +1,17 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import pc from 'picocolors'
 import type { Flags, KitContext } from '../../cli/command'
 import type { KitConfig, Track } from '../../config/schema'
+import { interrupted, onCleanup } from '../cleanup'
 import { ExitCode, KitError } from '../errors'
 import { appFastlaneDir, runLane } from '../fastlane'
 import { currentBranch, dirtyFiles, push, tag } from '../git'
 import { emitJson } from '../log'
 import { confirm, text } from '../prompt'
 import { commandStep, runSteps, type Step, type StepResult, summarize } from '../steps'
-import { appleCreds, keystoreCreds, playCreds } from './creds'
+import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
 import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
 import { loadPreflights } from './preflight'
 import { readVersion } from './version'
@@ -83,12 +84,34 @@ export async function checkClean(root: string): Promise<void> {
 
 const abs = (root: string, p: string) => (isAbsolute(p) ? p : resolve(root, p))
 
+/** KIT_OUTPUT_DIR keeps the artifacts; otherwise they go in a temp dir removed on exit (§9.3). */
 function outputDir(): string {
   if (process.env.KIT_OUTPUT_DIR) {
     mkdirSync(process.env.KIT_OUTPUT_DIR, { recursive: true })
     return process.env.KIT_OUTPUT_DIR
   }
-  return mkdtempSync(join(tmpdir(), 'kit-release-'))
+  const dir = mkdtempSync(join(tmpdir(), 'kit-release-'))
+  onCleanup(() => rmSync(dir, { recursive: true, force: true }))
+  return dir
+}
+
+/** Config-derived lane inputs (bundle ids, team, package, Gradle root): shared with `kit fastlane`. */
+export function laneConfigEnv(root: string, config: KitConfig): Record<string, string> {
+  const ios = config.release?.ios
+  const android = config.release?.android
+  return {
+    ...(ios
+      ? {
+          KIT_IOS_BUNDLE_IDS: ios.bundleIds.join(','),
+          KIT_IOS_BUNDLE_ID: ios.bundleIds[0]!,
+          KIT_IOS_PROJECT: abs(root, ios.project),
+          KIT_IOS_SCHEME: ios.scheme,
+          ...(ios.teamId ? { KIT_IOS_TEAM_ID: ios.teamId } : {}),
+        }
+      : {}),
+    ...(android ? { KIT_ANDROID_PACKAGE: android.packageName, KIT_ANDROID_MODULE: android.module } : {}),
+    ...(config.gradle ? { KIT_GRADLE_ROOT: abs(root, config.gradle.root) } : {}),
+  }
 }
 
 function laneStep(
@@ -120,8 +143,9 @@ function failed(results: StepResult[]): boolean {
 async function confirmTrack(flags: Flags, track: Track, summary: string): Promise<boolean> {
   if (flags.dryRun || track === 'internal') return true
   if (track !== 'prod') return confirm(flags, `Release ${summary}?`)
-  // prod: CI runs in the `production` environment, which needs reviewer approval (§9.6).
-  if (flags.ci) return true
+  // prod: GitHub Actions runs it in the `production` environment, which needs reviewer approval (§9.6).
+  // Only GITHUB_ACTIONS counts: CI=true can come from a shell or the root .env.
+  if (onGitHubActions()) return true
   const typed = await text({ ...flags, yes: false }, `Type "prod" to release ${summary} to production`, {
     hint: 'Production releases need a terminal (or CI with the production environment)',
   })
@@ -180,23 +204,10 @@ export async function releaseMobile(
   // ---- secrets (before any lane: next_build needs the ASC key)
   const secrets: Record<string, string> =
     platform === 'ios'
-      ? appleCreds({ match: true, ci: flags.ci }).env
+      ? appleCreds({ match: true, ci: onGitHubActions() }).env
       : { ...playCreds(), ...keystoreCreds() }
 
-  const common: Record<string, string> =
-    platform === 'ios'
-      ? {
-          ...secrets,
-          KIT_IOS_BUNDLE_IDS: ios!.bundleIds.join(','),
-          KIT_IOS_BUNDLE_ID: ios!.bundleIds[0]!,
-          ...(ios!.teamId ? { KIT_IOS_TEAM_ID: ios!.teamId } : {}),
-        }
-      : {
-          ...secrets,
-          KIT_ANDROID_PACKAGE: android!.packageName,
-          KIT_ANDROID_MODULE: android!.module,
-          KIT_GRADLE_ROOT: abs(root, config.gradle!.root),
-        }
+  const common: Record<string, string> = { ...secrets, ...laneConfigEnv(root, config) }
 
   // ---- preflight + resolve
   const preflights = (await loadPreflights(root, config)).filter(
@@ -278,6 +289,8 @@ export async function releaseMobile(
   const out = outputDir()
   const artifacts: Record<string, string> = {}
   const steps: Step[] = []
+  /** After the tag: a failure here warns but doesn't fail a release the store already has. */
+  const post: Step[] = []
   if (platform === 'ios') {
     steps.push(
       laneStep(
@@ -316,7 +329,7 @@ export async function releaseMobile(
         ),
       )
       if (ios!.sentry) {
-        steps.push(
+        post.push(
           laneStep('upload dSYMs', appRoot, 'ios', 'upload_symbols', () => ({
             ...common,
             KIT_IOS_DSYM: required(artifacts.dsym, 'dSYM'),
@@ -369,7 +382,8 @@ export async function releaseMobile(
     artifacts,
     uploaded: false,
   }
-  if (failed(results)) {
+  // Steps skipped by an interrupt record no result, so count them too.
+  if (failed(results) || results.length !== steps.length || interrupted()) {
     if (flags.json) emitJson({ ...result, ok: false, results })
     process.exitCode = summarize(`release ${platform}`, results, started)
     return
@@ -391,10 +405,22 @@ export async function releaseMobile(
     }
   }
 
-  if (flags.json) emitJson({ ...result, ok: true })
+  let postResults: StepResult[] = []
+  if (post.length) {
+    postResults = await runSteps([{ title: 'post', steps: post }], flags)
+    for (const p of postResults.filter((x) => !x.ok)) {
+      ctx.log.warn(`${p.title} failed after the upload (the release stands): ${p.error ?? ''}`)
+    }
+  }
+
+  if (flags.json)
+    emitJson({ ...result, ok: true, post: postResults.map((p) => ({ title: p.title, ok: p.ok })) })
   summarize(`release ${platform}`, results, started)
   if (!flags.json) {
     for (const [k, v] of Object.entries(artifacts)) ctx.log.dim(`  ${k}: ${v}`)
+    if (!process.env.KIT_OUTPUT_DIR && Object.keys(artifacts).length) {
+      ctx.log.dim('  (temp artifacts are removed on exit; set KIT_OUTPUT_DIR to keep them)')
+    }
     if (result.tag) ctx.log.dim(`  tag: ${result.tag}${result.tagPushed ? '' : ' (not pushed)'}`)
   }
 }

@@ -49,7 +49,26 @@ export interface AppleCreds {
 }
 
 /** ASC API key (+ match when `match` is set). `MATCH_GIT_BASIC_AUTHORIZATION` is required in CI only. */
+/** True only on GitHub Actions: `CI=true` alone (a shell or .env) proves nothing about the runner. */
+export const onGitHubActions = (): boolean => process.env.GITHUB_ACTIONS === 'true'
+
+/** Values that reach lanes through the inherited env; registered so output never shows them. */
+export function registerAmbientSecrets(): void {
+  for (const n of [
+    'SENTRY_AUTH_TOKEN',
+    'MATCH_GIT_URL',
+    'MATCH_PASSWORD',
+    'MATCH_GIT_BASIC_AUTHORIZATION',
+    'ASC_KEY_ID',
+    'ASC_ISSUER_ID',
+    'ANDROID_KEYSTORE_PASSWORD',
+  ]) {
+    registerSecret(process.env[n])
+  }
+}
+
 export function appleCreds(opts: { match: boolean; ci: boolean }): AppleCreds {
+  registerAmbientSecrets()
   const names = ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_P8_BASE64']
   if (opts.match) names.push('MATCH_PASSWORD', 'MATCH_GIT_URL')
   if (opts.match && opts.ci) names.push('MATCH_GIT_BASIC_AUTHORIZATION')
@@ -77,6 +96,7 @@ export function appleCreds(opts: { match: boolean; ci: boolean }): AppleCreds {
 
 /** Play service account JSON → KIT_PLAY_JSON_KEY. */
 export function playCreds(): Record<string, string> {
+  registerAmbientSecrets()
   const v = need(['PLAY_SERVICE_ACCOUNT_BASE64'])
   const path = decodeSecretFile('play.json', v.PLAY_SERVICE_ACCOUNT_BASE64!)
   if (!/"type"\s*:\s*"service_account"/.test(readFileSync(path, 'utf8'))) {
@@ -112,9 +132,7 @@ export function keystoreCreds(): Record<string, string> {
  */
 export function optionalLaneCreds(): Record<string, string> {
   const env: Record<string, string> = {}
-  for (const n of ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'MATCH_PASSWORD', 'MATCH_GIT_BASIC_AUTHORIZATION']) {
-    registerSecret(process.env[n])
-  }
+  registerAmbientSecrets()
   if (process.env.ASC_KEY_P8_BASE64?.trim()) {
     registerSecret(process.env.ASC_KEY_P8_BASE64)
     env.KIT_ASC_KEY_PATH = decodeSecretFile('asc-key.p8', process.env.ASC_KEY_P8_BASE64)
