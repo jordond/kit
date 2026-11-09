@@ -69,8 +69,10 @@ internal object KmpSupport {
                 )
         val catalog = KitCatalog(project, PLUGIN)
         if (target.namespace == null) {
-            val app = catalog.require(KitCatalog.APP_NAME, "the Android namespace is <app-name>.<module>")
-            target.namespace = "$app.${project.name.replace('-', '.')}"
+            val app = catalog.require(KitCatalog.APP_NAME, "the Android namespace is <app-name>.<module path>")
+            val namespace = KitNamespaces.forPath(app, project.path)
+            KitNamespaces.claim(project, namespace, PLUGIN)
+            target.namespace = namespace
         }
         target.compileSdk = catalog.requireInt(KitCatalog.SDK_COMPILE, "Android compileSdk")
         target.minSdk = catalog.requireInt(KitCatalog.SDK_MIN, "Android minSdk")
