@@ -1,0 +1,6 @@
+{
+  // edge worker
+  "name": "edge",
+  "account_id": "0123456789abcdef0123456789abcdef",
+  "d1_databases": [{ "binding": "DB", "database_name": "infra-db" }]
+}
