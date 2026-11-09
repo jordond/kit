@@ -1,0 +1,21 @@
+# frozen_string_literal: true
+
+# kit's shared fastlane bundle. kit runs fastlane with
+#   BUNDLE_GEMFILE=<kit>/fastlane/Gemfile BUNDLE_FROZEN=true
+#   BUNDLE_PATH=~/.cache/kit/bundle BUNDLE_APP_CONFIG=~/.cache/kit/bundle-config
+# so apps carry no Gemfile, Pluginfile or Gemfile.lock of their own.
+#
+# Plugins are listed here directly (no Pluginfile). fastlane's PluginManager
+# reads the Gemfile named by BUNDLE_GEMFILE, finds the fastlane-plugin-* gems
+# and loads them, so it never offers to "attach" a Pluginfile.
+
+source "https://rubygems.org"
+
+# Bump deliberately: kit's Gemfile.lock is the single pin for every app.
+gem "fastlane", "~> 2.241.2"
+
+# dSYM upload (`ios upload_symbols`).
+gem "fastlane-plugin-sentry", "~> 2.8"
+
+# No firebase_app_distribution: internal Android builds go to Play internal
+# testing (PLAN §17 decision 2).

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+gradle/maven/
+.gradle/
+build/
+*.log
+.DS_Store
+
+# local-only: planning docs, agent handoffs, spike notes
+docs/
+spikes/

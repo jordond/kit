@@ -1,0 +1,39 @@
+#!/bin/sh
+# kit launcher. Hands off to the repo-pinned kit with exec, so only one Bun process starts.
+# 1. KIT_DEV=<kit checkout>  -> run that checkout's sources
+# 2. <root>/node_modules/@jordond/kit present (root = nearest dir with kit.config.ts) -> exec it
+# 3. otherwise run this copy (only init, doctor, help, completion are useful outside a repo)
+# Uses only shell builtins on the hot path (no dirname/readlink forks).
+
+if [ -n "$KIT_DEV" ]; then
+  exec bun --no-env-file "$KIT_DEV/src/cli.ts" "$@"
+fi
+
+dir=$PWD
+while :; do
+  if [ -f "$dir/kit.config.ts" ]; then
+    KIT_ROOT=$dir
+    export KIT_ROOT
+    if [ -f "$dir/node_modules/@jordond/kit/dist/cli.js" ]; then
+      exec bun --no-env-file "$dir/node_modules/@jordond/kit/dist/cli.js" "$@"
+    fi
+    break
+  fi
+  [ -z "$dir" ] || [ "$dir" = "/" ] && break
+  dir=${dir%/*}
+done
+
+# No repo-local install: run this copy. Resolve symlinks (global installs link bin/kit).
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=${self%/*}/$link ;;
+  esac
+done
+pkg=${self%/*}/..
+if [ -f "$pkg/dist/cli.js" ]; then
+  exec bun --no-env-file "$pkg/dist/cli.js" "$@"
+fi
+exec bun --no-env-file "$pkg/src/cli.ts" "$@"

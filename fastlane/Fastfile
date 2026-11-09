@@ -1,0 +1,413 @@
+# frozen_string_literal: true
+
+require "fileutils"
+require "tmpdir"
+
+# kit's shared Fastfile. Every app imports it with one line:
+#
+#   import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via `kit fastlane ...` or `kit release ...`") })
+#
+# and kit runs fastlane with BUNDLE_GEMFILE pointing at the Gemfile next to this
+# file. Lanes take every input from env vars and report results as `KIT_*=`
+# lines on stdout; kit reads only those lines (PLAN §9.4).
+#
+# Conventions:
+# - Values kit computes or materialises use KIT_* names. Secrets keep their
+#   canonical names (ASC_KEY_ID, ASC_ISSUER_ID, MATCH_PASSWORD, MATCH_GIT_URL,
+#   MATCH_GIT_BASIC_AUTHORIZATION, SENTRY_AUTH_TOKEN; PLAN §9.5). Secret files
+#   arrive as paths (KIT_ASC_KEY_PATH, KIT_PLAY_JSON_KEY), never as contents.
+# - Paths should be absolute. A relative path is resolved against KIT_APP_ROOT,
+#   else the directory holding the app's fastlane/ folder. Never against
+#   __dir__: that is kit's package directory, not the app.
+# - fastlane runs lanes with the working directory set to <app>/fastlane.
+# - Helpers are kit_-prefixed methods and there are no top-level constants, so
+#   an app Fastfile can define its own without clashing.
+# - Lane names avoid fastlane action names (`testflight`, `appstore`, `cert`):
+#   a lane that shadows an action makes every later call to it ambiguous.
+
+# ---------------------------------------------------------------- helpers ---
+
+def kit_env(name)
+  value = ENV[name].to_s.strip
+  UI.user_error!("#{name} is not set (kit passes it; run fastlane via kit)") if value.empty?
+  value
+end
+
+def kit_env_opt(name, default = nil)
+  value = ENV[name].to_s.strip
+  value.empty? ? default : value
+end
+
+def kit_flag?(name, default: false)
+  value = ENV[name].to_s.strip
+  return default if value.empty?
+
+  %w[1 true yes].include?(value.downcase)
+end
+
+def kit_list(name)
+  ENV[name].to_s.split(",").map(&:strip).reject(&:empty?)
+end
+
+def kit_app_root
+  kit_env_opt("KIT_APP_ROOT") ||
+    File.expand_path("..", FastlaneCore::FastlaneFolder.path || Dir.pwd)
+end
+
+def kit_path(name, required: true)
+  raw = required ? kit_env(name) : kit_env_opt(name)
+  raw && File.expand_path(raw, kit_app_root)
+end
+
+# The output protocol. kit parses `KIT_<KEY>=<value>` lines from stdout only.
+def kit_emit(key, value)
+  $stdout.puts("KIT_#{key}=#{value}")
+  $stdout.flush
+end
+
+def kit_skip_upload?(what, artifact)
+  return false unless kit_flag?("KIT_SKIP_UPLOAD")
+
+  UI.important("KIT_SKIP_UPLOAD=1: skipping #{what} of #{artifact}.")
+  true
+end
+
+def kit_require_file(name)
+  path = kit_path(name)
+  UI.user_error!("#{name} points at #{path}, which does not exist") unless File.exist?(path)
+  path
+end
+
+# ------------------------------------------------------------------- iOS ---
+
+# App Store Connect API key (.p8). match, the build-number lookups and every
+# upload authenticate with it: no Apple ID, no 2FA. kit decodes
+# ASC_KEY_P8_BASE64 to a 0600 temp file and passes its path.
+def kit_asc_api_key
+  app_store_connect_api_key(
+    key_id: kit_env("ASC_KEY_ID"),
+    issuer_id: kit_env("ASC_ISSUER_ID"),
+    key_filepath: kit_require_file("KIT_ASC_KEY_PATH")
+  )
+end
+
+# KIT_IOS_BUNDLE_IDS lists every signed target (app first, then extensions).
+# KIT_IOS_BUNDLE_ID defaults to the first of them.
+def kit_ios_bundle_ids
+  ids = kit_list("KIT_IOS_BUNDLE_IDS")
+  ids = [kit_env("KIT_IOS_BUNDLE_ID")] if ids.empty?
+  ids
+end
+
+def kit_ios_bundle_id
+  kit_env_opt("KIT_IOS_BUNDLE_ID") || kit_ios_bundle_ids.first
+end
+
+def kit_match(readonly:, api_key:)
+  params = {
+    type: "appstore",
+    storage_mode: "git",
+    git_url: kit_env("MATCH_GIT_URL"),
+    app_identifier: kit_ios_bundle_ids,
+    readonly: readonly,
+    api_key: api_key
+  }
+  team = kit_env_opt("KIT_IOS_TEAM_ID")
+  params[:team_id] = team if team
+  match(params)
+end
+
+def kit_ios_ipa
+  kit_require_file("KIT_IOS_IPA")
+end
+
+platform :ios do
+  desc "Print the next build number: max(TestFlight, App Store) + 1."
+  desc "In: KIT_IOS_BUNDLE_ID, ASC_KEY_ID, ASC_ISSUER_ID, KIT_ASC_KEY_PATH. Out: KIT_NEXT_BUILD=<n>."
+  lane :next_build do
+    api_key = kit_asc_api_key
+    bundle_id = kit_ios_bundle_id
+    tf = begin
+      latest_testflight_build_number(api_key: api_key, app_identifier: bundle_id, initial_build_number: 0)
+    rescue StandardError => e
+      UI.important("Could not fetch the TestFlight build number: #{e.message}")
+      0
+    end
+    as = begin
+      app_store_build_number(api_key: api_key, app_identifier: bundle_id, initial_build_number: 0, live: false)
+    rescue StandardError => e
+      UI.important("Could not fetch the App Store build number: #{e.message}")
+      0
+    end
+    latest = [tf.to_i, as.to_i].max
+    if latest.zero?
+      UI.user_error!("No build numbers in TestFlight or the App Store. Upload the first build with `kit release ios --build 1`.")
+    end
+    UI.message("Latest build numbers: TestFlight #{tf}, App Store #{as}")
+    kit_emit("NEXT_BUILD", latest + 1)
+  end
+
+  # Signing lives in the Xcode project (Release configuration, manual, match
+  # profiles). It must not be forced via xcargs: an xcarg applies to every target
+  # xcodebuild builds, including SPM resource bundles, which reject a profile.
+  # Version and build are safe as xcargs because the projects are
+  # build-settings driven (GENERATE_INFOPLIST_FILE = YES), so the tree stays
+  # clean.
+  desc "Sync signing with match (readonly), then build a signed App Store .ipa."
+  desc "In: KIT_IOS_PROJECT, KIT_IOS_SCHEME, KIT_IOS_BUNDLE_IDS, KIT_IOS_TEAM_ID, KIT_IOS_VERSION, " \
+       "KIT_IOS_BUILD, KIT_IOS_OUTPUT (.ipa path), MATCH_*, ASC_*. Out: KIT_ARTIFACT_IPA=, KIT_ARTIFACT_DSYM=."
+  lane :build do
+    setup_ci if ENV["CI"] == "true"
+    api_key = kit_asc_api_key
+    kit_match(readonly: true, api_key: api_key)
+
+    output = kit_path("KIT_IOS_OUTPUT")
+    ids = kit_ios_bundle_ids
+    ipa = build_app(
+      project: kit_require_file("KIT_IOS_PROJECT"),
+      scheme: kit_env("KIT_IOS_SCHEME"),
+      export_method: "app-store",
+      clean: true,
+      output_directory: File.dirname(output),
+      output_name: File.basename(output),
+      export_options: {
+        signingStyle: "manual",
+        provisioningProfiles: ids.to_h { |id| [id, "match AppStore #{id}"] }
+      },
+      xcargs: [
+        "MARKETING_VERSION=#{kit_env('KIT_IOS_VERSION')}",
+        "CURRENT_PROJECT_VERSION=#{kit_env('KIT_IOS_BUILD')}"
+      ].join(" ")
+    )
+
+    # gym zips the archive's dSYMs next to the ipa. Fall back to the archive's
+    # dSYMs folder, which sentry-cli also accepts.
+    dsym = lane_context[SharedValues::DSYM_OUTPUT_PATH]
+    archive = lane_context[SharedValues::XCODEBUILD_ARCHIVE]
+    dsym = File.join(archive, "dSYMs") if (dsym.nil? || !File.exist?(dsym)) && archive
+
+    kit_emit("ARTIFACT_IPA", ipa)
+    kit_emit("ARTIFACT_DSYM", dsym) if dsym
+  end
+
+  desc "Upload a built .ipa to TestFlight."
+  desc "In: KIT_IOS_IPA, KIT_IOS_BUNDLE_ID, KIT_TESTFLIGHT_GROUPS (comma list; empty = internal testers only), " \
+       "KIT_RELEASE_NOTES, ASC_*, KIT_SKIP_UPLOAD."
+  lane :upload_testflight do
+    ipa = kit_ios_ipa
+    next if kit_skip_upload?("the TestFlight upload", ipa)
+
+    groups = kit_list("KIT_TESTFLIGHT_GROUPS")
+    external = !groups.empty?
+    params = {
+      api_key: kit_asc_api_key,
+      app_identifier: kit_ios_bundle_id,
+      ipa: ipa,
+      distribute_external: external,
+      # pilot ignores distribute_external when it skips the wait: it returns as
+      # soon as the build appears, before processing ends, so the build never
+      # reaches the group. Only internal-only uploads can skip the wait.
+      skip_waiting_for_build_processing: !external,
+      changelog: kit_env_opt("KIT_RELEASE_NOTES", "")
+    }
+    params[:groups] = groups if external
+    upload_to_testflight(params)
+    UI.success("Uploaded to TestFlight (#{external ? "groups: #{groups.join(', ')}" : 'internal testers'}).")
+  end
+
+  desc "Upload a built .ipa to the App Store and submit it for review."
+  desc "In: KIT_IOS_IPA, KIT_IOS_BUNDLE_ID, KIT_RELEASE_NOTES (What's New, en-US), KIT_APPSTORE_PHASED (default 1), " \
+       "KIT_APPSTORE_SUBMIT (default 1), ASC_*, KIT_SKIP_UPLOAD."
+  lane :upload_appstore do
+    ipa = kit_ios_ipa
+    whats_new = kit_env_opt("KIT_RELEASE_NOTES", "")
+    next if kit_skip_upload?("the App Store upload", ipa)
+
+    UI.user_error!("KIT_RELEASE_NOTES is empty: App Store Connect will not submit an update without What's New.") if whats_new.empty?
+
+    upload_to_app_store(
+      api_key: kit_asc_api_key,
+      app_identifier: kit_ios_bundle_id,
+      ipa: ipa,
+      submit_for_review: kit_flag?("KIT_APPSTORE_SUBMIT", default: true),
+      automatic_release: false, # the operator releases from App Store Connect after approval
+      phased_release: kit_flag?("KIT_APPSTORE_PHASED", default: true),
+      precheck_include_in_app_purchases: false,
+      # No skip_metadata: deliver applies automatic_release and phased_release
+      # inside its metadata step, so skipping it silently drops both. What's New
+      # is the only listing field this writes.
+      release_notes: { "en-US" => whats_new },
+      skip_screenshots: true,
+      force: true # skip the interactive HTML preview
+    )
+    UI.success("Submitted to the App Store for review.")
+  end
+
+  # Without a token, upload nothing rather than fail the release (same as the
+  # Sentry Gradle plugin).
+  desc "Upload dSYMs to Sentry."
+  desc "In: KIT_IOS_DSYM (zip or folder), KIT_SENTRY_ORG, KIT_SENTRY_PROJECT, SENTRY_AUTH_TOKEN, KIT_SKIP_UPLOAD."
+  lane :upload_symbols do
+    dsym = kit_require_file("KIT_IOS_DSYM")
+    next if kit_skip_upload?("the Sentry dSYM upload", dsym)
+
+    token = ENV["SENTRY_AUTH_TOKEN"].to_s
+    if token.empty?
+      UI.important("SENTRY_AUTH_TOKEN unset: skipped the dSYM upload. Crashes from this build arrive unsymbolicated.")
+      next
+    end
+    sentry_debug_files_upload(
+      auth_token: token,
+      org_slug: kit_env("KIT_SENTRY_ORG"),
+      project_slug: kit_env("KIT_SENTRY_PROJECT"),
+      path: dsym
+    )
+    UI.success("Uploaded dSYMs to Sentry.")
+  end
+
+  # Never runs `match nuke` and never regenerates existing certificates. `add`
+  # only creates what is missing for this app's bundle ids and team.
+  desc "Install (readonly) or add (add) App Store signing for this app via match."
+  desc "In: KIT_CERTS_MODE (readonly|add, default readonly), KIT_IOS_BUNDLE_IDS, KIT_IOS_TEAM_ID, MATCH_*, ASC_*."
+  lane :certs do
+    mode = kit_env_opt("KIT_CERTS_MODE", "readonly")
+    UI.user_error!("KIT_CERTS_MODE must be readonly or add, got '#{mode}'") unless %w[readonly add].include?(mode)
+    kit_match(readonly: mode == "readonly", api_key: kit_asc_api_key)
+  end
+end
+
+# --------------------------------------------------------------- Android ---
+
+def kit_play_json_key
+  kit_require_file("KIT_PLAY_JSON_KEY")
+end
+
+# kit track name (or Play track name) -> Play track name.
+def kit_play_track
+  tracks = { "internal" => "internal", "alpha" => "alpha", "beta" => "beta",
+             "prod" => "production", "production" => "production" }
+  track = kit_env("KIT_PLAY_TRACK")
+  tracks.fetch(track) { UI.user_error!("Unknown KIT_PLAY_TRACK '#{track}' (#{tracks.keys.join(', ')})") }
+end
+
+# Newest signed artifact under <gradle root>/<module dir>/build/outputs. Used
+# only when the gradle action did not report its outputs. Newest by mtime: the
+# dir can hold stale artifacts from older runs.
+def kit_find_artifact(kind)
+  module_dir = kit_env_opt("KIT_ANDROID_MODULE", ":android").delete_prefix(":").tr(":", "/")
+  sub = kind == "apk" ? "apk/release" : "bundle/release"
+  dir = File.join(kit_path("KIT_GRADLE_ROOT"), module_dir, "build/outputs", sub)
+  Dir.glob(File.join(dir, "*.#{kind}")).reject { |f| f.include?("unsigned") }.max_by { |f| File.mtime(f) }
+end
+
+platform :android do
+  desc "Print the next version code: max across every Play track + 1."
+  desc "In: KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY. Out: KIT_NEXT_CODE=<n>."
+  lane :next_code do
+    json_key = kit_play_json_key
+    package = kit_env("KIT_ANDROID_PACKAGE")
+    codes = []
+    # A build promoted to production can hold the highest code while alpha and
+    # beta lag, so take the max across every track.
+    %w[internal alpha beta production].each do |t|
+      codes.concat(google_play_track_version_codes(track: t, json_key: json_key, package_name: package))
+    rescue StandardError => e
+      UI.important("Could not fetch version codes for the '#{t}' track: #{e.message}")
+    end
+    latest = codes.max || 0
+    if latest.zero?
+      UI.user_error!("No version codes in any Play track. Upload the first build with `kit release android --code 1`.")
+    end
+    UI.message("Existing Play version codes: #{codes.uniq.sort.join(', ')}")
+    kit_emit("NEXT_CODE", latest + 1)
+  end
+
+  # Signing: kit.release (PLAN §13.4) reads -Pkit.keystoreFile plus
+  # ANDROID_KEYSTORE_ALIAS / ANDROID_KEYSTORE_PASSWORD from the inherited env.
+  # Passwords never go on argv.
+  desc "Build the signed release bundle (or APK) with Gradle."
+  desc "In: KIT_GRADLE_ROOT, KIT_ANDROID_MODULE (default :android), KIT_GRADLE_TASK (default <module>:bundleRelease), " \
+       "KIT_ANDROID_VERSION, KIT_ANDROID_CODE, KIT_ANDROID_KEYSTORE_FILE. Out: KIT_ARTIFACT_AAB= or KIT_ARTIFACT_APK=."
+  lane :build do
+    module_path = kit_env_opt("KIT_ANDROID_MODULE", ":android")
+    task = kit_env_opt("KIT_GRADLE_TASK", "#{module_path}:bundleRelease")
+    kind = task.end_with?("bundleRelease") ? "aab" : "apk"
+
+    props = {}
+    props["kit.versionName"] = kit_env_opt("KIT_ANDROID_VERSION") if kit_env_opt("KIT_ANDROID_VERSION")
+    props["kit.versionCode"] = kit_env_opt("KIT_ANDROID_CODE") if kit_env_opt("KIT_ANDROID_CODE")
+    props["kit.keystoreFile"] = kit_path("KIT_ANDROID_KEYSTORE_FILE") if kit_env_opt("KIT_ANDROID_KEYSTORE_FILE")
+
+    gradle(
+      task: task,
+      project_dir: kit_path("KIT_GRADLE_ROOT"),
+      properties: props,
+      print_command_output: !ENV["CI"]
+    )
+
+    artifact = if kind == "aab"
+                 lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH]
+               else
+                 lane_context[SharedValues::GRADLE_APK_OUTPUT_PATH]
+               end
+    artifact = kit_find_artifact(kind) if artifact.nil? || artifact.include?("unsigned") || !File.exist?(artifact)
+    UI.user_error!("Gradle task #{task} produced no signed .#{kind}") if artifact.nil?
+    kit_emit(kind == "aab" ? "ARTIFACT_AAB" : "ARTIFACT_APK", artifact)
+  end
+
+  desc "Upload a built AAB to a Google Play track (internal, alpha, beta, production)."
+  desc "In: KIT_ANDROID_AAB, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY, KIT_PLAY_TRACK, KIT_PLAY_ROLLOUT (production, " \
+       "default 0.1), KIT_PLAY_DRAFT, KIT_RELEASE_NOTES + KIT_ANDROID_CODE (changelog), KIT_SKIP_UPLOAD."
+  lane :upload_play do
+    aab = kit_require_file("KIT_ANDROID_AAB")
+    track = kit_play_track
+    next if kit_skip_upload?("the Play upload (#{track})", aab)
+
+    # A Play app whose first release was never rolled out is a "draft app"; the
+    # API rejects any release on it that is not itself a draft.
+    draft = kit_flag?("KIT_PLAY_DRAFT")
+    params = {
+      package_name: kit_env("KIT_ANDROID_PACKAGE"),
+      track: track,
+      aab: aab,
+      json_key: kit_play_json_key,
+      skip_upload_apk: true,
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+      skip_upload_changelogs: true
+    }
+
+    if track == "production"
+      # Staged by default; a full release must be asked for with rollout 1.
+      # supply keeps an explicit inProgress at 1.0 and drops the fraction,
+      # which Play rejects. Production "What's new" is managed in the console.
+      rollout = kit_env_opt("KIT_PLAY_ROLLOUT", "0.1")
+      if draft
+        params[:release_status] = "draft"
+      elsif rollout.to_f >= 1
+        params[:release_status] = "completed"
+      else
+        params[:release_status] = "inProgress"
+        params[:rollout] = rollout
+      end
+    else
+      params[:release_status] = "draft" if draft
+    end
+
+    notes = kit_env_opt("KIT_RELEASE_NOTES", "")
+    code = kit_env_opt("KIT_ANDROID_CODE")
+    Dir.mktmpdir("kit-play-metadata") do |metadata|
+      if track != "production" && !notes.empty? && code
+        locale = kit_env_opt("KIT_PLAY_LOCALE", "en-US")
+        dir = File.join(metadata, locale, "changelogs")
+        FileUtils.mkdir_p(dir)
+        File.write(File.join(dir, "#{code}.txt"), notes[0, 500])
+        params[:metadata_path] = metadata
+        params[:skip_upload_changelogs] = false
+      end
+      upload_to_play_store(params)
+    end
+    UI.success("Uploaded to the Play '#{track}' track#{draft ? ' as a draft (roll it out in the Play Console)' : ''}.")
+  end
+end
