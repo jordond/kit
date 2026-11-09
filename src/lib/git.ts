@@ -1,21 +1,22 @@
-import { ProcError, runCapture, runQuiet } from './proc'
+import { ProcError, runCapture, runPiped } from './proc'
 
 /** Files staged for commit (added, copied, modified, renamed), repo-relative. */
 export async function stagedFiles(cwd = '.'): Promise<string[]> {
   const { code, stdout } = await runCapture(
-    ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR'],
+    ['git', 'diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'],
     { cwd },
   )
   if (code !== 0) throw new Error('git diff --cached failed')
-  return stdout.split('\n').filter(Boolean)
+  // -z: NUL-separated and unquoted, so non-ASCII and odd paths come through verbatim.
+  return stdout.split('\0').filter(Boolean)
 }
 
 /** Read-only git call: stdout on success, ProcError (with git's message) otherwise. */
 async function read(args: string[], cwd: string): Promise<string> {
   const cmd = ['git', ...args]
-  const { code, output } = await runQuiet(cmd, { cwd })
-  if (code !== 0) throw new ProcError(cmd, code, output)
-  return output
+  const { code, stdout, stderr } = await runPiped(cmd, { cwd })
+  if (code !== 0) throw new ProcError(cmd, code, `${stdout}${stderr}`)
+  return stdout
 }
 
 /** Uncommitted changes (tracked or untracked), as `git status --porcelain` lines. */
@@ -45,10 +46,10 @@ export async function describe(
   const cmd = ['git', 'describe', '--tags', '--match', match]
   if (opts.exact !== false) cmd.push('--abbrev=0')
   if (opts.ref) cmd.push(opts.ref)
-  const { code, output } = await runQuiet(cmd, { cwd: opts.cwd ?? '.' })
-  if (code === 0) return output.trim()
-  if (/No names found|No tags can describe|cannot describe/i.test(output)) return undefined
-  throw new ProcError(cmd, code, output)
+  const { code, stdout, stderr } = await runPiped(cmd, { cwd: opts.cwd ?? '.' })
+  if (code === 0) return stdout.trim()
+  if (/No names found|No tags can describe|cannot describe/i.test(stderr)) return undefined
+  throw new ProcError(cmd, code, `${stdout}${stderr}`)
 }
 
 export interface Commit {

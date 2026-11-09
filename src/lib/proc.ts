@@ -45,6 +45,24 @@ export async function run(cmd: readonly string[], opts: RunOptions = {}): Promis
   return await spawn(cmd, opts, { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }).exited
 }
 
+/**
+ * Like `run`, but the child's stdout goes to kit's stderr. For `--json` runs that still stream a
+ * child's progress: stdout stays free for the one document.
+ */
+export async function runToStderr(cmd: readonly string[], opts: RunOptions = {}): Promise<number> {
+  if (!cmd.length) throw new Error('proc: empty command')
+  // fd 2: the child writes straight to kit's stderr. Shares the terminal, so no own process group.
+  const proc = Bun.spawn([...cmd], {
+    cwd: opts.cwd ?? '.',
+    env: childEnv(opts.env),
+    stdin: 'inherit',
+    stdout: 2,
+    stderr: 'inherit',
+  })
+  trackChild(proc, false)
+  return await proc.exited
+}
+
 /** Like `run`, but throws on a non-zero exit. */
 export async function runOrThrow(cmd: readonly string[], opts: RunOptions = {}): Promise<void> {
   const code = await run(cmd, opts)

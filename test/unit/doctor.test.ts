@@ -6,6 +6,7 @@ import {
   checkJava,
   checkMise,
   checkRuby,
+  checkUnreadable,
   checkWranglerLogin,
   checkXcode,
   parseEnvKeys,
@@ -37,6 +38,24 @@ describe('java', () => {
   test('missing java', () => {
     expect(checkJava(undefined, true)).toMatchObject({ status: 'fail', detail: 'not found' })
     expect(checkJava(undefined, false).status).toBe('warn')
+  })
+
+  test('a probe that exits non-zero (the macOS /usr/bin/java stub) is missing', () => {
+    const stub = out('The operation couldn’t be completed. Unable to locate a Java Runtime.', 1)
+    expect(checkJava(stub, true)).toMatchObject({ status: 'fail', detail: 'not found' })
+    expect(checkJava(stub, false)).toMatchObject({ status: 'warn', detail: 'not found' })
+  })
+})
+
+describe('unreadable project files', () => {
+  test('a parse error is a failed check naming the file', () => {
+    expect(checkUnreadable('mise', 'mise.toml versions', 'mise.toml', new Error('bad\nmore'))).toEqual({
+      id: 'mise',
+      label: 'mise.toml versions',
+      status: 'fail',
+      detail: 'mise.toml does not parse: bad',
+      hint: 'Fix mise.toml',
+    })
   })
 })
 

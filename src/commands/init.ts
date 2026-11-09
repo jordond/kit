@@ -101,7 +101,7 @@ export default defineCommand({
   group: 'Setup',
   examples: 'kit init\nkit init --dry-run\nkit init --yes   # also scaffold mise.toml and lefthook.yml',
   async run(ctx) {
-    const { copyFileSync, writeFileSync } = await import('node:fs')
+    const { chmodSync, writeFileSync } = await import('node:fs')
     const { relative } = await import('node:path')
     const pc = (await import('picocolors')).default
     const { emitJson } = await import('../lib/log')
@@ -169,7 +169,10 @@ export default defineCommand({
       if (!ctx.flags.json) ctx.log.step(a.title)
       let ok = true
       if (a.kind === 'env-file') {
-        copyFileSync(join(root, '.env.example'), join(root, '.env'))
+        // Secrets go in here: owner-only from creation, never the example's (usually 0644) mode.
+        const dotenv = join(root, '.env')
+        writeFileSync(dotenv, readFileSync(join(root, '.env.example')), { mode: 0o600 })
+        chmodSync(dotenv, 0o600)
         if (!ctx.flags.json) ctx.log.dim('  fill in the values, then run `kit doctor`')
       } else if (a.kind === 'scaffold') {
         const { file, template } = SCAFFOLDS[a.scaffold]

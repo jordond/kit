@@ -53,6 +53,26 @@ group('git', () => {
     expect(await stagedFiles(dir)).toEqual(['b.txt'])
   })
 
+  test('stagedFiles returns non-ASCII paths verbatim, not quoted', async () => {
+    writeFileSync(join(dir, 'café.txt'), 'new')
+    writeFileSync(join(dir, 'a b.txt'), 'new')
+    git('add', 'café.txt', 'a b.txt')
+    expect((await stagedFiles(dir)).sort()).toEqual(['a b.txt', 'café.txt'])
+  })
+
+  test('read-only calls return stdout only, not git’s stderr', async () => {
+    // GIT_TRACE makes git write trace lines to stderr; they must not end up in the result.
+    const before = process.env.GIT_TRACE
+    process.env.GIT_TRACE = '1'
+    try {
+      expect(await currentBranch(dir)).toBe('main')
+      expect((await logSince(undefined, { cwd: dir })).map((c) => c.subject)).toEqual(['feat: first'])
+    } finally {
+      if (before === undefined) delete process.env.GIT_TRACE
+      else process.env.GIT_TRACE = before
+    }
+  })
+
   test('currentBranch', async () => {
     expect(await currentBranch(dir)).toBe('main')
     git('checkout', '-q', '-b', 'release/1.0')

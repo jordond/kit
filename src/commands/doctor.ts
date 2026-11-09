@@ -44,7 +44,8 @@ export function parseJavaVersion(output: string): string | undefined {
 
 export function checkJava(probe: Probe, required: boolean): Check {
   const hint = `Install JDK ${MIN_JAVA}+ (e.g. \`mise use java@${MIN_JAVA}\` or \`brew install --cask temurin\`)`
-  if (!probe) return missing('java', 'java', required, hint)
+  // A non-zero exit is no JDK: macOS ships a /usr/bin/java stub that only says "Unable to locate a Java Runtime".
+  if (probe?.code !== 0) return missing('java', 'java', required, hint)
   const version = parseJavaVersion(probe.output)
   const major = Number(version?.split(/[.+-]/)[0])
   if (!version || Number.isNaN(major)) {
@@ -163,6 +164,12 @@ export function checkMise(
   return { id: 'mise', label, status: 'ok', detail: Object.keys(tools).join(', ') }
 }
 
+/** A project file kit reads (mise.toml, package.json) that does not parse: a failure, not a crash. */
+export function checkUnreadable(id: string, label: string, file: string, error: unknown): Check {
+  const why = error instanceof Error ? error.message.split('\n')[0] : String(error)
+  return { id, label, status: 'fail', detail: `${file} does not parse: ${why}`, hint: `Fix ${file}` }
+}
+
 /** Key names in a dotenv file. */
 export function parseEnvKeys(text: string): string[] {
   const keys: string[] = []
@@ -274,10 +281,18 @@ export default defineCommand({
     ])
 
     const miseFile = ['mise.toml', '.mise.toml'].find((f) => existsSync(join(root, f)))
-    const miseTools = miseFile ? parseMiseTools(readToml(join(root, miseFile)).tools) : undefined
+    let miseTools: Record<string, string> | undefined
+    let miseCheck: Check | undefined
+    if (miseFile) {
+      try {
+        miseTools = parseMiseTools(readToml(join(root, miseFile)).tools)
+      } catch (e) {
+        miseCheck = checkUnreadable('mise', 'mise.toml versions', miseFile, e)
+      }
+    }
     const detected: Record<string, string | undefined> = {
       bun: Bun.version,
-      java: java ? parseJavaVersion(java.output) : undefined,
+      java: java?.code === 0 ? parseJavaVersion(java.output) : undefined,
       ruby: ruby?.output.match(/ruby (\d[\w.]*)/)?.[1],
     }
     if (miseTools?.node) detected.node = (await probe(['node', '--version']))?.output.trim().replace(/^v/, '')
@@ -289,12 +304,13 @@ export default defineCommand({
           .map((f) => ({ file: f, text: readFileSync(join(wfDir, f), 'utf8') }))
       : []
     const pkg = read('package.json')
-    const pin = pkg
-      ? (JSON.parse(pkg) as {
-          devDependencies?: Record<string, string>
-          dependencies?: Record<string, string>
-        })
-      : undefined
+    let pin: { devDependencies?: Record<string, string>; dependencies?: Record<string, string> } | undefined
+    let pkgCheck: Check | undefined
+    try {
+      pin = pkg ? JSON.parse(pkg) : undefined
+    } catch (e) {
+      pkgCheck = checkUnreadable('package-json', 'package.json', 'package.json', e)
+    }
     const kitPin = pin?.devDependencies?.['@jordond/kit'] ?? pin?.dependencies?.['@jordond/kit']
 
     const checks: Check[] = [
@@ -309,9 +325,10 @@ export default defineCommand({
         gradle,
       ),
       checkWranglerLogin(wrangler),
-      checkMise(miseTools, detected),
+      miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
       checkCiPin(workflows, kitPin, ctx.args.ci === true),
+      ...(pkgCheck ? [pkgCheck] : []),
     ]
 
     const ok = !checks.some((c) => c.status === 'fail')

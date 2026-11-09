@@ -36,6 +36,39 @@ describe('readAccountId', () => {
   })
 })
 
+describe('readAccountId picks the top-level key only', () => {
+  const A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  const B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+  const C = 'cccccccccccccccccccccccccccccccc'
+  const write = (name: string, text: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-cf-'))
+    writeFileSync(join(dir, name), text)
+    return readAccountId(dir).id
+  }
+
+  test('jsonc: commented-out ids and env blocks are ignored; trailing commas parse', () => {
+    const text = `{
+      // "account_id": "${A}",
+      /* "account_id": "${B}", */
+      "name": "x", // trailing comment with a "quote"
+      "url": "https://example.com/*not-a-comment*/",
+      "env": { "staging": { "account_id": "${B}", }, },
+      "account_id": "${C}",
+    }`
+    expect(write('wrangler.jsonc', text)).toBe(C)
+  })
+
+  test('jsonc: only an env block has one → undefined', () => {
+    expect(write('wrangler.jsonc', `{ "env": { "prod": { "account_id": "${A}" } } }`)).toBeUndefined()
+  })
+
+  test('toml: an [env.*] account_id is not the top-level one', () => {
+    expect(write('wrangler.toml', `name = "x"\n[env.staging]\naccount_id = "${A}"\n`)).toBeUndefined()
+    const text = `# account_id = "${A}"\naccount_id = "${C}"\n[env.x]\naccount_id = "${B}"\n`
+    expect(write('wrangler.toml', text)).toBe(C)
+  })
+})
+
 describe('resolveAccountId', () => {
   test('from-wrangler reads the first d1 entry target', () => {
     expect(accountTarget(config)).toBe('edge')

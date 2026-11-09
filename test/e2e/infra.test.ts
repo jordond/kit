@@ -131,6 +131,36 @@ describe('env push', () => {
   })
 })
 
+describe('env push when a remote cannot be listed', () => {
+  const failList = (bin: string) =>
+    `${recordingFake(bin).replace(/\necho "\${bin} ok"$/, '')}\nif [ "$2" = list ]; then echo "not authenticated" >&2; exit 1; fi\necho "${bin} ok"`
+
+  test('every list fails: exit 1 and ok:false, nothing pushed', async () => {
+    fx.script('wrangler', failList('wrangler'))
+    const r = await fx.kit(['env', 'push', '--json'])
+    expect(r.code).toBe(1)
+    const doc = JSON.parse(r.stdout)
+    expect(doc.ok).toBe(false)
+    expect(doc.outcomes.every((o: { status: string }) => o.status !== 'pushed')).toBe(true)
+    expect(summary().some((s) => s.includes('secret put'))).toBe(false)
+  })
+
+  test('without --json: exit 1 and names the remote, not "Nothing to push"', async () => {
+    fx.script('wrangler', failList('wrangler'))
+    const r = await fx.kit(['env', 'push', '--target', 'edge'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('could not list secrets on edge')
+    expect(r.stderr).not.toContain('Nothing to push')
+  })
+
+  test('--dry-run with a failed list still exits 1', async () => {
+    fx.script('gh', failList('gh'))
+    const r = await fx.kit(['env', 'push', '--github', '--dry-run', '--json'])
+    expect(r.code).toBe(1)
+    expect(JSON.parse(r.stdout).ok).toBe(false)
+  })
+})
+
 describe('env init', () => {
   test('--dry-run reports what it would ask for', async () => {
     rmSync(join(fx.dir, '.env'))
