@@ -66,6 +66,44 @@ export const builtins: BuiltinEntry[] = [
     group: 'Release',
     load: () => import('../commands/release/android'),
   },
+  // setup: passthroughs, doctor, init, deps
+  {
+    path: ['gradle'],
+    description: 'Run ./gradlew in the Gradle root',
+    group: 'Develop',
+    load: () => import('../commands/gradle'),
+  },
+  {
+    path: ['wrangler'],
+    description: "Run wrangler in a worker target's directory",
+    group: 'Develop',
+    load: () => import('../commands/wrangler'),
+  },
+  {
+    path: ['xcode'],
+    description: 'Open the iOS project in Xcode',
+    group: 'Develop',
+    load: () => import('../commands/xcode'),
+  },
+  {
+    path: ['doctor'],
+    description: 'Check tools, versions and .env',
+    group: 'Setup',
+    load: () => import('../commands/doctor'),
+  },
+  {
+    path: ['init'],
+    description: 'Set up a fresh clone',
+    group: 'Setup',
+    load: () => import('../commands/init'),
+  },
+  {
+    path: ['deps'],
+    description: 'List or update npm dependencies (catalog-aware)',
+    group: 'Setup',
+    load: () => import('../commands/deps'),
+  },
+  // end setup
   {
     path: ['config'],
     description: 'Print the resolved kit.config.ts',

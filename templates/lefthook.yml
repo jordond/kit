@@ -1,0 +1,6 @@
+# Git hooks (https://lefthook.dev). Run `lefthook install` once per clone.
+pre-commit:
+  commands:
+    lint:
+      run: kit lint --staged --fix
+      stage_fixed: true
