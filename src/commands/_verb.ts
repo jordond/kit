@@ -19,7 +19,15 @@ export interface VerbRun {
 /** Shared body of lint/format/typecheck/check/test/build: plan, run as a tree, summarize, exit code. */
 export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
   const { root, config } = requireProject(ctx)
-  if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+  if (config.cloudflare?.accountId) {
+    // Verbs mostly don't touch wrangler: a missing account id is a warning here, fatal in deploy.
+    try {
+      ;(await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+    } catch (e) {
+      if (!(e instanceof KitError)) throw e
+      log.warn(`${e.message}; CLOUDFLARE_ACCOUNT_ID not pinned`)
+    }
+  }
   const started = performance.now()
   const groups = planVerbs(root, config, v.verbs, { ...v.plan, targets: ctx.positionals, extra: ctx.rest })
 

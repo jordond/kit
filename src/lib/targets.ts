@@ -204,6 +204,7 @@ function workspaceCommands(c: Ctx, verb: Verb | 'prepare'): PlannedCommand[] {
 
 function touchesStaged(root: string, dir: string, staged: string[]): boolean {
   const rel = relative(root, resolve(root, dir))
+  if (!staged.length) return false
   return !rel || staged.some((f) => f === rel || f.startsWith(`${rel}/`))
 }
 

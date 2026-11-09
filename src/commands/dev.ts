@@ -15,7 +15,14 @@ export default defineCommand({
     const { runInteractive } = await import('../lib/proc')
     const { ExitCode, KitError } = await import('../lib/errors')
     const { root, config } = requireProject(ctx)
-    if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+    if (config.cloudflare?.accountId) {
+      try {
+        ;(await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+      } catch (e) {
+        if (!(e instanceof KitError)) throw e
+        ctx.log.warn(`${e.message}; CLOUDFLARE_ACCOUNT_ID not pinned`)
+      }
+    }
     const name = singleTarget(ctx, 'dev')
     const env = checkEnv(config, name, ctx.args.env)
     const cmds = targetCommands(root, config, name, 'dev', { env, extra: ctx.rest })
@@ -32,6 +39,7 @@ export default defineCommand({
     }
     for (const c of cmds) {
       const code = await runInteractive(c.cmd, { cwd: c.cwd, env: c.env })
+      if ((await import('../lib/cleanup')).interrupted()) return
       if (code !== 0) {
         process.exitCode = 1
         return

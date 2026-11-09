@@ -225,7 +225,6 @@ async function main(argv: string[]): Promise<number> {
 installSignalHandlers()
 try {
   process.exitCode = await main(process.argv.slice(2))
-  if (interrupted()) process.exitCode = ExitCode.interrupted
 } catch (e) {
   if (e instanceof KitError) {
     log.error(e.message, e.hint)
@@ -237,4 +236,6 @@ try {
     process.exitCode = ExitCode.failed
   }
 }
+// After the catch: a command that throws because of the interrupt still exits 130.
+if (interrupted()) process.exitCode = ExitCode.interrupted
 await runCleanup()

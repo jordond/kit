@@ -73,6 +73,11 @@ describe('planVerbs', () => {
       'apps/web/src/a.astro',
     ])
   })
+  test('a root-dir target is skipped when nothing is staged', () => {
+    const c = configSchema.parse({ name: 'x', targets: { root: { kind: 'custom', dir: '.', lint: 'x' } } })
+    expect(planVerbs(root, c, ['lint'], { staged: [] })).toEqual([])
+    expect(planVerbs(root, c, ['lint'], { staged: ['a.ts'] }).map((g) => g.title)).toEqual(['root'])
+  })
   test('staged with nothing staged plans nothing', () => {
     expect(planVerbs(root, config, ['lint'], { staged: [] })).toEqual([])
   })

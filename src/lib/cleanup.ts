@@ -8,7 +8,7 @@ import type { Subprocess } from 'bun'
  * - First Ctrl-C: SIGINT reaches every child's process tree, kit waits for them and exits 130.
  *   With no child running it exits at once.
  * - Second Ctrl-C: SIGKILL every child, run cleanup, exit 130.
- * - SIGTERM is forwarded to children (it is not sent to the group).
+ * - SIGTERM and SIGHUP are forwarded to children (detached ones are in their own session).
  */
 
 type Fn = () => void | Promise<void>
@@ -83,11 +83,17 @@ export function installSignalHandlers(): void {
     forward('SIGINT', { groupsOnly: !!process.stdin.isTTY })
     if (children.size === 0) void exitNow(130)
   })
-  process.on('SIGTERM', () => {
-    interrupts++
-    forward('SIGTERM')
-    if (children.size === 0) void exitNow(143)
-  })
+  // Detached children run in their own session, so a closed terminal (SIGHUP) won't reach them.
+  for (const [signal, code] of [
+    ['SIGTERM', 143],
+    ['SIGHUP', 129],
+  ] as const) {
+    process.on(signal, () => {
+      interrupts++
+      forward(signal)
+      if (children.size === 0) void exitNow(code)
+    })
+  }
 }
 
 /** Test seam. */
