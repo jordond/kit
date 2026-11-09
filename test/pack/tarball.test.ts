@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 // (that would symlink the whole checkout, kit's own dev zod included). Slow, so opt-in: KIT_PACK_TEST=1.
 const enabled = process.env.KIT_PACK_TEST === '1'
 const KIT = resolve(import.meta.dir, '../..')
+const STALE = 'stale-build-canary.js'
 const pkg = JSON.parse(readFileSync(join(KIT, 'package.json'), 'utf8')) as {
   version: string
   devDependencies: Record<string, string>
@@ -41,6 +42,9 @@ const kit = (args: string[]) => sh([join(app, 'node_modules/.bin/kit'), ...args]
 describe.skipIf(!enabled)('packed tarball', () => {
   beforeAll(async () => {
     tmp = mkdtempSync(join(tmpdir(), 'kit-pack-'))
+    // A leftover from an earlier build; `bun run build` must start from an empty dist so it never ships.
+    mkdirSync(join(KIT, 'dist'), { recursive: true })
+    writeFileSync(join(KIT, 'dist', STALE), '')
     await ok(['bun', 'run', 'build'], KIT)
     const out = join(tmp, 'pack')
     await ok(['bun', 'pm', 'pack', '--destination', out], KIT)
@@ -101,6 +105,14 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(readdirSync(join(installed, 'dist'))).toContain('cli.js')
     // zod is a peer: kit's bundle must use the app's copy, never a nested one.
     expect(readdirSync(installed)).not.toContain('node_modules')
+  })
+
+  test('the tarball has no stale build output', () => {
+    const dist = readdirSync(join(app, 'node_modules/@jordond/kit/dist'), { recursive: true }).map(String)
+    expect(dist).not.toContain(STALE)
+    expect(dist.filter((f) => f.includes('spike'))).toEqual([])
+    // One build has one cli entry chunk set; earlier builds left several main-*.js chunks behind.
+    expect(dist.filter((f) => /^main-.*\.js$/.test(f)).length).toBeLessThanOrEqual(1)
   })
 
   test('kit --help', async () => {
