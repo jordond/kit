@@ -93,6 +93,29 @@ describe('doctor', () => {
     expect(r.stderr).toContain('17.0.9 (need 21+)')
   })
 
+  test('malformed mise.toml and package.json are ✖ checks, not a crash', async () => {
+    writeFileSync(join(fx.dir, '.env'), 'API_KEY=x\nOTHER_KEY=y\n')
+    writeFileSync(join(fx.dir, 'mise.toml'), '[tools\njava = "21"\n')
+    writeFileSync(join(fx.dir, 'package.json'), '{ "name": ')
+    const r = await fx.kit(['doctor', '--json'], { env: env() })
+    expect(r.code).toBe(4)
+    const doc = JSON.parse(r.stdout)
+    const byId = Object.fromEntries(doc.checks.map((c: { id: string; status: string }) => [c.id, c.status]))
+    expect(byId).toMatchObject({ mise: 'fail', 'package-json': 'fail', java: 'ok' })
+    const plain = await fx.kit(['doctor'], { env: env() })
+    expect(plain.code).toBe(4)
+    expect(plain.stderr).toContain('✖ mise.toml versions')
+    expect(plain.stderr).toContain('✖ package.json')
+  })
+
+  test('a java that exits non-zero (macOS stub) is missing', async () => {
+    writeFileSync(join(fx.dir, '.env'), 'API_KEY=x\nOTHER_KEY=y\n')
+    fx.script('java', `echo 'Unable to locate a Java Runtime.' >&2; exit 1`)
+    const r = await fx.kit(['doctor'], { env: env() })
+    expect(r.code).toBe(4)
+    expect(r.stderr).toMatch(/✖ java\s+not found/)
+  })
+
   test('works outside a project', async () => {
     const r = await fx.kit(['doctor', '--json'], { cwd: '..' })
     expect(JSON.parse(r.stdout).checks.length).toBeGreaterThan(0)
