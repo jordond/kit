@@ -174,12 +174,15 @@ async function main(argv: string[]): Promise<number> {
     }
   }
 
-  // Passthrough commands take every token after their path as-is, help flags included.
+  // Passthrough commands take every token after their path as-is, help flags included, except a
+  // leading -h/--help: that is kit's usage (help never executes). `kit gradle tasks --help` passes.
   const picked = target && loaded.get(target)
   if (target && picked?.passthrough) {
     const rest = argv.slice(target.path.length)
-    await picked.run({ root, config, args: {}, positionals: [], rest, flags: computeFlags({}), log })
-    return process.exitCode === undefined ? 0 : Number(process.exitCode)
+    if (rest[0] !== '-h' && rest[0] !== '--help') {
+      await picked.run({ root, config, args: {}, positionals: [], rest, flags: computeFlags({}), log })
+      return process.exitCode === undefined ? 0 : Number(process.exitCode)
+    }
   }
 
   if (!target || wantsHelp) {

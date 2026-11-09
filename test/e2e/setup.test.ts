@@ -33,15 +33,23 @@ describe('passthroughs', () => {
     expect(summary()).toEqual(['./apps/api pnpm exec wrangler d1 list --json'])
   })
 
-  test('wrangler --help / -h: usage on stdout, exit 0, nothing run', async () => {
+  test.each([
+    ['wrangler', "Run wrangler in a worker target's directory", 'kit wrangler api whoami'],
+    ['gradle', 'Run ./gradlew in the Gradle root', 'kit gradle assembleDebug'],
+  ])('%s --help / -h: kit usage on stdout, exit 0, nothing run', async (cmd, description, example) => {
     for (const flag of ['--help', '-h']) {
-      const r = await fx.kit(['wrangler', flag])
+      const r = await fx.kit([cmd, flag])
       expect(r.code).toBe(0)
-      expect(r.stdout).toContain("Run wrangler in a worker target's directory")
-      expect(r.stdout).toContain('kit wrangler api whoami')
-      expect(r.stdout).toContain('Worker targets: api')
+      expect(r.stdout).toContain(description)
+      expect(r.stdout).toContain(example)
+      expect(r.stdout).toContain('no --json')
     }
     expect(fx.calls()).toEqual([])
+  })
+
+  test('gradle: --help after a task still passes through', async () => {
+    expect((await fx.kit(['gradle', 'tasks', '--help'])).code).toBe(0)
+    expect(summary()).toEqual(['./apps/client fake-gradlew tasks --help'])
   })
 
   test('wrangler: a target first still passes --help through', async () => {

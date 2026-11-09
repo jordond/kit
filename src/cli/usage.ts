@@ -3,7 +3,7 @@ import pc from 'picocolors'
 
 const GROUP_ORDER = ['Develop', 'Quality', 'Release', 'Infra', 'Setup']
 
-type AnyCommand = Command & { group?: string }
+type AnyCommand = Command & { group?: string; passthrough?: boolean }
 
 /** The command at `ctx.commandPath` (undefined at the root) and its children. */
 function lookup(ctx: Readonly<CommandContext>): { cmd?: AnyCommand; children: Map<string, AnyCommand> } {
@@ -29,11 +29,16 @@ export async function renderUsage(ctx: Readonly<CommandContext>): Promise<string
     .filter(([, a]) => a.type === 'positional')
     .map(([name]) => ` <${name}>`)
     .join('')
-  lines.push(
-    pc.bold('Usage'),
-    `  ${pc.cyan(path)}${children.size ? ' <command>' : ''}${positionals} [options]`,
-    '',
-  )
+  const tail = self?.passthrough ? ' [args…]' : `${children.size ? ' <command>' : ''}${positionals} [options]`
+  lines.push(pc.bold('Usage'), `  ${pc.cyan(path)}${tail}`, '')
+  if (self?.passthrough) {
+    // kit parses nothing after the path, so its global flags (--json, --dry-run, …) don't apply.
+    lines.push(
+      'Every argument passes through untouched; kit parses no flags here (no --json).',
+      `Only a leading -h/--help shows this; \`${path} <args> --help\` reaches the tool.`,
+      '',
+    )
+  }
 
   const examples = typeof self?.examples === 'string' ? self.examples : ''
   if (examples) {
@@ -66,7 +71,7 @@ export async function renderUsage(ctx: Readonly<CommandContext>): Promise<string
   }
 
   const args = Object.entries(ctx.args ?? {})
-  if (args.length && (hasRun || !children.size)) {
+  if (args.length && (hasRun || !children.size) && !self?.passthrough) {
     lines.push(pc.bold('Options'))
     const rows = args.map(([name, a]) => {
       const flag = a.type === 'positional' ? `<${name}>` : `${a.short ? `-${a.short}, ` : '    '}--${name}`

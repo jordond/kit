@@ -100,14 +100,19 @@ export function computeFlags(values: Record<string, unknown>): Flags {
   }
 }
 
+/** A gunshi command plus what kit's usage renderer reads. */
+export type KitGunshiCommand = Command & { group?: string; passthrough?: boolean }
+
 /** Adapt a kit command to a gunshi command. */
-export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): Command & { group?: string } {
+export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): KitGunshiCommand {
   return {
     name,
     description: cmd.description,
     examples: cmd.examples,
-    args: { ...globalArgs, ...(cmd.args ?? {}) },
+    // A passthrough parses no flags of its own; gunshi only sees it for `kit <path> --help`.
+    args: cmd.passthrough ? {} : { ...globalArgs, ...(cmd.args ?? {}) },
     group: cmd.group,
+    passthrough: cmd.passthrough,
     run: async (ctx) => {
       const missing = (cmd.requiresEnv ?? []).filter((k) => !process.env[k])
       if (missing.length) {
@@ -127,5 +132,5 @@ export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): Comm
         log,
       })
     },
-  } as Command & { group?: string }
+  } as KitGunshiCommand
 }

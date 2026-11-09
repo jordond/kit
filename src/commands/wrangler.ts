@@ -1,33 +1,15 @@
 import { defineCommand } from '../cli/command'
 
-const DESCRIPTION = "Run wrangler in a worker target's directory (arguments pass through)"
-const EXAMPLES = 'kit wrangler api whoami\nkit wrangler api d1 list\nkit wrangler api deploy --dry-run'
-
-/** `kit wrangler --help`: arguments pass through, so kit's own help never sees a leading flag. */
-export function wranglerUsage(workers: string[] | undefined): string {
-  const lines = [DESCRIPTION, '', 'Usage: kit wrangler <worker target> [wrangler args…]', '', 'Examples:']
-  for (const e of EXAMPLES.split('\n')) lines.push(`  ${e}`)
-  if (workers) {
-    lines.push('', workers.length ? `Worker targets: ${workers.join(', ')}` : 'No target has kind "worker"')
-  }
-  return `${lines.join('\n')}\n`
-}
-
 export default defineCommand({
-  description: DESCRIPTION,
+  description: "Run wrangler in a worker target's directory (arguments pass through)",
   group: 'Develop',
   passthrough: true,
-  examples: EXAMPLES,
+  examples: 'kit wrangler api whoami\nkit wrangler api d1 list\nkit wrangler api deploy --dry-run',
   async run(ctx) {
     const workersOf = (targets: Record<string, { kind: string }>) =>
       Object.entries(targets)
         .filter(([, t]) => t.kind === 'worker')
         .map(([n]) => n)
-    const first = ctx.rest[0]
-    if (first === '-h' || first === '--help') {
-      process.stdout.write(wranglerUsage(ctx.config ? workersOf(ctx.config.targets) : undefined))
-      return
-    }
     const { join } = await import('node:path')
     const { requireProject } = await import('../cli/command')
     const { ExitCode, KitError } = await import('../lib/errors')
