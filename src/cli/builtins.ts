@@ -66,6 +66,55 @@ export const builtins: BuiltinEntry[] = [
     group: 'Release',
     load: () => import('../commands/release/android'),
   },
+  // infra: env + db
+  {
+    path: ['env', 'sync'],
+    description: 'Render env outputs (.dev.vars) from .env',
+    group: 'Infra',
+    load: () => import('../commands/env/sync'),
+  },
+  {
+    path: ['env', 'check'],
+    description: 'Validate .env and check outputs for drift',
+    group: 'Infra',
+    load: () => import('../commands/env/check'),
+  },
+  {
+    path: ['env', 'push'],
+    description: 'Push secrets with wrangler and gh',
+    group: 'Infra',
+    load: () => import('../commands/env/push'),
+  },
+  {
+    path: ['env', 'init'],
+    description: 'Create .env and ask for missing keys',
+    group: 'Infra',
+    load: () => import('../commands/env/init'),
+  },
+  {
+    path: ['db', 'migrate'],
+    description: 'Apply pending D1 migrations',
+    group: 'Infra',
+    load: () => import('../commands/db/migrate'),
+  },
+  {
+    path: ['db', 'list'],
+    description: 'List D1 migrations',
+    group: 'Infra',
+    load: () => import('../commands/db/list'),
+  },
+  {
+    path: ['db', 'create'],
+    description: 'Create a D1 migration',
+    group: 'Infra',
+    load: () => import('../commands/db/create'),
+  },
+  {
+    path: ['db', 'exec'],
+    description: 'Run SQL against D1',
+    group: 'Infra',
+    load: () => import('../commands/db/exec'),
+  },
   {
     path: ['config'],
     description: 'Print the resolved kit.config.ts',
@@ -76,4 +125,6 @@ export const builtins: BuiltinEntry[] = [
 
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
+  env: 'Render, check and push env from .env',
+  db: 'Cloudflare D1 migrations and queries',
 }
