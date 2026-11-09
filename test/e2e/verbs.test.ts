@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
 const BINS = ['prep', 'biome', 'tsc', 'fake-gradlew', 'vitest', 'vite', 'astro', 'wrangler']
@@ -103,6 +105,40 @@ describe('verbs', () => {
     const r = await fx.kit(['deploy', 'web', '--env', 'staging'])
     expect(r.code).toBe(0)
     expect(summary()).toEqual(['./apps/web astro deploy staging'])
+  })
+
+  test('deploy --json: one document on stdout, child output on stderr', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(
+      cfg,
+      readFileSync(cfg, 'utf8').replace(
+        "envs: ['staging'] }",
+        "envs: ['staging'], deploy: { before: ['--version'] } }",
+      ),
+    )
+    const r = await fx.kit(['deploy', 'web', '--env', 'staging', '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout)).toEqual({
+      target: 'web',
+      env: 'staging',
+      ok: true,
+      steps: [
+        { title: 'kit --version', code: 0 },
+        { title: expect.any(String), code: 0 },
+      ],
+    })
+    expect(r.stderr).toContain('astro ok')
+    expect(r.stderr).toMatch(/\d+\.\d+\.\d+/)
+  })
+
+  test('deploy --json: a failed deploy is ok:false and exits 1', async () => {
+    fx.fail('astro', 3, 'deploy broke')
+    const r = await fx.kit(['deploy', 'web', '--env', 'staging', '--json'])
+    expect(r.code).toBe(1)
+    const doc = JSON.parse(r.stdout)
+    expect(doc.ok).toBe(false)
+    expect(doc.steps.at(-1).code).toBe(3)
+    expect(r.stderr).toContain('deploy broke')
   })
 
   test('outside a project: exit 3', async () => {
