@@ -82,6 +82,19 @@ export async function checkClean(root: string): Promise<void> {
   }
 }
 
+/** §9.3 step 1 (doctor --release): fail before secrets are decoded or the store is queried. */
+export function checkTools(platform: Platform, which: (bin: string) => string | null = Bun.which): void {
+  const need = platform === 'ios' ? ['bundle', 'xcodebuild', 'java'] : ['bundle', 'java']
+  const missing = need.filter((b) => !which(b))
+  if (missing.length) {
+    throw new KitError(
+      `Missing tools for an ${platform} release: ${missing.join(', ')}`,
+      'Run `kit doctor` (Ruby + Bundler, a JDK, and Xcode for iOS)',
+      ExitCode.precondition,
+    )
+  }
+}
+
 const abs = (root: string, p: string) => (isAbsolute(p) ? p : resolve(root, p))
 
 /** KIT_OUTPUT_DIR keeps the artifacts; otherwise they go in a temp dir removed on exit (§9.3). */
@@ -196,6 +209,7 @@ export async function releaseMobile(
   if (opts.build !== undefined && !(Number.isInteger(opts.build) && opts.build > 0)) {
     throw new KitError(`--build must be a positive integer, got ${opts.build}`, undefined, ExitCode.usage)
   }
+  checkTools(platform)
   await checkClean(root)
   const branch = await checkBranch(root, config)
   const version = readVersion(root, config, platform)
@@ -405,7 +419,10 @@ export async function releaseMobile(
       result.tagPushed = true
     } catch (e) {
       result.tagPushed = false
-      ctx.log.warn(`uploaded, but tagging ${name} failed: ${e instanceof Error ? e.message : String(e)}`)
+      const msg = `uploaded, but tagging ${name} failed: ${e instanceof Error ? e.message : String(e)}`
+      ctx.log.warn(msg)
+      if (onGitHubActions())
+        process.stderr.write(`::warning title=kit release::${msg.replace(/\r?\n/g, ' ')}\n`)
       ctx.log.dim(`  › git tag -a ${name} -m "${platform} ${version} (${build})" && git push origin ${name}`)
     }
   }

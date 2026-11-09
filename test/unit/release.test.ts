@@ -73,3 +73,11 @@ test('parseOutputs accepts the fastlane timestamp prefix and ignores noise', () 
     ),
   ).toEqual({ NEXT_BUILD: '8', ARTIFACT_IPA: '/a b/App.ipa', C: '3' })
 })
+
+test('checkTools names what an iOS release is missing', async () => {
+  const { checkTools } = await import('../../src/lib/release/mobile')
+  expect(() => checkTools('ios', (b) => (b === 'bundle' ? '/x' : null))).toThrow(
+    'Missing tools for an ios release: xcodebuild, java',
+  )
+  expect(() => checkTools('android', () => '/x')).not.toThrow()
+})

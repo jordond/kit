@@ -105,7 +105,9 @@ jobs:
     environment: ${{ inputs.track == 'prod' && 'production' || '' }}
     timeout-minutes: 90
     concurrency:
-      group: mobile-distribute-${{ github.repository }}-${{ inputs.platform }}
+      # Per track: GitHub keeps one pending run per group, so a later internal dispatch must not
+      # cancel a prod run waiting for approval.
+      group: mobile-distribute-${{ github.repository }}-${{ inputs.platform }}-${{ inputs.track }}
       cancel-in-progress: false
     steps:
       - name: Validate inputs
