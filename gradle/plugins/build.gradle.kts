@@ -56,6 +56,8 @@ testing {
                     // Reuse the caller's Gradle user home so AGP/KGP/Compose aren't downloaded per run.
                     systemProperty("kit.testKitDir", gradle.gradleUserHomeDir.absolutePath)
                     maxParallelForks = 1
+                    // The fixtures' real inputs (AGP, KGP, Gradle distributions) aren't task inputs.
+                    outputs.upToDateWhen { false }
                     testLogging {
                         events("passed", "skipped", "failed")
                         showStandardStreams = providers.gradleProperty("kit.testOutput").isPresent

@@ -65,7 +65,7 @@ internal object BuildInfo {
                 publicApi.set(kit.buildInfo.publicApi)
                 versionName.set(xcodeVersionName.orElse(KitVersions.versionName(project)))
                 versionCode.set(xcodeVersionCode.orElse(KitVersions.versionCode(project)))
-                isInternal.set(internalFlag)
+                internalBuild.set(internalFlag)
                 gitSha.set(gitShaSource)
                 outputDir.set(project.layout.buildDirectory.dir("generated/kit/buildinfo/commonMain/kotlin"))
             }
@@ -97,7 +97,7 @@ abstract class KitGenerateBuildInfoTask : DefaultTask() {
     abstract val versionCode: Property<Int>
 
     @get:Input
-    abstract val isInternal: Property<Boolean>
+    abstract val internalBuild: Property<Boolean>
 
     @get:Input
     abstract val gitSha: Property<String>
@@ -125,7 +125,7 @@ abstract class KitGenerateBuildInfoTask : DefaultTask() {
             |$visibility object ${className.get()} {
             |    $visibility const val VERSION_NAME: String = ${versionName.get().quoted()}
             |    $visibility const val VERSION_CODE: Int = ${versionCode.get()}
-            |    $visibility const val IS_INTERNAL: Boolean = ${isInternal.get()}
+            |    $visibility const val IS_INTERNAL: Boolean = ${internalBuild.get()}
             |    $visibility const val GIT_SHA: String = ${gitSha.get().quoted()}
             |}
             |
