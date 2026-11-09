@@ -11,7 +11,7 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
  * Applies KMP, the default hierarchy, the shared opt-ins and `-Xexpect-actual-classes`, and
  * `-Xexport-kdoc` on native. Targets come from `kit { targets { android(); ios(); jvm(); js() } }`;
  * `android()` applies AGP 9's `com.android.kotlin.multiplatform.library` and fails loudly when it isn't
- * on the classpath. Namespace `<app-name>.<module>`, SDK levels and JVM target come from the catalog.
+ * on the classpath. Namespace `<app-name>.<module path>` (unique per build), SDK levels and JVM target come from the catalog.
  */
 class KitKmpLibraryPlugin : Plugin<Project> {
     override fun apply(project: Project) {

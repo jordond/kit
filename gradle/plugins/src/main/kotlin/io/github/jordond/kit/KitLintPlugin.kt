@@ -11,7 +11,8 @@ import java.io.File
  * (ported from brewd's and WhaleSay's root `subprojects { }` block).
  *
  * - kotlin: every .kt file under src, minus resources and build output
- * - kotlinGradle: the project's own .gradle.kts files
+ * - kotlinGradle: each subproject's own .gradle.kts files; the root build and settings scripts only
+ *   with `kit { lintRootScripts = true }` (default off: the scope brewd and WhaleSay lint today)
  * - xml: every .xml file under src
  *
  * ktlint reads the nearest `.editorconfig` at or above the Gradle root. Spotless itself comes from
@@ -34,7 +35,8 @@ class KitLintPlugin : Plugin<Project> {
                     ?: DEFAULT_KTLINT
             val editorConfig = findEditorConfig(root.rootDir)
             val excludes = kit.excludes.get()
-            root.allprojects { configure(this, ktlint, editorConfig, excludes) }
+            val projects = if (kit.lintRootScripts.get()) root.allprojects else root.subprojects
+            projects.forEach { configure(it, ktlint, editorConfig, excludes) }
         }
     }
 

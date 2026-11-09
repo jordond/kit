@@ -42,8 +42,12 @@ class KitAndroidApplicationPlugin : Plugin<Project> {
         val components = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
         components.finalizeDsl { dsl ->
             if (dsl.namespace == null) {
-                dsl.namespace = kit.namespace.orNull
-                    ?: catalog.require(KitCatalog.APP_NAME, "default namespace; or set kit { namespace = … }")
+                val namespace =
+                    kit.namespace.orNull
+                        ?: catalog.require(KitCatalog.APP_NAME, "default namespace; or set kit { namespace = … }")
+                // The app module takes `app-name` itself (not path-derived): one app module per build.
+                KitNamespaces.claim(project, namespace, PLUGIN)
+                dsl.namespace = namespace
             }
             if (dsl.defaultConfig.applicationId == null) {
                 dsl.defaultConfig.applicationId = kit.applicationId.orNull ?: dsl.namespace

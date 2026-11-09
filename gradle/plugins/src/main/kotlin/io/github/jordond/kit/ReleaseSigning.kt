@@ -12,6 +12,8 @@ import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import org.gradle.api.provider.ValueSource
 import org.gradle.api.provider.ValueSourceParameters
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.TaskProvider
@@ -46,7 +48,12 @@ internal object SigningEnv {
  * - AGP < 9.4 has no lazy signing API, so there the same ValueSource is read in finalizeDsl and fed to a
  *   `kitRelease` DSL signing config (a configuration input; the decode still happens in the task).
  *
- * A signing config the app sets on the release build type itself is left alone.
+ * - allowDebugFallback signs with AGP's own `debug` signing config (AGP creates its keystore on demand);
+ *   with it on, signing resolves at configuration time on every AGP version.
+ * - The decoded keystore is deleted when the build finishes ([KitKeystoreCleanup]).
+ *
+ * A signing config the app sets on the release build type itself, or Studio's injected signing
+ * (`-Pandroid.injected.signing.store.file`), is left alone.
  */
 internal class ReleaseSigning(
     private val project: Project,
@@ -54,13 +61,23 @@ internal class ReleaseSigning(
 ) {
     private val decodedKeystore = project.layout.buildDirectory.file("kit/signing/release.jks")
     private var appOwnsSigning = false
+    private var eager = false
+
+    /**
+     * Android Studio's "Generate Signed Bundle / APK" injects its own signing through these
+     * properties; AGP applies it, so kit neither replaces nor gates it.
+     */
+    private val injectedSigning: Boolean =
+        project.providers.gradleProperty(INJECTED_STORE_FILE).isPresent
 
     private val keystore: Provider<KitKeystore> =
         project.providers.of(KitKeystoreSource::class.java) {
             parameters.keystoreFile.set(project.providers.gradleProperty(SigningEnv.KEYSTORE_FILE_PROPERTY))
             parameters.decodedFile.set(decodedKeystore)
-            parameters.allowDebugFallback.set(kit.allowDebugFallback)
         }
+
+    private val cleanupService =
+        project.gradle.sharedServices.registerIfAbsent("kitKeystoreCleanup", KitKeystoreCleanup::class.java) {}
 
     private val task: TaskProvider<KitReleaseSigningTask> =
         project.tasks.register("kitReleaseSigning", KitReleaseSigningTask::class.java) {
@@ -69,34 +86,47 @@ internal class ReleaseSigning(
             keystoreFile.set(project.providers.gradleProperty(SigningEnv.KEYSTORE_FILE_PROPERTY))
             decodedFile.set(decodedKeystore)
             allowDebugFallback.set(kit.allowDebugFallback)
+            cleanup.set(cleanupService)
+            usesService(cleanupService)
         }
 
     fun finalizeDsl(dsl: ApplicationExtension) {
         val release = dsl.buildTypes.findByName(KitReleasePlugin.RELEASE) ?: return
-        appOwnsSigning = release.signingConfig != null
-        if (appOwnsSigning || supportsLazySigning) return
+        appOwnsSigning = release.signingConfig != null || injectedSigning
+        if (appOwnsSigning) return
+        val fallback = kit.allowDebugFallback.get()
+        // Lazy path: AGP 9.4+, no fallback. The fallback must hand AGP its own `debug` DSL config, the
+        // only one whose missing keystore validateSigning creates (a lazily supplied copy fails on a fresh
+        // ANDROID_USER_HOME), so it resolves at configuration time like AGP < 9.4.
+        eager = fallback || !supportsLazySigning
+        if (!eager) return
 
-        val resolved = keystore.orNull ?: return
+        val resolved = keystore.orNull
         release.signingConfig =
-            dsl.signingConfigs.create("kitRelease") {
-                storeFile = resolved.storeFile
-                storePassword = resolved.storePassword
-                keyAlias = resolved.keyAlias
-                keyPassword = resolved.keyPassword
+            when {
+                resolved != null ->
+                    dsl.signingConfigs.create("kitRelease") {
+                        storeFile = resolved.storeFile
+                        storePassword = resolved.storePassword
+                        keyAlias = resolved.keyAlias
+                        keyPassword = resolved.keyPassword
+                    }
+                fallback -> dsl.signingConfigs.getByName("debug")
+                else -> null
             }
     }
 
     fun wire(variant: ApplicationVariant) {
         if (appOwnsSigning) return
-        if (supportsLazySigning) {
-            fromProvider!!.invoke(variant.signingConfig, keystore.map(ToSigningConfigInfo()))
-        }
+        if (!eager) fromProvider!!.invoke(variant.signingConfig, keystore.map(ToSigningConfigInfo()))
         val v = variant.name.replaceFirstChar { it.uppercase() }
         val gated = setOf("validateSigning$v", "package$v", "package${v}Bundle", "sign${v}Bundle")
         project.tasks.named { it in gated }.configureEach { dependsOn(task) }
     }
 
     private companion object {
+        const val INJECTED_STORE_FILE = "android.injected.signing.store.file"
+
         /** `SigningConfig.from(Provider<SigningConfigInfo>)`, AGP 9.4+. kit compiles against 9.2.1. */
         val fromProvider =
             SigningConfig::class.java.methods.firstOrNull { method ->
@@ -112,19 +142,20 @@ internal data class KitKeystore(
     val keyAlias: String,
     val storePassword: String,
     val keyPassword: String,
-) : Serializable
+) : Serializable {
+    /** Never print the passwords (Gradle may render values in errors and debug logs). */
+    override fun toString() = "KitKeystore(storeFile=$storeFile, keyAlias=$keyAlias, storePassword=****, keyPassword=****)"
+}
 
 /**
  * Where the release keystore comes from, without touching its contents: -Pkit.keystoreFile, else the
  * path ANDROID_KEYSTORE_BASE64 decodes to, each with ANDROID_KEYSTORE_ALIAS / _PASSWORD (the key
- * password is the store password). Absent when incomplete, or the debug keystore with
- * allowDebugFallback.
+ * password is the store password). Absent when incomplete.
  */
 internal abstract class KitKeystoreSource : ValueSource<KitKeystore, KitKeystoreSource.Params> {
     interface Params : ValueSourceParameters {
         val keystoreFile: Property<String>
         val decodedFile: RegularFileProperty
-        val allowDebugFallback: Property<Boolean>
     }
 
     override fun obtain(): KitKeystore? {
@@ -133,13 +164,7 @@ internal abstract class KitKeystoreSource : ValueSource<KitKeystore, KitKeystore
         val file =
             parameters.keystoreFile.orNull?.takeIf { it.isNotBlank() }?.let(::File)
                 ?: SigningEnv.get(SigningEnv.BASE64)?.let { parameters.decodedFile.get().asFile }
-        if (file != null && alias != null && password != null) return KitKeystore(file, alias, password, password)
-        return if (parameters.allowDebugFallback.getOrElse(false)) debugKeystore() else null
-    }
-
-    private fun debugKeystore(): KitKeystore {
-        val home = System.getenv("ANDROID_USER_HOME") ?: File(System.getProperty("user.home"), ".android").path
-        return KitKeystore(File(home, "debug.keystore"), "androiddebugkey", "android", "android")
+        return if (file != null && alias != null && password != null) KitKeystore(file, alias, password, password) else null
     }
 }
 
@@ -166,6 +191,10 @@ abstract class KitReleaseSigningTask : DefaultTask() {
 
     @get:Internal
     abstract val allowDebugFallback: Property<Boolean>
+
+    /** Deletes the decoded keystore when the build finishes. */
+    @get:Internal
+    abstract val cleanup: Property<KitKeystoreCleanup>
 
     init {
         doNotTrackState("Reads signing secrets from the environment; never snapshot them")
@@ -195,7 +224,9 @@ abstract class KitReleaseSigningTask : DefaultTask() {
             } catch (e: IllegalArgumentException) {
                 throw GradleException("kit.release: ${SigningEnv.BASE64} is not valid base64", e)
             }
-        writeOwnerOnly(decodedFile.get().asFile, bytes)
+        val target = decodedFile.get().asFile
+        cleanup.get().track(target)
+        writeOwnerOnly(target, bytes)
     }
 
     private fun writeOwnerOnly(
@@ -211,5 +242,23 @@ abstract class KitReleaseSigningTask : DefaultTask() {
             Files.createFile(path)
         }
         Files.write(path, bytes)
+    }
+}
+
+/**
+ * Deletes decoded keystores at the end of the build. A shared build service is closed once the build
+ * (and every task that used it) is done, also on failure, and works with the configuration cache.
+ */
+abstract class KitKeystoreCleanup :
+    BuildService<BuildServiceParameters.None>,
+    AutoCloseable {
+    private val files = java.util.concurrent.ConcurrentHashMap.newKeySet<File>()
+
+    fun track(file: File) {
+        files += file
+    }
+
+    override fun close() {
+        files.forEach { it.delete() }
     }
 }

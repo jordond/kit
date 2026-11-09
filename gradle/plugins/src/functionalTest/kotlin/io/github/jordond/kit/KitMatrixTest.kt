@@ -1,6 +1,5 @@
 package io.github.jordond.kit
 
-import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DynamicContainer
 import org.junit.jupiter.api.DynamicContainer.dynamicContainer
@@ -8,9 +7,6 @@ import org.junit.jupiter.api.DynamicNode
 import org.junit.jupiter.api.DynamicTest.dynamicTest
 import org.junit.jupiter.api.TestFactory
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.attribute.PosixFilePermission
-import java.util.Base64
 
 /**
  * The TestKit matrix (PLAN §14). Each cell builds one fixture and runs these in order; the full set
@@ -30,8 +26,18 @@ class KitMatrixTest {
                     dynamicTest("a changed -Pkit.versionCode reuses the configuration cache") { ccReused(fixture) },
                     dynamicTest("lint registers spotlessCheck") { lint(fixture) },
                     dynamicTest("an unsigned release build fails") { unsignedFails(fixture) },
-                    dynamicTest("a release build signs from ANDROID_KEYSTORE_*") { signedFromEnv(fixture) },
+                    dynamicTest("alias or password missing fails naming them") { SigningScenarios.partialEnv(fixture) },
+                    dynamicTest("a release build signs from ANDROID_KEYSTORE_*, deletes the keystore, leaks nothing") {
+                        SigningScenarios.fromEnv(fixture)
+                    },
+                    dynamicTest("a release build signs from -Pkit.keystoreFile, leaks nothing") { SigningScenarios.fromKeystoreFile(fixture) },
+                    dynamicTest("allowDebugFallback signs with AGP's debug key (empty ANDROID_USER_HOME)") {
+                        SigningScenarios.debugFallback(fixture)
+                    },
                     dynamicTest("a missing catalog key fails naming it") { missingCatalogKey(fixture) },
+                    dynamicTest("nested modules get path namespaces; duplicates fail") {
+                        SigningScenarios.nestedNamespaces(Fixture(File(tmp, "${cell.name}-nested"), cell))
+                    },
                 )
             val b3 =
                 if (cell == KitMatrixCell.MAX) {
@@ -77,37 +83,6 @@ class KitMatrixTest {
     private fun unsignedFails(fixture: Fixture) {
         val result = fixture.fail(":android:assembleRelease")
         assertTrue(result.output.contains(NO_SIGNING), result.output.takeLast(4000))
-    }
-
-    private fun signedFromEnv(fixture: Fixture) {
-        val keystore = File(fixture.dir, "../${fixture.dir.name}-release.jks")
-        keystore.delete()
-        val keytool = File(System.getProperty("java.home"), "bin/keytool").path
-        val process =
-            ProcessBuilder(
-                keytool, "-genkeypair", "-keystore", keystore.path, "-storepass", "kitpass1", "-keypass", "kitpass1",
-                "-alias", "kit", "-keyalg", "RSA", "-keysize", "2048", "-validity", "365", "-dname", "CN=kit",
-            ).redirectErrorStream(true).start()
-        assertEquals(0, process.waitFor(), process.inputStream.bufferedReader().readText())
-
-        val env =
-            mapOf(
-                "ANDROID_KEYSTORE_BASE64" to Base64.getEncoder().encodeToString(keystore.readBytes()),
-                "ANDROID_KEYSTORE_ALIAS" to "kit",
-                "ANDROID_KEYSTORE_PASSWORD" to "kitpass1",
-            )
-        fixture.build(":android:assembleRelease", env = env)
-
-        val apk = fixture.file("android/build/outputs/apk/release/android-release.apk")
-        assertTrue(apk.isFile, "no signed APK at $apk")
-        val decoded = fixture.file("android/build/kit/signing/release.jks")
-        assertTrue(decoded.isFile)
-        assertEquals(
-            setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
-            Files.getPosixFilePermissions(decoded.toPath()),
-        )
-        val leaked = fixture.file(".gradle").walkTopDown().filter { it.extension in setOf("jks", "keystore") }.toList()
-        assertTrue(leaked.isEmpty(), "keystore written under .gradle/: $leaked")
     }
 
     private fun missingCatalogKey(fixture: Fixture) {
