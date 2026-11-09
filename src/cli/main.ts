@@ -18,6 +18,8 @@ interface Leaf {
   description: string
   group: string
   source: 'builtin' | 'repo'
+  /** Repo command that replaces the built-in with the same path (known once loaded). */
+  override?: boolean
   load: () => Promise<KitCommand<Args>>
 }
 
@@ -66,7 +68,10 @@ function buildTree(
   const names = [...new Set(leaves.map((l) => l.path[depth] as string))]
   for (const name of names) {
     const here = leaves.filter((l) => l.path[depth] === name)
-    const leaf = here.find((l) => l.path.length === depth + 1)
+    const atDepth = here.filter((l) => l.path.length === depth + 1)
+    // An overriding repo command takes the built-in's place in help and dispatch.
+    const leaf =
+      atDepth.find((l) => l.source === 'repo' && (l.override || loaded.get(l)?.override)) ?? atDepth[0]
     const children = here.filter((l) => l.path.length > depth + 1)
     const loadedCmd = leaf ? loaded.get(leaf) : undefined
     const base: Command & { group?: string } = loadedCmd
@@ -159,7 +164,7 @@ async function main(argv: string[]): Promise<number> {
     }
   }
 
-  // setup: passthrough commands take every token after their path as-is, help flags included.
+  // Passthrough commands take every token after their path as-is, help flags included.
   const picked = target && loaded.get(target)
   if (target && picked?.passthrough) {
     const rest = argv.slice(target.path.length)
@@ -174,7 +179,10 @@ async function main(argv: string[]): Promise<number> {
       (l) => l.source === 'repo' && startsWith(l.path, tokens.slice(0, l.path.length - 1)),
     )
     await Promise.all(level.map(async (l) => loaded.set(l, await l.load())))
-    for (const l of level) l.description = loaded.get(l)?.description ?? ''
+    for (const l of level) {
+      l.description = loaded.get(l)?.description ?? ''
+      l.override = loaded.get(l)?.override
+    }
     if (!target) for (const l of level) loaded.delete(l)
   }
 

@@ -15,6 +15,7 @@ export default defineCommand({
     const { runInteractive } = await import('../lib/proc')
     const { ExitCode, KitError } = await import('../lib/errors')
     const { root, config } = requireProject(ctx)
+    if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
     const name = singleTarget(ctx, 'dev')
     const env = checkEnv(config, name, ctx.args.env)
     const cmds = targetCommands(root, config, name, 'dev', { env, extra: ctx.rest })

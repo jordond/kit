@@ -24,6 +24,7 @@ export default defineCommand({
     if (target?.kind !== 'worker') {
       throw new KitError(`"${name}" is not a worker target`, hint, ExitCode.usage)
     }
+    if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
     const dir = join(root, target.dir)
     process.exitCode = await run(pmExec(detectPackageManager(dir, root), 'wrangler', ...args), { cwd: dir })
   },
