@@ -6,11 +6,29 @@ export type Verb = (typeof verbs)[number]
 export const kinds = ['gradle', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
 
-const command = z.union([z.string(), z.array(z.string())])
+export const tracks = ['internal', 'alpha', 'beta', 'prod'] as const
+export type Track = (typeof tracks)[number]
+
+/** A command string, or a list run in order. `false` turns a kind's default off. */
+const command = z.union([z.string(), z.array(z.string()), z.literal(false)])
+export type CommandValue = z.infer<typeof command>
+
 const verbOverrides = Object.fromEntries(verbs.map((v) => [v, command.optional()])) as Record<
   Verb,
   z.ZodOptional<typeof command>
 >
+
+const deploy = z.union([
+  command,
+  z
+    .object({
+      /** Deploy command; defaults to the kind's. */
+      run: command.optional(),
+      /** kit commands run first, e.g. `env sync`. */
+      before: z.array(z.string()).optional(),
+    })
+    .strict(),
+])
 
 const target = z
   .object({
@@ -18,7 +36,16 @@ const target = z
     dir: z.string(),
     envs: z.array(z.string()).optional(),
     ...verbOverrides,
-    deploy: z.union([command, z.object({ before: z.array(z.string()).optional() })]).optional(),
+    deploy: deploy.optional(),
+  })
+  .strict()
+export type TargetConfig = z.output<typeof target>
+
+const workspace = z
+  .object({
+    ...verbOverrides,
+    /** Commands run before lint, typecheck, test and build when the workspace runs (codegen). */
+    prepare: command.optional(),
   })
   .strict()
 
@@ -52,11 +79,19 @@ export const configSchema = z
       })
       .strict()
       .optional(),
-    workspace: z.object(verbOverrides).strict().optional(),
+    workspace: workspace.optional(),
     targets: z.record(z.string(), target).default({}),
+    cloudflare: z
+      .object({
+        accountId: z.string().optional(),
+        d1: z.record(z.string(), z.object({ name: z.string(), target: z.string() }).strict()).optional(),
+      })
+      .strict()
+      .optional(),
     release: z
       .object({
         branches: z.array(z.string()).optional(),
+        notes: z.object({ maxLength: z.number().int().positive().optional() }).strict().optional(),
         preflight: z.array(z.string()).optional(),
         ios: z
           .object({
@@ -79,18 +114,38 @@ export const configSchema = z
               .array(
                 z.object({
                   task: z.string(),
-                  tracks: z.array(z.enum(['internal', 'alpha', 'beta', 'prod'])),
+                  tracks: z.array(z.enum(tracks)),
                 }),
               )
               .optional(),
           })
           .strict()
           .optional(),
+        services: z
+          .record(
+            z.string(),
+            z.object({ versionKey: z.string(), build: z.string().optional(), deploy: z.string() }).strict(),
+          )
+          .optional(),
       })
       .strict()
       .optional(),
   })
   .strict()
+  .superRefine((c, ctx) => {
+    for (const [name, d] of Object.entries(c.cloudflare?.d1 ?? {})) {
+      if (!c.targets[d.target]) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['cloudflare', 'd1', name, 'target'],
+          message: `Unknown target "${d.target}"`,
+        })
+      }
+    }
+    if (c.targets.workspace) {
+      ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })
+    }
+  })
 
 export type KitConfigInput = z.input<typeof configSchema>
 export type KitConfig = z.output<typeof configSchema>

@@ -9,12 +9,50 @@ export interface BuiltinEntry {
 }
 
 /** Static manifest: help can list built-ins without importing them. */
+/** Static manifest: help can list built-ins without importing them. */
 export const builtins: BuiltinEntry[] = [
+  { path: ['dev'], description: 'Run a dev server', group: 'Develop', load: () => import('../commands/dev') },
+  {
+    path: ['build'],
+    description: 'Build every target',
+    group: 'Develop',
+    load: () => import('../commands/build'),
+  },
+  {
+    path: ['deploy'],
+    description: 'Deploy a target',
+    group: 'Develop',
+    load: () => import('../commands/deploy'),
+  },
   {
     path: ['lint'],
     description: 'Lint every target',
     group: 'Quality',
     load: () => import('../commands/lint'),
+  },
+  {
+    path: ['format'],
+    description: 'Format every target',
+    group: 'Quality',
+    load: () => import('../commands/format'),
+  },
+  {
+    path: ['typecheck'],
+    description: 'Typecheck every target',
+    group: 'Quality',
+    load: () => import('../commands/typecheck'),
+  },
+  {
+    path: ['check'],
+    description: 'Lint and typecheck every target',
+    group: 'Quality',
+    load: () => import('../commands/check'),
+  },
+  {
+    path: ['test'],
+    description: 'Run the test suites',
+    group: 'Quality',
+    load: () => import('../commands/test'),
   },
   {
     path: ['release', 'ios'],
@@ -34,15 +72,8 @@ export const builtins: BuiltinEntry[] = [
     group: 'Setup',
     load: () => import('../commands/config'),
   },
-  {
-    path: ['spike', 'tree'],
-    description: 'S6 spike: task tree + prompts on stderr',
-    group: 'Spike',
-    load: () => import('../commands/spike-tree'),
-  },
 ]
 
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
-  spike: 'Phase 0 spikes',
 }

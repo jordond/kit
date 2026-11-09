@@ -12,6 +12,7 @@ export const globalArgs = {
   yes: { type: 'boolean', short: 'y', description: 'Accept confirmations (never skips prod)' },
   verbose: { type: 'boolean', short: 'v', description: 'Stream all child output' },
   quiet: { type: 'boolean', short: 'q', description: 'Errors and summary only' },
+  bail: { type: 'boolean', description: 'Stop at the first failure' },
 } as const satisfies Args
 
 export interface Flags {
@@ -20,6 +21,7 @@ export interface Flags {
   yes: boolean
   verbose: boolean
   quiet: boolean
+  bail: boolean
   /** True when prompts are allowed: stdin and stderr are TTYs, not CI, not --json. */
   interactive: boolean
   ci: boolean
@@ -29,7 +31,9 @@ export interface KitContext<A extends Args = Args> {
   root: string | undefined
   config: KitConfig | undefined
   args: ArgValues<A>
+  /** Positional arguments after the command path (`kit test api web` → ['api', 'web']). */
   positionals: string[]
+  /** Arguments after `--`. */
   rest: string[]
   flags: Flags
   log: Logger
@@ -57,7 +61,29 @@ export interface Runtime {
   config: KitConfig | undefined
 }
 
-function computeFlags(values: Record<string, unknown>): Flags {
+/** gunshi includes the subcommand tokens in positionals; drop them. */
+function stripPath(positionals: string[], path: readonly string[] = []): string[] {
+  let i = 0
+  while (i < path.length && positionals[i] === path[i]) i++
+  return positionals.slice(i)
+}
+
+/** Root and config, or exit 3 when kit runs outside a project. */
+export function requireProject(ctx: Pick<KitContext, 'root' | 'config'>): {
+  root: string
+  config: KitConfig
+} {
+  if (!ctx.root || !ctx.config) {
+    throw new KitError(
+      'No kit.config.ts found here or in any parent directory',
+      'Run `kit init`',
+      ExitCode.config,
+    )
+  }
+  return { root: ctx.root, config: ctx.config }
+}
+
+export function computeFlags(values: Record<string, unknown>): Flags {
   const ci = process.env.CI === 'true' || process.env.CI === '1'
   const json = values.json === true
   return {
@@ -66,8 +92,9 @@ function computeFlags(values: Record<string, unknown>): Flags {
     yes: values.yes === true,
     verbose: values.verbose === true,
     quiet: values.quiet === true,
+    bail: values.bail === true,
     ci,
-    interactive: !json && !ci && !!process.stdin.isTTY && !!process.stderr.isTTY,
+    interactive: !json && !ci && !process.env.KIT_NO_INPUT && !!process.stdin.isTTY && !!process.stderr.isTTY,
   }
 }
 
@@ -92,7 +119,7 @@ export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): Comm
         root: rt.root,
         config: rt.config,
         args: ctx.values as ArgValues<Args>,
-        positionals: ctx.positionals,
+        positionals: stripPath(ctx.positionals, ctx.commandPath),
         rest: ctx.rest,
         flags: computeFlags(ctx.values),
         log,

@@ -4,6 +4,7 @@ import pc from 'picocolors'
 import pkg from '../../package.json' with { type: 'json' }
 import { findRoot, loadConfig, loadDotEnv } from '../config/load'
 import type { KitConfig } from '../config/schema'
+import { installSignalHandlers, interrupted, runCleanup } from '../lib/cleanup'
 import { ExitCode, KitError } from '../lib/errors'
 import { log } from '../lib/log'
 import { builtins, groupDescriptions } from './builtins'
@@ -205,8 +206,10 @@ async function main(argv: string[]): Promise<number> {
   return process.exitCode === undefined ? 0 : Number(process.exitCode)
 }
 
+installSignalHandlers()
 try {
   process.exitCode = await main(process.argv.slice(2))
+  if (interrupted()) process.exitCode = ExitCode.interrupted
 } catch (e) {
   if (e instanceof KitError) {
     log.error(e.message, e.hint)
@@ -218,3 +221,4 @@ try {
     process.exitCode = ExitCode.failed
   }
 }
+await runCleanup()

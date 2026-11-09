@@ -1,0 +1,8 @@
+{
+  "name": "web",
+  "scripts": {
+    "build": "astro build",
+    "deploy": "astro deploy",
+    "deploy:staging": "astro deploy staging"
+  }
+}
