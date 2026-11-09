@@ -160,6 +160,28 @@ export function inRangeOutdated(table: string): string[] {
   return [...names]
 }
 
+/** `bun outdated`'s table as rows keyed by its lower-cased header (`package`, `current`, `update`, …). */
+export function outdatedRows(table: string): Record<string, string>[] {
+  let header: string[] | undefined
+  const rows: Record<string, string>[] = []
+  for (const line of table.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('|')) continue
+    const cells = trimmed
+      .replace(/^\||\|$/g, '')
+      .split('|')
+      .map((c) => c.trim())
+    if (!header) {
+      if (cells[0] === 'Package') header = cells.map((h) => h.toLowerCase())
+      continue
+    }
+    if (cells.every((c) => /^[-:]*$/.test(c))) continue
+    const keys = header
+    rows.push(Object.fromEntries(keys.map((h, i) => [h, cells[i] ?? ''])))
+  }
+  return rows
+}
+
 export interface OpenManifest {
   readonly path: string
   readonly manifest: PackageManifest
@@ -242,9 +264,17 @@ export default defineCommand({
 })
 
 async function list(ctx: KitContext, root: string): Promise<void> {
-  const { run } = await import('../lib/proc')
+  const { run, runCapture } = await import('../lib/proc')
+  const { emitJson } = await import('../lib/log')
   if (ctx.flags.dryRun) {
-    ctx.log.step(OUTDATED_CMD.join(' '))
+    if (ctx.flags.json) emitJson({ dryRun: true, cmd: OUTDATED_CMD })
+    else ctx.log.step(OUTDATED_CMD.join(' '))
+    return
+  }
+  if (ctx.flags.json) {
+    const { code, stdout } = await runCapture(OUTDATED_CMD, { cwd: root })
+    emitJson({ ok: code === 0, outdated: outdatedRows(stdout) })
+    if (code !== 0) process.exitCode = code
     return
   }
   process.exitCode = await run(OUTDATED_CMD, { cwd: root })
@@ -256,14 +286,23 @@ async function list(ctx: KitContext, root: string): Promise<void> {
  * install then re-settles the lockfile against the restored manifests.
  */
 async function update(ctx: KitContext, root: string): Promise<void> {
-  const { run, runCapture } = await import('../lib/proc')
+  const { run, runCapture, runToStderr } = await import('../lib/proc')
+  const { onCleanup } = await import('../lib/cleanup')
+  const { emitJson } = await import('../lib/log')
+  // --json: bun's output goes to stderr and the one document comes last.
+  const exec = ctx.flags.json ? runToStderr : run
+  const report = (doc: { ok: boolean; packages: string[]; cmds?: string[][] }) => {
+    if (ctx.flags.json) emitJson({ dryRun: ctx.flags.dryRun, ...doc })
+  }
   const listed = await runCapture(OUTDATED_CMD, { cwd: root })
   if (listed.code !== 0) {
+    report({ ok: false, packages: [] })
     process.exitCode = listed.code
     return
   }
   const names = inRangeOutdated(listed.stdout)
   if (!names.length) {
+    report({ ok: true, packages: [] })
     ctx.log.success('Every declared range already has its newest match installed')
     return
   }
@@ -276,17 +315,28 @@ async function update(ctx: KitContext, root: string): Promise<void> {
     ['bun', 'install'],
   ]
   if (ctx.flags.dryRun) {
-    for (const c of cmds) ctx.log.step(c.join(' '))
+    report({ ok: true, packages: names, cmds })
+    if (!ctx.flags.json) for (const c of cmds) ctx.log.step(c.join(' '))
     return
   }
   const before = manifestPaths(root).map((path) => ({ path, text: readFileSync(path, 'utf8') }))
-  let code = 0
-  for (const cmd of cmds.slice(0, 2)) {
-    code = await run(cmd, { cwd: root })
-    if (code !== 0) break
+  const restore = () => {
+    for (const { path, text } of before) writeFileSync(path, text)
   }
-  for (const { path, text } of before) writeFileSync(path, text)
-  if (code === 0) code = await run(cmds[2]!, { cwd: root })
+  // A forced exit (second Ctrl-C) mid-update must still put the manifests back.
+  const off = onCleanup(restore)
+  let code = 0
+  try {
+    for (const cmd of cmds.slice(0, 2)) {
+      code = await exec(cmd, { cwd: root })
+      if (code !== 0) break
+    }
+  } finally {
+    off()
+    restore()
+  }
+  if (code === 0) code = await exec(cmds[2]!, { cwd: root })
+  report({ ok: code === 0, packages: names })
   if (code !== 0) process.exitCode = code
 }
 
@@ -294,7 +344,7 @@ async function latest(ctx: KitContext, root: string, names: string[]): Promise<v
   const pc = (await import('picocolors')).default
   const { ExitCode, KitError } = await import('../lib/errors')
   const { emitJson } = await import('../lib/log')
-  const { run } = await import('../lib/proc')
+  const { run, runToStderr } = await import('../lib/proc')
   const rootManifest = join(root, 'package.json')
   const files = manifestPaths(root).map((path) => ({ path, manifest: readManifest(path) }))
   const pinned = catalogRefs(readManifest(rootManifest))
@@ -310,27 +360,28 @@ async function latest(ctx: KitContext, root: string, names: string[]): Promise<v
     )
   }
   const edits = planned.flatMap((p) => p.edits)
-  if (ctx.flags.json) {
-    emitJson({
-      dryRun: ctx.flags.dryRun,
-      edits: edits.map((e) => ({ ...e, path: relative(root, e.path) || 'package.json' })),
-    })
-  } else {
+  const shown = edits.map((e) => ({ ...e, path: relative(root, e.path) || 'package.json' }))
+  if (!ctx.flags.json) {
     for (const { path, name, change } of edits) {
       const where = change.field === CATALOG_FIELD ? 'catalog' : `${relative(root, path)} ${change.field}`
       ctx.log.info(`  ${pc.bold(name)}  ${change.from} → ${pc.green(change.to)}  ${pc.dim(where)}`)
     }
   }
-  if (ctx.flags.dryRun) return
+  if (ctx.flags.dryRun) {
+    if (ctx.flags.json) emitJson({ dryRun: true, edits: shown })
+    return
+  }
   const touched = new Set(edits.map((e) => e.path))
   for (const { path, manifest } of files) if (touched.has(path)) writeManifest(path, manifest)
 
-  const code = await run(['bun', 'install'], { cwd: root })
+  // --json: bun's output goes to stderr and the one document comes last.
+  const code = await (ctx.flags.json ? runToStderr : run)(['bun', 'install'], { cwd: root })
   const manifest = readManifest(rootManifest)
   const restored = restoreCatalogRefs(manifest, pinned)
   if (restored.length) {
     writeManifest(rootManifest, manifest)
     ctx.log.dim(`re-pinned to the catalog: ${restored.join(', ')}`)
   }
+  if (ctx.flags.json) emitJson({ dryRun: false, ok: code === 0, edits: shown, restored })
   if (code !== 0) process.exitCode = code
 }

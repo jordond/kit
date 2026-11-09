@@ -185,6 +185,92 @@ describe('deps and help', () => {
     }
   })
 
+  /**
+   * bun-workers with a root manifest and a fake `bun` first on PATH: outdated/update/install are
+   * scripted (each prints to stdout), anything else (kit itself) goes to the real bun.
+   */
+  function bunWorkspace(update = 'echo "bun update out"') {
+    const bun = fixture('bun-workers', [])
+    const manifest = { name: 'ws', workspaces: [], dependencies: { 'left-pad': '^1.0.0' } }
+    writeFileSync(join(bun.dir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+    bun.script(
+      'bun',
+      `case "$1" in
+  outdated) printf '| Package | Current | Update | Latest |\\n|---|---|---|---|\\n| left-pad | 1.0.0 | 1.3.0 | 1.3.0 |\\n' ;;
+  update) ${update} ;;
+  install) echo "bun install out" ;;
+  *) exec "${process.execPath}" "$@" ;;
+esac`,
+    )
+    Bun.spawnSync(['chmod', '+x', join(bun.dir, '.fakebin/bun')])
+    return bun
+  }
+
+  test('deps update --json: one document last, bun output on stderr', async () => {
+    const bun = bunWorkspace()
+    try {
+      const r = await bun.kit(['deps', 'update', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toEqual({ dryRun: false, ok: true, packages: ['left-pad'] })
+      expect(r.stderr).toContain('bun update out')
+      expect(r.stderr).toContain('bun install out')
+    } finally {
+      bun.cleanup()
+    }
+  })
+
+  test('deps --json: the outdated table as rows', async () => {
+    const bun = bunWorkspace()
+    try {
+      const r = await bun.kit(['deps', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toEqual({
+        ok: true,
+        outdated: [{ package: 'left-pad', current: '1.0.0', update: '1.3.0', latest: '1.3.0' }],
+      })
+    } finally {
+      bun.cleanup()
+    }
+  })
+
+  test('deps latest --json: install runs before the document, which is the only stdout', async () => {
+    const server = Bun.serve({ port: 0, fetch: () => Response.json({ version: '2.0.0' }) })
+    const bun = bunWorkspace()
+    try {
+      const r = await bun.kit(['deps', 'latest', 'left-pad', '--json'], {
+        env: { npm_config_registry: `http://localhost:${server.port}` },
+      })
+      expect(r.code).toBe(0)
+      const doc = JSON.parse(r.stdout)
+      expect(doc).toMatchObject({ dryRun: false, ok: true, restored: [] })
+      expect(doc.edits[0].change).toEqual({ field: 'dependencies', from: '^1.0.0', to: '^2.0.0' })
+      expect(r.stderr).toContain('bun install out')
+    } finally {
+      bun.cleanup()
+      server.stop(true)
+    }
+  })
+
+  test('deps update: a forced exit mid-update still restores the manifest', async () => {
+    // `bun update` rewrites the manifest, then ignores SIGINT; the second Ctrl-C forces kit out.
+    const bun = bunWorkspace(
+      `trap '' INT; echo '{"rewritten":true}' > package.json; touch .updating; sleep 10`,
+    )
+    try {
+      const original = readFileSync(join(bun.dir, 'package.json'), 'utf8')
+      const proc = bun.spawn(['deps', 'update'])
+      for (let i = 0; i < 100 && !existsSync(join(bun.dir, '.updating')); i++) await Bun.sleep(50)
+      expect(readFileSync(join(bun.dir, 'package.json'), 'utf8')).toContain('rewritten')
+      proc.kill('SIGINT')
+      await Bun.sleep(100)
+      proc.kill('SIGINT')
+      expect(await proc.exited).toBe(130)
+      expect(readFileSync(join(bun.dir, 'package.json'), 'utf8')).toBe(original)
+    } finally {
+      bun.cleanup()
+    }
+  })
+
   test('help lists the setup commands outside a project', async () => {
     const r = await fx.kit(['--help'], { cwd: '..' })
     expect(r.code).toBe(0)
