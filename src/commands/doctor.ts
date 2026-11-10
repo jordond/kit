@@ -1,6 +1,5 @@
 import { defineCommand } from '../cli/command'
 import type { KitConfig } from '../config/schema'
-import { iosVersionDrift } from '../lib/release/version'
 
 /**
  * `kit doctor`: one line per check on stderr (✔ ok, ▲ warning, ✖ failure), `--json` on stdout.
@@ -205,21 +204,22 @@ export function checkEnvFile(example: string | undefined, env: string | undefine
 const KIT_USES = /jordond\/kit\/[^@\s]+@\S+\s*#\s*v?(\d+\.\d+\.\d+\S*)/g
 
 /**
- * Workflow `uses: jordond/kit/…@<sha> # vX.Y.Z` pins vs the package.json pin. The SHA itself isn't
- * resolved (stub): the version comment Renovate keeps next to it is compared instead.
+ * TOML `app-ios-version` == `release.ios.xcconfig` MARKETING_VERSION (what local Xcode builds show).
+ * `drift` is version.ts's iosVersionDrift, passed in so doctor loads it only when needed.
  */
-/** TOML `app-ios-version` == `release.ios.xcconfig` MARKETING_VERSION (what local Xcode builds show). */
-export function checkIosVersion(root: string, config: KitConfig): Check {
+export function checkIosVersion(
+  drift: () => { toml: string; xcconfig: string | undefined; file: string } | undefined,
+): Check {
   const label = 'iOS version'
   try {
-    const drift = iosVersionDrift(root, config)
-    if (!drift) return { id: 'ios-version', label, status: 'ok', detail: 'TOML and xcconfig agree' }
+    const d = drift()
+    if (!d) return { id: 'ios-version', label, status: 'ok', detail: 'TOML and xcconfig agree' }
     return {
       id: 'ios-version',
       label,
       status: 'fail',
-      detail: `TOML ${drift.toml}, ${drift.file} ${drift.xcconfig ?? '(no MARKETING_VERSION)'}`,
-      hint: `Set MARKETING_VERSION = ${drift.toml} in ${drift.file}`,
+      detail: `TOML ${d.toml}, ${d.file} ${d.xcconfig ?? '(no MARKETING_VERSION)'}`,
+      hint: `Set MARKETING_VERSION = ${d.toml} in ${d.file}`,
     }
   } catch (e) {
     return { id: 'ios-version', label, status: 'fail', detail: e instanceof Error ? e.message : String(e) }
@@ -227,9 +227,9 @@ export function checkIosVersion(root: string, config: KitConfig): Check {
 }
 
 /**
- * Release secrets for the configured platforms (PLAN §9.5), by name only. Missing ones fail on
- * GitHub Actions, where a release would stop on them, and only warn locally, where most work needs
- * no signing secrets.
+ * Release secrets for the configured platforms (PLAN §9.5), by name only. Missing ones only warn,
+ * on GitHub Actions too: most jobs (lint, PRs, forks, the other platform) get no signing secrets,
+ * and `kit release` itself stops on a missing one. The CI-only names are checked on Actions.
  */
 export function checkReleaseSecrets(
   secrets: { required: string[]; ci: string[]; optional: string[] },
@@ -248,7 +248,7 @@ export function checkReleaseSecrets(
     return {
       id: 'release-secrets',
       label,
-      status: onActions ? 'fail' : 'warn',
+      status: 'warn',
       detail: `missing ${missing.join(', ')}`,
       hint: renames.length
         ? `Rename in .env: ${renames.join(', ')}`
@@ -266,6 +266,10 @@ export function checkReleaseSecrets(
   }
 }
 
+/**
+ * Workflow `uses: jordond/kit/…@<sha> # vX.Y.Z` pins vs the package.json pin. The SHA itself isn't
+ * resolved (stub): the version comment Renovate keeps next to it is compared instead.
+ */
 export function checkCiPin(
   workflows: { file: string; text: string }[],
   pin: string | undefined,
@@ -357,6 +361,7 @@ export default defineCommand({
     const { ExitCode } = await import('../lib/errors')
 
     const { onGitHubActions, releaseSecrets, renameHints } = await import('../lib/release/creds')
+    const { iosVersionDrift } = await import('../lib/release/version')
     const root = ctx.root ?? process.cwd()
     const config = ctx.config
     const read = (p: string) => (existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined)
@@ -444,7 +449,7 @@ export default defineCommand({
       checkWranglerLogin(wrangler),
       miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
-      ...(config?.release?.ios?.xcconfig ? [checkIosVersion(root, config)] : []),
+      ...(config?.release?.ios?.xcconfig ? [checkIosVersion(() => iosVersionDrift(root, config))] : []),
       checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
         renameHints(m, (old) => !!process.env[old]),
       ),

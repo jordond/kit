@@ -26,6 +26,7 @@ export default defineCommand({
       iosVersionDrift,
       nextVersion,
       readVersion,
+      readXcconfig,
       setVersion,
       setXcconfigVersion,
     } = await import('../../lib/release/version')
@@ -97,22 +98,47 @@ export default defineCommand({
       return r.stdout.trim()
     }
 
+    // Compute every edit before writing any, and check the xcconfig is tracked (a gitignored one
+    // can't be committed), so a failure leaves the tree as it was.
+    const path = join(root, file)
+    const tomlBefore = readFileSync(path, 'utf8')
+    let tomlAfter = tomlBefore
+    for (const c of changes) tomlAfter = setVersion(tomlAfter, config, c.name, c.to)
+    const edits = [{ rel: file, path, before: tomlBefore, after: tomlAfter }]
+    if (xcconfig) {
+      const r = await runPiped(['git', 'ls-files', '--error-unmatch', '--', xcconfig], { cwd: root })
+      if (r.code !== 0) {
+        throw new KitError(
+          `${xcconfig} (release.ios.xcconfig) is not tracked by git`,
+          'Commit it first; kit commits the bump to it with the TOML',
+          ExitCode.precondition,
+        )
+      }
+      const before = readXcconfig(root, xcconfig)
+      edits.push({
+        rel: xcconfig,
+        path: join(root, xcconfig),
+        before,
+        after: setXcconfigVersion(before, xcconfig, iosChange!.to),
+      })
+    }
+
     let branch = base
     if (ctx.args.pr) {
       branch = `chore/bump-${changes.map((c) => `${c.name}-${c.to}`).join('-')}`
       await git('switch', '-c', branch)
     }
-    const path = join(root, file)
-    let text = readFileSync(path, 'utf8')
-    for (const c of changes) text = setVersion(text, config, c.name, c.to)
-    writeFileSync(path, text)
-    const files = [file]
-    if (xcconfig) {
-      const xcPath = join(root, xcconfig)
-      writeFileSync(xcPath, setXcconfigVersion(readFileSync(xcPath, 'utf8'), xcconfig, iosChange!.to))
-      files.push(xcconfig)
+    try {
+      for (const e of edits) writeFileSync(e.path, e.after)
+      await git('commit', '-m', subject, '--', ...edits.map((e) => e.rel))
+    } catch (err) {
+      for (const e of edits) writeFileSync(e.path, e.before)
+      if (ctx.args.pr) {
+        await runPiped(['git', 'switch', base], { cwd: root })
+        await runPiped(['git', 'branch', '-D', branch], { cwd: root })
+      }
+      throw err
     }
-    await git('commit', '-m', subject, '--', ...files)
     const sha = await git('rev-parse', '--short', 'HEAD')
     for (const c of changes) ctx.log.success(`${c.name} ${c.from} → ${c.to}`)
     ctx.log.dim(`  committed ${sha} on ${branch}: ${subject}`)

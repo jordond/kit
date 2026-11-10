@@ -312,6 +312,19 @@ describe('kit version', () => {
     expect(sh(['git', 'status', '--porcelain'])).toBe('')
   })
 
+  test('bump with an untracked xcconfig refuses and writes nothing', async () => {
+    sh(['git', 'rm', '-q', '--cached', 'client/ios/Configuration/Config.xcconfig'])
+    sh(['git', 'commit', '-qm', 'untrack'])
+    writeFileSync(join(f.dir, '.git/info/exclude'), 'client/ios/Configuration/Config.xcconfig\n')
+    const head = sh(['git', 'rev-parse', 'HEAD'])
+    const r = await run(['version', 'bump', 'patch', '--platform', 'ios', '--pr'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('is not tracked by git')
+    expect(sh(['git', 'rev-parse', 'HEAD'])).toBe(head)
+    expect(sh(['git', 'branch', '--show-current'])).toBe('main')
+    expect(sh(['git', 'status', '--porcelain'])).toBe('')
+  })
+
   test('drift between the TOML and the xcconfig: bump, release and doctor refuse', async () => {
     const xc = join(f.dir, 'client/ios/Configuration/Config.xcconfig')
     writeFileSync(xc, readFileSync(xc, 'utf8').replace('1.4.0', '1.3.9'))

@@ -82,6 +82,26 @@ describe('env sync / check', () => {
     })
   })
 
+  test('check: environment secrets count; --schema-only skips GitHub', async () => {
+    await fx.kit(['env', 'sync'])
+    fx.script(
+      'gh',
+      `case "$*" in
+  *repos/*/environments*) echo '{"environments":[{"name":"production"}]}' ;;
+  *organization-secrets*) echo '{"secrets":[]}' ;;
+  *"--env production"*) echo '[{"name":"DEPLOY_TOKEN"}]' ;;
+  *) echo '[]' ;;
+esac`,
+    )
+    const r = await fx.kit(['env', 'check', '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout).github).toMatchObject({ status: 'ok', missing: [] })
+    fx.script('gh', 'exit 99')
+    const s = await fx.kit(['env', 'check', '--schema-only', '--json'])
+    expect(s.code).toBe(0)
+    expect(JSON.parse(s.stdout).github).toMatchObject({ status: 'skipped', reason: '--schema-only' })
+  })
+
   test('check: invalid env exits 3 naming the key', async () => {
     const r = await fx.kit(['env', 'check', '--schema-only'], { env: { PUBLIC_URL: 'not a url' } })
     expect(r.code).toBe(3)

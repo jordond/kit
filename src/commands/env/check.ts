@@ -4,11 +4,15 @@ export default defineCommand({
   description: 'Validate .env, check outputs for drift, and check GitHub has every CI secret',
   group: 'Infra',
   args: {
-    'schema-only': { type: 'boolean', description: 'Validate .env only; skip output drift (CI)' },
+    'schema-only': {
+      type: 'boolean',
+      description: 'Validate .env only; skip output drift and GitHub secrets (CI)',
+    },
   },
   examples: 'kit env check\nkit env check --schema-only\nkit env check --json',
-  // GitHub: names in env.githubSecrets + the release secrets for configured platforms, via `gh secret
-  // list` (names only). Skipped on GitHub Actions, without gh, or when gh can't list (not logged in).
+  // GitHub: names in env.githubSecrets, plus the release secrets for configured platforms when a
+  // workflow releases; repo, environment and org secrets count (names only). Skipped with
+  // --schema-only, on GitHub Actions, without gh, or when gh can't list (not logged in).
   async run(ctx) {
     const { requireProject } = await import('../../cli/command')
     const { loadEnv } = await import('../../lib/env/load')
@@ -20,8 +24,10 @@ export default defineCommand({
     const drift = ctx.args['schema-only']
       ? []
       : checkOutputs(root, outputs(config, state.schema), state.values)
-    const { checkGithubSecrets } = await import('../../lib/env/github')
-    const github = await checkGithubSecrets(root, config)
+    const { checkGithubSecrets, skippedGithub } = await import('../../lib/env/github')
+    const github = ctx.args['schema-only']
+      ? skippedGithub('--schema-only')
+      : await checkGithubSecrets(root, config)
     const ok = !state.issues.length && !drift.length && github.status !== 'missing'
 
     if (ctx.flags.json) {

@@ -436,7 +436,7 @@ Options
   -v, --verbose      Stream all child output
   -q, --quiet        Errors and summary only
       --bail         Stop at the first failure
-      --schema-only  Validate .env only; skip output drift (CI)
+      --schema-only  Validate .env only; skip output drift and GitHub secrets (CI)
 
 "
 `;
