@@ -87,9 +87,10 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 - iOS: set `release.ios.xcconfig` to the xcconfig holding `MARKETING_VERSION` (what local Xcode builds
   show). `kit version bump` rewrites it in the same commit, and `kit release ios` / `kit doctor` fail
   if it ever differs from the TOML.
-- Secrets: `kit doctor` checks the release secrets for each configured platform (warns locally, fails
-  on GitHub Actions); `kit env check` compares `gh secret list` with `env.githubSecrets` plus those
-  release secrets and flags old names (`APPLE_*`, `FIREBASE_*`) to delete.
+- Secrets: `kit doctor` warns about missing release secrets for each configured platform (`kit release`
+  itself stops on them). `kit env check` fails when GitHub lacks a name from `env.githubSecrets`, or a
+  release secret when a workflow releases; repo, environment and org secrets count. It flags old names
+  (`APPLE_*`, `FIREBASE_*`) to delete.
 - Confirmation: `internal` none; `alpha`/`beta` a prompt (`--yes` skips); `prod` asks you to type `prod`
   locally (`--yes` doesn't skip) and in CI relies on the `production` environment's reviewers.
 - `--dry-run` runs preflight and the build, never uploads or tags.
