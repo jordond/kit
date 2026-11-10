@@ -157,3 +157,14 @@ describe('secret checks', () => {
     expect(r.stale).toEqual(['APPLE_ASC_KEY_ID', 'FIREBASE_TESTER_GROUP'])
   })
 })
+
+test('xcconfig MARKETING_VERSION read and rewrite keep the line', async () => {
+  const { setXcconfigVersion, xcconfigVersion } = await import('../../src/lib/release/version')
+  const text = '// c\nMARKETING_VERSION = 1.2.3 // note\nOTHER = 1\n'
+  expect(xcconfigVersion(text)).toBe('1.2.3')
+  expect(setXcconfigVersion(text, 'C.xcconfig', '1.3.0')).toBe(
+    '// c\nMARKETING_VERSION = 1.3.0 // note\nOTHER = 1\n',
+  )
+  expect(xcconfigVersion('OTHER = 1')).toBeUndefined()
+  expect(() => setXcconfigVersion('OTHER = 1', 'C.xcconfig', '1')).toThrow('has no MARKETING_VERSION line')
+})

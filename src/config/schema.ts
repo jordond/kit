@@ -123,6 +123,8 @@ export const configSchema = z
             scheme: z.string(),
             output: z.string(),
             teamId: z.string().optional(),
+            /** xcconfig holding MARKETING_VERSION: `kit version bump` keeps it equal to the TOML. */
+            xcconfig: z.string().optional(),
             testflightGroups: z.object({ alpha: z.string(), beta: z.string() }).partial().optional(),
             sentry: z.object({ org: z.string(), project: z.string() }).strict().optional(),
           })

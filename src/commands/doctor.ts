@@ -1,5 +1,6 @@
 import { defineCommand } from '../cli/command'
 import type { KitConfig } from '../config/schema'
+import { iosVersionDrift } from '../lib/release/version'
 
 /**
  * `kit doctor`: one line per check on stderr (✔ ok, ▲ warning, ✖ failure), `--json` on stdout.
@@ -207,6 +208,24 @@ const KIT_USES = /jordond\/kit\/[^@\s]+@\S+\s*#\s*v?(\d+\.\d+\.\d+\S*)/g
  * Workflow `uses: jordond/kit/…@<sha> # vX.Y.Z` pins vs the package.json pin. The SHA itself isn't
  * resolved (stub): the version comment Renovate keeps next to it is compared instead.
  */
+/** TOML `app-ios-version` == `release.ios.xcconfig` MARKETING_VERSION (what local Xcode builds show). */
+export function checkIosVersion(root: string, config: KitConfig): Check {
+  const label = 'iOS version'
+  try {
+    const drift = iosVersionDrift(root, config)
+    if (!drift) return { id: 'ios-version', label, status: 'ok', detail: 'TOML and xcconfig agree' }
+    return {
+      id: 'ios-version',
+      label,
+      status: 'fail',
+      detail: `TOML ${drift.toml}, ${drift.file} ${drift.xcconfig ?? '(no MARKETING_VERSION)'}`,
+      hint: `Set MARKETING_VERSION = ${drift.toml} in ${drift.file}`,
+    }
+  } catch (e) {
+    return { id: 'ios-version', label, status: 'fail', detail: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 /**
  * Release secrets for the configured platforms (PLAN §9.5), by name only. Missing ones fail on
  * GitHub Actions, where a release would stop on them, and only warn locally, where most work needs
@@ -425,6 +444,7 @@ export default defineCommand({
       checkWranglerLogin(wrangler),
       miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
+      ...(config?.release?.ios?.xcconfig ? [checkIosVersion(root, config)] : []),
       checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
         renameHints(m, (old) => !!process.env[old]),
       ),

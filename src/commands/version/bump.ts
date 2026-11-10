@@ -20,9 +20,15 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
     const { ExitCode, KitError } = await import('../../lib/errors')
-    const { bumpLevels, expandPlatforms, nextVersion, readVersion, setVersion } = await import(
-      '../../lib/release/version'
-    )
+    const {
+      bumpLevels,
+      expandPlatforms,
+      iosVersionDrift,
+      nextVersion,
+      readVersion,
+      setVersion,
+      setXcconfigVersion,
+    } = await import('../../lib/release/version')
     const { checkBranch, checkClean } = await import('../../lib/release/mobile')
     const { push } = await import('../../lib/git')
     const { ProcError, runPiped } = await import('../../lib/proc')
@@ -47,14 +53,29 @@ export default defineCommand({
       return { name, from, to: nextVersion(from, level as 'patch') }
     })
     const file = config.versions!.file
+    // iOS: keep release.ios.xcconfig's MARKETING_VERSION equal to the TOML, in the same commit.
+    const iosChange = changes.find((c) => c.name === 'ios')
+    const xcconfig = iosChange ? config.release?.ios?.xcconfig : undefined
+    if (xcconfig) {
+      const drift = iosVersionDrift(root, config)
+      if (drift) {
+        throw new KitError(
+          `iOS version drift before the bump: ${file} says ${drift.toml}, ${xcconfig} says ${drift.xcconfig ?? '(no MARKETING_VERSION)'}`,
+          'Make them equal (the TOML is the source), commit, then bump',
+          ExitCode.precondition,
+        )
+      }
+    }
     const subject = `chore(release): ${changes.map((c) => `${c.name} ${c.to}`).join(', ')}`
     const json = (extra: Record<string, unknown>) => {
-      if (ctx.flags.json) emitJson({ file, changes, commit: subject, ...extra })
+      if (ctx.flags.json)
+        emitJson({ file, ...(xcconfig ? { xcconfig } : {}), changes, commit: subject, ...extra })
     }
     if (ctx.flags.dryRun) {
       json({ dryRun: true })
       if (!ctx.flags.json) {
         for (const c of changes) ctx.log.step(`${c.name}: ${c.from} → ${c.to}`)
+        if (xcconfig) ctx.log.step(`${xcconfig}: MARKETING_VERSION → ${iosChange!.to}`)
         ctx.log.dim(
           `  commit "${subject}"${ctx.args['no-push'] ? '' : ctx.args.pr ? ', push a branch and open a PR' : ', push'}`,
         )
@@ -85,7 +106,13 @@ export default defineCommand({
     let text = readFileSync(path, 'utf8')
     for (const c of changes) text = setVersion(text, config, c.name, c.to)
     writeFileSync(path, text)
-    await git('commit', '-m', subject, '--', file)
+    const files = [file]
+    if (xcconfig) {
+      const xcPath = join(root, xcconfig)
+      writeFileSync(xcPath, setXcconfigVersion(readFileSync(xcPath, 'utf8'), xcconfig, iosChange!.to))
+      files.push(xcconfig)
+    }
+    await git('commit', '-m', subject, '--', ...files)
     const sha = await git('rev-parse', '--short', 'HEAD')
     for (const c of changes) ctx.log.success(`${c.name} ${c.from} → ${c.to}`)
     ctx.log.dim(`  committed ${sha} on ${branch}: ${subject}`)

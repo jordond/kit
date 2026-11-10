@@ -13,6 +13,7 @@ export default {
       scheme: 'iosApp',
       output: 'App.ipa',
       teamId: 'TEAM123',
+      xcconfig: 'client/ios/Configuration/Config.xcconfig',
       testflightGroups: { beta: 'Beta Testers' },
       sentry: { org: 'org', project: 'ios' },
     },

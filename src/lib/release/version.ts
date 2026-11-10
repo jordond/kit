@@ -99,3 +99,38 @@ export function expandPlatforms(config: KitConfig, platform: string): string[] {
   versionKey(config, platform)
   return [platform]
 }
+
+const MARKETING = /^(\s*MARKETING_VERSION\s*=\s*)([^\s/]+)(.*)$/m
+
+/** MARKETING_VERSION from xcconfig text, or undefined when the key isn't set there. */
+export function xcconfigVersion(text: string): string | undefined {
+  return text.match(MARKETING)?.[2]
+}
+
+/** Rewrite MARKETING_VERSION's value, keeping the rest of the line (comments, spacing). */
+export function setXcconfigVersion(text: string, file: string, to: string): string {
+  if (!MARKETING.test(text)) {
+    throw new KitError(
+      `${file} has no MARKETING_VERSION line`,
+      'Add `MARKETING_VERSION = <version>`',
+      ExitCode.config,
+    )
+  }
+  return text.replace(MARKETING, (_m, head: string, _v: string, tail: string) => `${head}${to}${tail}`)
+}
+
+/**
+ * The iOS version must read the same in the TOML and in `release.ios.xcconfig`: local Xcode builds
+ * use the xcconfig, releases the TOML (one binary reporting two versions splits analytics).
+ * Returns the mismatch, or undefined when equal or no xcconfig is configured.
+ */
+export function iosVersionDrift(
+  root: string,
+  config: KitConfig,
+): { toml: string; xcconfig: string | undefined; file: string } | undefined {
+  const file = config.release?.ios?.xcconfig
+  if (!file || !config.versions?.keys.ios) return undefined
+  const toml = readVersion(root, config, 'ios')
+  const xc = xcconfigVersion(readFileSync(join(root, file), 'utf8'))
+  return xc === toml ? undefined : { toml, xcconfig: xc, file }
+}

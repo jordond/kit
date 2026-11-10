@@ -84,6 +84,12 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 | `kit fastlane …` | fastlane with kit's env and the ASC/Play key files |
 
 - Build numbers are never committed: `max(store) + 1`, or `--build` / `--code`.
+- iOS: set `release.ios.xcconfig` to the xcconfig holding `MARKETING_VERSION` (what local Xcode builds
+  show). `kit version bump` rewrites it in the same commit, and `kit release ios` / `kit doctor` fail
+  if it ever differs from the TOML.
+- Secrets: `kit doctor` checks the release secrets for each configured platform (warns locally, fails
+  on GitHub Actions); `kit env check` compares `gh secret list` with `env.githubSecrets` plus those
+  release secrets and flags old names (`APPLE_*`, `FIREBASE_*`) to delete.
 - Confirmation: `internal` none; `alpha`/`beta` a prompt (`--yes` skips); `prod` asks you to type `prod`
   locally (`--yes` doesn't skip) and in CI relies on the `production` environment's reviewers.
 - `--dry-run` runs preflight and the build, never uploads or tags.

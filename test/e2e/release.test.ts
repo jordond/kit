@@ -276,6 +276,14 @@ describe('kit version', () => {
         .replace('app-android-version = "1.4.0"', 'app-android-version = "1.5.0"'),
     )
     expect(sh(['git', 'log', '-1', '--format=%s'])).toBe('chore(release): ios 1.5.0, android 1.5.0')
+    expect(readFileSync(join(f.dir, 'client/ios/Configuration/Config.xcconfig'), 'utf8')).toContain(
+      'MARKETING_VERSION = 1.5.0 // app version',
+    )
+    expect(sh(['git', 'show', '--name-only', '--format=', 'HEAD']).split('\n').sort()).toEqual([
+      'client/gradle/libs.versions.toml',
+      'client/ios/Configuration/Config.xcconfig',
+    ])
+    expect(sh(['git', 'status', '--porcelain'])).toBe('')
     expect(JSON.parse(r.stdout)).toMatchObject({ pushed: true, branch: 'main' })
     expect(sh(['git', 'rev-parse', 'origin/main'])).toBe(sh(['git', 'rev-parse', 'HEAD']))
   })
@@ -302,6 +310,27 @@ describe('kit version', () => {
     expect(r.code).toBe(0)
     expect(JSON.parse(r.stdout).changes).toEqual([{ name: 'ios', from: '1.4.0', to: '2.0.0' }])
     expect(sh(['git', 'status', '--porcelain'])).toBe('')
+  })
+
+  test('drift between the TOML and the xcconfig: bump, release and doctor refuse', async () => {
+    const xc = join(f.dir, 'client/ios/Configuration/Config.xcconfig')
+    writeFileSync(xc, readFileSync(xc, 'utf8').replace('1.4.0', '1.3.9'))
+    sh(['git', 'commit', '-qam', 'drift'])
+    const bump = await run(['version', 'bump', 'patch', '--platform', 'ios', '--yes'])
+    expect(bump.code).toBe(4)
+    expect(bump.stderr).toContain('iOS version drift before the bump')
+    const doctor = await run(['doctor', '--json'])
+    expect(
+      JSON.parse(doctor.stdout).checks.find((c: { id: string }) => c.id === 'ios-version'),
+    ).toMatchObject({
+      status: 'fail',
+    })
+    if (process.platform === 'darwin') {
+      const rel = await run(['release', 'ios', '--track', 'internal'])
+      expect(rel.code).toBe(4)
+      expect(rel.stderr).toContain('iOS version drift')
+      expect(lanes()).toEqual([])
+    }
   })
 
   test('bad level → exit 2; unknown platform → exit 2', async () => {
