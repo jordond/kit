@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { configSchema } from '../../src/config/schema'
@@ -80,4 +80,136 @@ test('checkTools names what an iOS release is missing', async () => {
     'Missing tools for an ios release: xcodebuild, java',
   )
   expect(() => checkTools('android', () => '/x')).not.toThrow()
+})
+
+describe('secret checks', () => {
+  const full = configSchema.parse({
+    name: 'X',
+    env: { githubSecrets: ['CLOUDFLARE_API_TOKEN', 'ASC_KEY_ID'] },
+    release: {
+      ios: {
+        bundleIds: ['a'],
+        project: 'p',
+        scheme: 's',
+        output: 'o.ipa',
+        sentry: { org: 'o', project: 'p' },
+      },
+      android: { packageName: 'a', module: ':android' },
+    },
+  })
+
+  test('releaseSecrets follows the configured platforms', async () => {
+    const { releaseSecrets } = await import('../../src/lib/release/creds')
+    expect(releaseSecrets(full)).toEqual({
+      required: [
+        'ASC_KEY_ID',
+        'ASC_ISSUER_ID',
+        'ASC_KEY_P8_BASE64',
+        'MATCH_PASSWORD',
+        'MATCH_GIT_URL',
+        'ANDROID_KEYSTORE_BASE64',
+        'ANDROID_KEYSTORE_ALIAS',
+        'ANDROID_KEYSTORE_PASSWORD',
+        'PLAY_SERVICE_ACCOUNT_BASE64',
+      ],
+      ci: ['MATCH_GIT_BASIC_AUTHORIZATION'],
+      optional: ['SENTRY_AUTH_TOKEN'],
+    })
+    expect(releaseSecrets(config)).toEqual({ required: [], ci: [], optional: [] })
+  })
+
+  test('doctor: missing release secrets warn (locally and on Actions), hint renames', async () => {
+    const { checkReleaseSecrets } = await import('../../src/commands/doctor')
+    const { releaseSecrets, renameHints } = await import('../../src/lib/release/creds')
+    const env = { APPLE_ASC_KEY_ID: 'x', ASC_ISSUER_ID: 'x' }
+    const hints = (m: string[]) => renameHints(m, (old) => old in env)
+    const local = checkReleaseSecrets(releaseSecrets(full), env, false, hints)
+    expect(local.status).toBe('warn')
+    expect(local.detail).toStartWith('missing ASC_KEY_ID, ASC_KEY_P8_BASE64')
+    expect(local.detail).not.toContain('MATCH_GIT_BASIC_AUTHORIZATION')
+    expect(local.hint).toBe('Rename in .env: APPLE_ASC_KEY_ID → ASC_KEY_ID')
+    const ci = checkReleaseSecrets(releaseSecrets(full), env, true, hints)
+    expect(ci.status).toBe('warn')
+    expect(ci.detail).toContain('MATCH_GIT_BASIC_AUTHORIZATION')
+    const all = Object.fromEntries(releaseSecrets(full).required.map((n) => [n, 'v']))
+    expect(checkReleaseSecrets(releaseSecrets(full), all, false)).toMatchObject({
+      status: 'warn',
+      detail: 'all set; optional SENTRY_AUTH_TOKEN unset',
+    })
+    expect(checkReleaseSecrets(releaseSecrets(config), {}, true).status).toBe('skip')
+  })
+
+  test('GitHub: expected = githubSecrets + release secrets; old names reported stale', async () => {
+    const { compareGithubSecrets, expectedGithubSecrets } = await import('../../src/lib/env/github')
+    const expected = expectedGithubSecrets(full)
+    expect(expected.required[0]).toBe('CLOUDFLARE_API_TOKEN')
+    expect(expected.required).toContain('MATCH_GIT_BASIC_AUTHORIZATION')
+    expect(expected.required.filter((n) => n === 'ASC_KEY_ID')).toHaveLength(1)
+    expect(expected.optional).toEqual(['SENTRY_AUTH_TOKEN'])
+    const r = compareGithubSecrets(expected, [
+      'CLOUDFLARE_API_TOKEN',
+      'APPLE_ASC_KEY_ID',
+      'FIREBASE_TESTER_GROUP',
+    ])
+    expect(r.status).toBe('missing')
+    expect(r.missing).toContain('ASC_KEY_ID')
+    expect(r.optionalMissing).toEqual(['SENTRY_AUTH_TOKEN'])
+    expect(r.stale).toEqual(['APPLE_ASC_KEY_ID', 'FIREBASE_TESTER_GROUP'])
+    expect(compareGithubSecrets(expected, ['toString', 'constructor']).stale).toEqual([])
+  })
+
+  test('GitHub: release secrets are expected only when a workflow releases', async () => {
+    const { expectedGithubSecrets, workflowsRelease } = await import('../../src/lib/env/github')
+    expect(expectedGithubSecrets(full, false)).toEqual({
+      required: ['CLOUDFLARE_API_TOKEN', 'ASC_KEY_ID'],
+      optional: [],
+    })
+    const dir = mkdtempSync(join(tmpdir(), 'kit-wf-'))
+    expect(workflowsRelease(dir)).toBe(false)
+    const wf = join(dir, '.github', 'workflows')
+    mkdirSync(wf, { recursive: true })
+    writeFileSync(join(wf, 'lint.yml'), 'run: kit check')
+    expect(workflowsRelease(dir)).toBe(false)
+    writeFileSync(join(wf, 'ios.yaml'), 'uses: jordond/kit/.github/workflows/mobile-distribute.yml@abc')
+    expect(workflowsRelease(dir)).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+test('xcconfig MARKETING_VERSION read and rewrite keep the line', async () => {
+  const { setXcconfigVersion, xcconfigVersion } = await import('../../src/lib/release/version')
+  const text = '// c\nMARKETING_VERSION = 1.2.3 // note\nOTHER = 1\n'
+  expect(xcconfigVersion(text)).toBe('1.2.3')
+  expect(setXcconfigVersion(text, 'C.xcconfig', '1.3.0')).toBe(
+    '// c\nMARKETING_VERSION = 1.3.0 // note\nOTHER = 1\n',
+  )
+  expect(xcconfigVersion('OTHER = 1')).toBeUndefined()
+  expect(() => setXcconfigVersion('OTHER = 1', 'C.xcconfig', '1')).toThrow('has no MARKETING_VERSION line')
+  // An empty value must not swallow the next line.
+  const empty = 'MARKETING_VERSION =\nCURRENT_PROJECT_VERSION = 1\n'
+  expect(xcconfigVersion(empty)).toBeUndefined()
+  expect(() => setXcconfigVersion(empty, 'C.xcconfig', '2')).toThrow('has no MARKETING_VERSION line')
+  const twice = 'MARKETING_VERSION = 1.0.0\nMARKETING_VERSION = 1.1.0\n'
+  expect(() => xcconfigVersion(twice, 'C.xcconfig')).toThrow('sets MARKETING_VERSION 2 times')
+  expect(xcconfigVersion('MARKETING_VERSION[config=Debug] = 9\nMARKETING_VERSION = 1.0.0\r\n')).toBe('1.0.0')
+})
+
+test('iosVersionDrift: config errors for a missing file or no ios key', async () => {
+  const { iosVersionDrift } = await import('../../src/lib/release/version')
+  const dir = mkdtempSync(join(tmpdir(), 'kit-xc-'))
+  writeFileSync(join(dir, 'v.toml'), '[versions]\napp-ios-version = "1.0.0"\n')
+  const ios = { bundleIds: ['a'], project: 'p', scheme: 's', output: 'o.ipa', xcconfig: 'C.xcconfig' }
+  const cfg = configSchema.parse({
+    name: 'X',
+    versions: { file: 'v.toml', keys: { ios: 'app-ios-version' } },
+    release: { ios },
+  })
+  expect(() => iosVersionDrift(dir, cfg)).toThrow('Cannot read release.ios.xcconfig C.xcconfig: ENOENT')
+  const noKey = configSchema.parse({
+    name: 'X',
+    versions: { file: 'v.toml', keys: { api: 'a' } },
+    release: { ios },
+  })
+  expect(() => iosVersionDrift(dir, noKey)).toThrow('versions.keys.ios is not')
+  rmSync(dir, { recursive: true, force: true })
 })

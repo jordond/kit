@@ -1,0 +1,3 @@
+// Local Xcode builds read this; kit version bump keeps it equal to the TOML.
+MARKETING_VERSION = 1.4.0 // app version
+CURRENT_PROJECT_VERSION = 1

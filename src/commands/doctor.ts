@@ -204,6 +204,69 @@ export function checkEnvFile(example: string | undefined, env: string | undefine
 const KIT_USES = /jordond\/kit\/[^@\s]+@\S+\s*#\s*v?(\d+\.\d+\.\d+\S*)/g
 
 /**
+ * TOML `app-ios-version` == `release.ios.xcconfig` MARKETING_VERSION (what local Xcode builds show).
+ * `drift` is version.ts's iosVersionDrift, passed in so doctor loads it only when needed.
+ */
+export function checkIosVersion(
+  drift: () => { toml: string; xcconfig: string | undefined; file: string } | undefined,
+): Check {
+  const label = 'iOS version'
+  try {
+    const d = drift()
+    if (!d) return { id: 'ios-version', label, status: 'ok', detail: 'TOML and xcconfig agree' }
+    return {
+      id: 'ios-version',
+      label,
+      status: 'fail',
+      detail: `TOML ${d.toml}, ${d.file} ${d.xcconfig ?? '(no MARKETING_VERSION)'}`,
+      hint: `Set MARKETING_VERSION = ${d.toml} in ${d.file}`,
+    }
+  } catch (e) {
+    return { id: 'ios-version', label, status: 'fail', detail: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+/**
+ * Release secrets for the configured platforms (PLAN §9.5), by name only. Missing ones only warn,
+ * on GitHub Actions too: most jobs (lint, PRs, forks, the other platform) get no signing secrets,
+ * and `kit release` itself stops on a missing one. The CI-only names are checked on Actions.
+ */
+export function checkReleaseSecrets(
+  secrets: { required: string[]; ci: string[]; optional: string[] },
+  env: Record<string, string | undefined>,
+  onActions: boolean,
+  renameHints: (missing: string[]) => string[] = () => [],
+): Check {
+  const label = 'release secrets'
+  const wanted = [...secrets.required, ...(onActions ? secrets.ci : [])]
+  if (!wanted.length) return { id: 'release-secrets', label, status: 'skip', detail: 'no release configured' }
+  const set = (n: string) => !!env[n]?.trim()
+  const missing = wanted.filter((n) => !set(n))
+  const optional = secrets.optional.filter((n) => !set(n))
+  if (missing.length) {
+    const renames = renameHints(missing)
+    return {
+      id: 'release-secrets',
+      label,
+      status: 'warn',
+      detail: `missing ${missing.join(', ')}`,
+      hint: renames.length
+        ? `Rename in .env: ${renames.join(', ')}`
+        : onActions
+          ? 'Pass them to the job as secrets'
+          : 'Add them to .env to release from this machine',
+    }
+  }
+  return {
+    id: 'release-secrets',
+    label,
+    status: optional.length ? 'warn' : 'ok',
+    detail: optional.length ? `all set; optional ${optional.join(', ')} unset` : `${wanted.length} set`,
+    ...(optional.length ? { hint: 'Without SENTRY_AUTH_TOKEN the dSYM upload is skipped' } : {}),
+  }
+}
+
+/**
  * Workflow `uses: jordond/kit/…@<sha> # vX.Y.Z` pins vs the package.json pin. The SHA itself isn't
  * resolved (stub): the version comment Renovate keeps next to it is compared instead.
  */
@@ -297,6 +360,8 @@ export default defineCommand({
     const { parseToml, readToml } = await import('../lib/toml')
     const { ExitCode } = await import('../lib/errors')
 
+    const { onGitHubActions, releaseSecrets, renameHints } = await import('../lib/release/creds')
+    const { iosVersionDrift } = await import('../lib/release/version')
     const root = ctx.root ?? process.cwd()
     const config = ctx.config
     const read = (p: string) => (existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined)
@@ -384,6 +449,10 @@ export default defineCommand({
       checkWranglerLogin(wrangler),
       miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
+      ...(config?.release?.ios?.xcconfig ? [checkIosVersion(() => iosVersionDrift(root, config))] : []),
+      checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
+        renameHints(m, (old) => !!process.env[old]),
+      ),
       checkCiPin(workflows, kitPin, ctx.args.ci === true),
       catalogCheck,
       ...(pkgCheck ? [pkgCheck] : []),

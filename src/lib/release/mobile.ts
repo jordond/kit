@@ -14,7 +14,7 @@ import { commandStep, runSteps, type Step, type StepResult, summarize } from '..
 import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
 import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
 import { loadPreflights } from './preflight'
-import { readVersion } from './version'
+import { iosVersionDrift, readVersion } from './version'
 
 /**
  * `kit release ios|android --track …` (PLAN §9.3):
@@ -213,6 +213,16 @@ export async function releaseMobile(
   await checkClean(root)
   const branch = await checkBranch(root, config)
   const version = readVersion(root, config, platform)
+  if (platform === 'ios') {
+    const drift = iosVersionDrift(root, config)
+    if (drift) {
+      throw new KitError(
+        `iOS version drift: ${config.versions!.file} says ${drift.toml}, ${drift.file} says ${drift.xcconfig ?? '(no MARKETING_VERSION)'}`,
+        'Set MARKETING_VERSION to the TOML version and commit (`kit version bump` keeps them together)',
+        ExitCode.precondition,
+      )
+    }
+  }
   const appRoot = appFastlaneDir(root, config)
 
   // ---- secrets (before any lane: next_build needs the ASC key)

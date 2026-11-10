@@ -20,9 +20,16 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
     const { ExitCode, KitError } = await import('../../lib/errors')
-    const { bumpLevels, expandPlatforms, nextVersion, readVersion, setVersion } = await import(
-      '../../lib/release/version'
-    )
+    const {
+      bumpLevels,
+      expandPlatforms,
+      iosVersionDrift,
+      nextVersion,
+      readVersion,
+      readXcconfig,
+      setVersion,
+      setXcconfigVersion,
+    } = await import('../../lib/release/version')
     const { checkBranch, checkClean } = await import('../../lib/release/mobile')
     const { push } = await import('../../lib/git')
     const { ProcError, runPiped } = await import('../../lib/proc')
@@ -47,14 +54,29 @@ export default defineCommand({
       return { name, from, to: nextVersion(from, level as 'patch') }
     })
     const file = config.versions!.file
+    // iOS: keep release.ios.xcconfig's MARKETING_VERSION equal to the TOML, in the same commit.
+    const iosChange = changes.find((c) => c.name === 'ios')
+    const xcconfig = iosChange ? config.release?.ios?.xcconfig : undefined
+    if (xcconfig) {
+      const drift = iosVersionDrift(root, config)
+      if (drift) {
+        throw new KitError(
+          `iOS version drift before the bump: ${file} says ${drift.toml}, ${xcconfig} says ${drift.xcconfig ?? '(no MARKETING_VERSION)'}`,
+          'Make them equal (the TOML is the source), commit, then bump',
+          ExitCode.precondition,
+        )
+      }
+    }
     const subject = `chore(release): ${changes.map((c) => `${c.name} ${c.to}`).join(', ')}`
     const json = (extra: Record<string, unknown>) => {
-      if (ctx.flags.json) emitJson({ file, changes, commit: subject, ...extra })
+      if (ctx.flags.json)
+        emitJson({ file, ...(xcconfig ? { xcconfig } : {}), changes, commit: subject, ...extra })
     }
     if (ctx.flags.dryRun) {
       json({ dryRun: true })
       if (!ctx.flags.json) {
         for (const c of changes) ctx.log.step(`${c.name}: ${c.from} → ${c.to}`)
+        if (xcconfig) ctx.log.step(`${xcconfig}: MARKETING_VERSION → ${iosChange!.to}`)
         ctx.log.dim(
           `  commit "${subject}"${ctx.args['no-push'] ? '' : ctx.args.pr ? ', push a branch and open a PR' : ', push'}`,
         )
@@ -76,16 +98,47 @@ export default defineCommand({
       return r.stdout.trim()
     }
 
+    // Compute every edit before writing any, and check the xcconfig is tracked (a gitignored one
+    // can't be committed), so a failure leaves the tree as it was.
+    const path = join(root, file)
+    const tomlBefore = readFileSync(path, 'utf8')
+    let tomlAfter = tomlBefore
+    for (const c of changes) tomlAfter = setVersion(tomlAfter, config, c.name, c.to)
+    const edits = [{ rel: file, path, before: tomlBefore, after: tomlAfter }]
+    if (xcconfig) {
+      const r = await runPiped(['git', 'ls-files', '--error-unmatch', '--', xcconfig], { cwd: root })
+      if (r.code !== 0) {
+        throw new KitError(
+          `${xcconfig} (release.ios.xcconfig) is not tracked by git`,
+          'Commit it first; kit commits the bump to it with the TOML',
+          ExitCode.precondition,
+        )
+      }
+      const before = readXcconfig(root, xcconfig)
+      edits.push({
+        rel: xcconfig,
+        path: join(root, xcconfig),
+        before,
+        after: setXcconfigVersion(before, xcconfig, iosChange!.to),
+      })
+    }
+
     let branch = base
     if (ctx.args.pr) {
       branch = `chore/bump-${changes.map((c) => `${c.name}-${c.to}`).join('-')}`
       await git('switch', '-c', branch)
     }
-    const path = join(root, file)
-    let text = readFileSync(path, 'utf8')
-    for (const c of changes) text = setVersion(text, config, c.name, c.to)
-    writeFileSync(path, text)
-    await git('commit', '-m', subject, '--', file)
+    try {
+      for (const e of edits) writeFileSync(e.path, e.after)
+      await git('commit', '-m', subject, '--', ...edits.map((e) => e.rel))
+    } catch (err) {
+      for (const e of edits) writeFileSync(e.path, e.before)
+      if (ctx.args.pr) {
+        await runPiped(['git', 'switch', base], { cwd: root })
+        await runPiped(['git', 'branch', '-D', branch], { cwd: root })
+      }
+      throw err
+    }
     const sha = await git('rev-parse', '--short', 'HEAD')
     for (const c of changes) ctx.log.success(`${c.name} ${c.from} → ${c.to}`)
     ctx.log.dim(`  committed ${sha} on ${branch}: ${subject}`)

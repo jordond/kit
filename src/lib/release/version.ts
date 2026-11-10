@@ -99,3 +99,71 @@ export function expandPlatforms(config: KitConfig, platform: string): string[] {
   versionKey(config, platform)
   return [platform]
 }
+
+// One unconditional `MARKETING_VERSION = x` line; `[ \t]` so an empty value can't reach the next line.
+const MARKETING = /^([ \t]*MARKETING_VERSION[ \t]*=[ \t]*)([^\s/]+)(.*)$/gm
+
+function marketingLines(text: string, file: string): RegExpExecArray[] {
+  const found = [...text.matchAll(MARKETING)]
+  if (found.length > 1) {
+    throw new KitError(
+      `${file} sets MARKETING_VERSION ${found.length} times`,
+      'Keep one `MARKETING_VERSION = <version>` line (Xcode uses the last; kit edits only one)',
+      ExitCode.config,
+    )
+  }
+  return found
+}
+
+/** MARKETING_VERSION from xcconfig text, or undefined when the key isn't set there. */
+export function xcconfigVersion(text: string, file = 'xcconfig'): string | undefined {
+  return marketingLines(text, file)[0]?.[2]
+}
+
+/** Rewrite MARKETING_VERSION's value, keeping the rest of the line (comments, spacing). */
+export function setXcconfigVersion(text: string, file: string, to: string): string {
+  if (!marketingLines(text, file).length) {
+    throw new KitError(
+      `${file} has no MARKETING_VERSION line`,
+      'Add `MARKETING_VERSION = <version>`',
+      ExitCode.config,
+    )
+  }
+  return text.replace(MARKETING, (_m, head: string, _v: string, tail: string) => `${head}${to}${tail}`)
+}
+
+/** `release.ios.xcconfig`'s text, or a config error naming the file. */
+export function readXcconfig(root: string, file: string): string {
+  try {
+    return readFileSync(join(root, file), 'utf8')
+  } catch (e) {
+    throw new KitError(
+      `Cannot read release.ios.xcconfig ${file}: ${(e as NodeJS.ErrnoException).code ?? String(e)}`,
+      'Fix the path in kit.config.ts (repo-relative)',
+      ExitCode.config,
+    )
+  }
+}
+
+/**
+ * The iOS version must read the same in the TOML and in `release.ios.xcconfig`: local Xcode builds
+ * use the xcconfig, releases the TOML (one binary reporting two versions splits analytics).
+ * Returns the mismatch, or undefined when equal or no xcconfig is configured.
+ */
+export function iosVersionDrift(
+  root: string,
+  config: KitConfig,
+): { toml: string; xcconfig: string | undefined; file: string } | undefined {
+  const file = config.release?.ios?.xcconfig
+  if (!file) return undefined
+  if (!config.versions?.keys.ios) {
+    throw new KitError(
+      'release.ios.xcconfig is set but versions.keys.ios is not',
+      "Add versions.keys.ios (e.g. 'app-ios-version') in kit.config.ts",
+      ExitCode.config,
+    )
+  }
+  const toml = readVersion(root, config, 'ios')
+  const xc = xcconfigVersion(readXcconfig(root, file), file)
+  return xc === toml ? undefined : { toml, xcconfig: xc, file }
+}

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
 import { decodeSecretFile, registerSecret } from '../secrets'
 
@@ -8,8 +9,42 @@ import { decodeSecretFile, registerSecret } from '../secrets'
  * passed to lanes as paths. Every value is registered for redaction.
  */
 
+export const IOS_SECRETS = [
+  'ASC_KEY_ID',
+  'ASC_ISSUER_ID',
+  'ASC_KEY_P8_BASE64',
+  'MATCH_PASSWORD',
+  'MATCH_GIT_URL',
+]
+export const ANDROID_SECRETS = [
+  'ANDROID_KEYSTORE_BASE64',
+  'ANDROID_KEYSTORE_ALIAS',
+  'ANDROID_KEYSTORE_PASSWORD',
+  'PLAY_SERVICE_ACCOUNT_BASE64',
+]
+
+export interface ReleaseSecrets {
+  /** Needed for every release of a configured platform. */
+  required: string[]
+  /** Needed only on GitHub Actions (HTTPS access to the match repo). */
+  ci: string[]
+  /** Used when present (Sentry dSYM upload skips without it). */
+  optional: string[]
+}
+
+/** The canonical release secrets this config's platforms need (PLAN §9.5). */
+export function releaseSecrets(config: KitConfig | undefined): ReleaseSecrets {
+  const ios = config?.release?.ios
+  const android = config?.release?.android
+  return {
+    required: [...(ios ? IOS_SECRETS : []), ...(android ? ANDROID_SECRETS : [])],
+    ci: ios ? ['MATCH_GIT_BASIC_AUTHORIZATION'] : [],
+    optional: ios?.sentry ? ['SENTRY_AUTH_TOKEN'] : [],
+  }
+}
+
 /** Old name → canonical, for a hint when only the old one is set. */
-const LEGACY: Record<string, string> = {
+export const LEGACY: Record<string, string> = {
   APPLE_ASC_KEY_ID: 'ASC_KEY_ID',
   APPLE_ASC_ISSUER_ID: 'ASC_ISSUER_ID',
   APPLE_ASC_KEY_P8_BASE64: 'ASC_KEY_P8_BASE64',
@@ -20,12 +55,20 @@ const LEGACY: Record<string, string> = {
   KEY_PASSWORD: 'ANDROID_KEYSTORE_PASSWORD',
 }
 
+/** Retired names (Firebase App Distribution, PLAN §17 #2) that should be deleted. */
+export const RETIRED = ['FIREBASE_SERVICE_ACCOUNT_BASE64', 'FIREBASE_ANDROID_APP_ID', 'FIREBASE_TESTER_GROUP']
+
+/** `→ rename OLD → NEW` hints for missing canonical names whose old name exists in `present`. */
+export function renameHints(missing: string[], present: (name: string) => boolean): string[] {
+  return Object.entries(LEGACY)
+    .filter(([old, canon]) => missing.includes(canon) && present(old))
+    .map(([old, canon]) => `${old} → ${canon}`)
+}
+
 function need(names: string[]): Record<string, string> {
   const missing = names.filter((n) => !process.env[n]?.trim())
   if (missing.length) {
-    const renames = Object.entries(LEGACY)
-      .filter(([old, canon]) => missing.includes(canon) && process.env[old])
-      .map(([old, canon]) => `${old} → ${canon}`)
+    const renames = renameHints(missing, (old) => !!process.env[old])
     throw new KitError(
       `Missing release secrets: ${missing.join(', ')}`,
       renames.length
@@ -69,8 +112,7 @@ export function registerAmbientSecrets(): void {
 
 export function appleCreds(opts: { match: boolean; ci: boolean }): AppleCreds {
   registerAmbientSecrets()
-  const names = ['ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_KEY_P8_BASE64']
-  if (opts.match) names.push('MATCH_PASSWORD', 'MATCH_GIT_URL')
+  const names = IOS_SECRETS.filter((n) => opts.match || !n.startsWith('MATCH_'))
   if (opts.match && opts.ci) names.push('MATCH_GIT_BASIC_AUTHORIZATION')
   const v = need(names)
   const ascKeyPath = decodeSecretFile('asc-key.p8', v.ASC_KEY_P8_BASE64!)

@@ -79,6 +79,8 @@ echo "${bin} ok"
           CI: 'true',
           NO_COLOR: '1',
           KIT_ROOT: '',
+          // kit's own CI runs on Actions; fixtures behave like a local run unless a test says otherwise.
+          GITHUB_ACTIONS: '',
           ...opts.env,
         },
         stdin: 'ignore',
@@ -116,6 +118,8 @@ echo "${bin} ok"
           CI: 'true',
           NO_COLOR: '1',
           KIT_ROOT: '',
+          // kit's own CI runs on Actions; fixtures behave like a local run unless a test says otherwise.
+          GITHUB_ACTIONS: '',
         },
         stdin: 'ignore',
         stdout: 'pipe',
