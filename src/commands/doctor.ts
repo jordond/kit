@@ -207,6 +207,46 @@ const KIT_USES = /jordond\/kit\/[^@\s]+@\S+\s*#\s*v?(\d+\.\d+\.\d+\S*)/g
  * Workflow `uses: jordond/kit/…@<sha> # vX.Y.Z` pins vs the package.json pin. The SHA itself isn't
  * resolved (stub): the version comment Renovate keeps next to it is compared instead.
  */
+/**
+ * Release secrets for the configured platforms (PLAN §9.5), by name only. Missing ones fail on
+ * GitHub Actions, where a release would stop on them, and only warn locally, where most work needs
+ * no signing secrets.
+ */
+export function checkReleaseSecrets(
+  secrets: { required: string[]; ci: string[]; optional: string[] },
+  env: Record<string, string | undefined>,
+  onActions: boolean,
+  renameHints: (missing: string[]) => string[] = () => [],
+): Check {
+  const label = 'release secrets'
+  const wanted = [...secrets.required, ...(onActions ? secrets.ci : [])]
+  if (!wanted.length) return { id: 'release-secrets', label, status: 'skip', detail: 'no release configured' }
+  const set = (n: string) => !!env[n]?.trim()
+  const missing = wanted.filter((n) => !set(n))
+  const optional = secrets.optional.filter((n) => !set(n))
+  if (missing.length) {
+    const renames = renameHints(missing)
+    return {
+      id: 'release-secrets',
+      label,
+      status: onActions ? 'fail' : 'warn',
+      detail: `missing ${missing.join(', ')}`,
+      hint: renames.length
+        ? `Rename in .env: ${renames.join(', ')}`
+        : onActions
+          ? 'Pass them to the job as secrets'
+          : 'Add them to .env to release from this machine',
+    }
+  }
+  return {
+    id: 'release-secrets',
+    label,
+    status: optional.length ? 'warn' : 'ok',
+    detail: optional.length ? `all set; optional ${optional.join(', ')} unset` : `${wanted.length} set`,
+    ...(optional.length ? { hint: 'Without SENTRY_AUTH_TOKEN the dSYM upload is skipped' } : {}),
+  }
+}
+
 export function checkCiPin(
   workflows: { file: string; text: string }[],
   pin: string | undefined,
@@ -297,6 +337,7 @@ export default defineCommand({
     const { parseToml, readToml } = await import('../lib/toml')
     const { ExitCode } = await import('../lib/errors')
 
+    const { onGitHubActions, releaseSecrets, renameHints } = await import('../lib/release/creds')
     const root = ctx.root ?? process.cwd()
     const config = ctx.config
     const read = (p: string) => (existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined)
@@ -384,6 +425,9 @@ export default defineCommand({
       checkWranglerLogin(wrangler),
       miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
+      checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
+        renameHints(m, (old) => !!process.env[old]),
+      ),
       checkCiPin(workflows, kitPin, ctx.args.ci === true),
       catalogCheck,
       ...(pkgCheck ? [pkgCheck] : []),

@@ -51,9 +51,35 @@ describe('env sync / check', () => {
     expect(before.code).toBe(3)
     expect(before.stderr).toContain('apps/edge/.dev.vars missing')
     await fx.kit(['env', 'sync'])
+    fx.script('gh', `echo '[{"name":"DEPLOY_TOKEN"},{"name":"FIREBASE_ANDROID_APP_ID"}]'`)
     const after = await fx.kit(['env', 'check', '--json'])
     expect(after.code).toBe(0)
-    expect(JSON.parse(after.stdout)).toEqual({ ok: true, invalid: [], drift: [] })
+    expect(JSON.parse(after.stdout)).toEqual({
+      ok: true,
+      invalid: [],
+      drift: [],
+      github: {
+        status: 'ok',
+        expected: ['DEPLOY_TOKEN'],
+        missing: [],
+        optionalMissing: [],
+        stale: ['FIREBASE_ANDROID_APP_ID'],
+      },
+    })
+  })
+
+  test('check: a GitHub secret CI needs is missing → exit 3; skipped on GitHub Actions', async () => {
+    await fx.kit(['env', 'sync'])
+    fx.script('gh', `echo '[]'`)
+    const r = await fx.kit(['env', 'check'])
+    expect(r.code).toBe(3)
+    expect(r.stderr).toContain('GitHub secrets missing: DEPLOY_TOKEN')
+    const ci = await fx.kit(['env', 'check', '--json'], { env: { GITHUB_ACTIONS: 'true' } })
+    expect(ci.code).toBe(0)
+    expect(JSON.parse(ci.stdout).github).toMatchObject({
+      status: 'skipped',
+      reason: 'running on GitHub Actions',
+    })
   })
 
   test('check: invalid env exits 3 naming the key', async () => {

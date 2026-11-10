@@ -417,7 +417,7 @@ Options
 `;
 
 exports[`help kit env check --help 1`] = `
-"Validate .env against the schema and check outputs for drift
+"Validate .env, check outputs for drift, and check GitHub has every CI secret
 
 Usage
   kit env check [options]

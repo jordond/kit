@@ -81,3 +81,79 @@ test('checkTools names what an iOS release is missing', async () => {
   )
   expect(() => checkTools('android', () => '/x')).not.toThrow()
 })
+
+describe('secret checks', () => {
+  const full = configSchema.parse({
+    name: 'X',
+    env: { githubSecrets: ['CLOUDFLARE_API_TOKEN', 'ASC_KEY_ID'] },
+    release: {
+      ios: {
+        bundleIds: ['a'],
+        project: 'p',
+        scheme: 's',
+        output: 'o.ipa',
+        sentry: { org: 'o', project: 'p' },
+      },
+      android: { packageName: 'a', module: ':android' },
+    },
+  })
+
+  test('releaseSecrets follows the configured platforms', async () => {
+    const { releaseSecrets } = await import('../../src/lib/release/creds')
+    expect(releaseSecrets(full)).toEqual({
+      required: [
+        'ASC_KEY_ID',
+        'ASC_ISSUER_ID',
+        'ASC_KEY_P8_BASE64',
+        'MATCH_PASSWORD',
+        'MATCH_GIT_URL',
+        'ANDROID_KEYSTORE_BASE64',
+        'ANDROID_KEYSTORE_ALIAS',
+        'ANDROID_KEYSTORE_PASSWORD',
+        'PLAY_SERVICE_ACCOUNT_BASE64',
+      ],
+      ci: ['MATCH_GIT_BASIC_AUTHORIZATION'],
+      optional: ['SENTRY_AUTH_TOKEN'],
+    })
+    expect(releaseSecrets(config)).toEqual({ required: [], ci: [], optional: [] })
+  })
+
+  test('doctor: missing release secrets warn locally, fail on Actions, hint renames', async () => {
+    const { checkReleaseSecrets } = await import('../../src/commands/doctor')
+    const { releaseSecrets, renameHints } = await import('../../src/lib/release/creds')
+    const env = { APPLE_ASC_KEY_ID: 'x', ASC_ISSUER_ID: 'x' }
+    const hints = (m: string[]) => renameHints(m, (old) => old in env)
+    const local = checkReleaseSecrets(releaseSecrets(full), env, false, hints)
+    expect(local.status).toBe('warn')
+    expect(local.detail).toStartWith('missing ASC_KEY_ID, ASC_KEY_P8_BASE64')
+    expect(local.detail).not.toContain('MATCH_GIT_BASIC_AUTHORIZATION')
+    expect(local.hint).toBe('Rename in .env: APPLE_ASC_KEY_ID → ASC_KEY_ID')
+    const ci = checkReleaseSecrets(releaseSecrets(full), env, true, hints)
+    expect(ci.status).toBe('fail')
+    expect(ci.detail).toContain('MATCH_GIT_BASIC_AUTHORIZATION')
+    const all = Object.fromEntries(releaseSecrets(full).required.map((n) => [n, 'v']))
+    expect(checkReleaseSecrets(releaseSecrets(full), all, false)).toMatchObject({
+      status: 'warn',
+      detail: 'all set; optional SENTRY_AUTH_TOKEN unset',
+    })
+    expect(checkReleaseSecrets(releaseSecrets(config), {}, true).status).toBe('skip')
+  })
+
+  test('GitHub: expected = githubSecrets + release secrets; old names reported stale', async () => {
+    const { compareGithubSecrets, expectedGithubSecrets } = await import('../../src/lib/env/github')
+    const expected = expectedGithubSecrets(full)
+    expect(expected.required[0]).toBe('CLOUDFLARE_API_TOKEN')
+    expect(expected.required).toContain('MATCH_GIT_BASIC_AUTHORIZATION')
+    expect(expected.required.filter((n) => n === 'ASC_KEY_ID')).toHaveLength(1)
+    expect(expected.optional).toEqual(['SENTRY_AUTH_TOKEN'])
+    const r = compareGithubSecrets(expected, [
+      'CLOUDFLARE_API_TOKEN',
+      'APPLE_ASC_KEY_ID',
+      'FIREBASE_TESTER_GROUP',
+    ])
+    expect(r.status).toBe('missing')
+    expect(r.missing).toContain('ASC_KEY_ID')
+    expect(r.optionalMissing).toEqual(['SENTRY_AUTH_TOKEN'])
+    expect(r.stale).toEqual(['APPLE_ASC_KEY_ID', 'FIREBASE_TESTER_GROUP'])
+  })
+})
