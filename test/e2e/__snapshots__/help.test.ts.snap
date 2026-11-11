@@ -11,6 +11,7 @@ Develop
   build       Build every target
   deploy      Deploy a target
   gradle      Run ./gradlew in the Gradle root
+  kotlin      Run the Kotlin toolchain wrapper in toolchain.root
   wrangler    Run wrangler in a worker target's directory
   xcode       Open the iOS project in Xcode
 
@@ -133,7 +134,7 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
-      --release  Gradle: the signed release bundle (AAB)
+      --release  Gradle or Kotlin toolchain: the signed release bundle (AAB)
       --apk      Gradle: the signed release APK
 
 "
@@ -599,7 +600,24 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
-      --js-only  Skip the Gradle and bundler steps
+      --js-only  Skip the Gradle, Kotlin toolchain and bundler steps
+
+"
+`;
+
+exports[`help kit kotlin --help 1`] = `
+"Run the Kotlin toolchain wrapper in toolchain.root (arguments pass through)
+
+Usage
+  kit kotlin [args…]
+
+Every argument passes through untouched; kit parses no flags here (no --json).
+Only a leading -h/--help shows this; \`kit kotlin <args> --help\` reaches the tool.
+
+Examples
+  kit kotlin build -m shared
+  kit kotlin run -m desktopApp
+  kit kotlin show settings -m androidApp
 
 "
 `;

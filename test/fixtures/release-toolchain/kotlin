@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fake Kotlin toolchain wrapper: records argv, the app module.yaml and the keystore.properties it
+# builds with, and writes an AAB where `kotlin package` does.
+kotlin_cli_version=0.13.0
+bun -e 'const fs = require("fs")
+const yaml = fs.readFileSync("androidApp/module.yaml", "utf8")
+const m = yaml.match(/propertiesFile: "(.*)"/)
+const props = m && fs.existsSync(m[1]) ? fs.readFileSync(m[1], "utf8") : null
+console.log(JSON.stringify({ argv: process.argv.slice(1), yaml, props }))' -- "$@" >> "${KIT_TEST_LOG:-/dev/null}"
+if [ -f .kotlin-fail ]; then echo "e: compilation failed"; exit 1; fi
+if [ "$1" = package ]; then
+  mkdir -p build/tasks/_androidApp_bundleAndroid
+  echo aab > build/tasks/_androidApp_bundleAndroid/gradle-project-release.aab
+  echo "Build successful"
+fi
+exit 0

@@ -26,16 +26,20 @@ export function kitDir(): string {
   }
 }
 
-/** The dir holding the app's `fastlane/Fastfile`: `release.fastlaneDir`, else gradle.root, else the root. */
+/**
+ * The dir holding the app's `fastlane/Fastfile`: `release.fastlaneDir`, else gradle.root or
+ * toolchain.root, else the root.
+ */
 export function appFastlaneDir(root: string, config: KitConfig): string {
+  const native = config.gradle?.root ?? config.toolchain?.root
   const candidates = config.release?.fastlaneDir
     ? [config.release.fastlaneDir]
-    : [...(config.gradle ? [config.gradle.root] : []), '.']
+    : [...(native ? [native] : []), '.']
   for (const c of candidates) {
     const dir = join(root, c)
     if (existsSync(join(dir, 'fastlane', 'Fastfile'))) return dir
   }
-  const where = config.release?.fastlaneDir ?? config.gradle?.root ?? '.'
+  const where = config.release?.fastlaneDir ?? native ?? '.'
   throw new KitError(
     `No fastlane/Fastfile in ${where}`,
     `Create ${join(where, 'fastlane/Fastfile')} with: import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via \`kit fastlane ...\` or \`kit release ...\`") })`,

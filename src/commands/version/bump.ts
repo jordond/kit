@@ -20,13 +20,16 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
     const { ExitCode, KitError } = await import('../../lib/errors')
+    const { moduleYamlPath } = await import('../../lib/toolchain')
     const {
+      androidVersionDrift,
       bumpLevels,
       expandPlatforms,
       iosVersionDrift,
       nextVersion,
       readVersion,
       readXcconfig,
+      setModuleVersion,
       setVersion,
       setXcconfigVersion,
     } = await import('../../lib/release/version')
@@ -67,16 +70,40 @@ export default defineCommand({
         )
       }
     }
+    // Kotlin toolchain: keep the app module's versionName equal to the TOML, in the same commit.
+    const androidChange = changes.find((c) => c.name === 'android')
+    const androidModule =
+      androidChange && config.toolchain && config.release?.android
+        ? moduleYamlPath(config, config.release.android.module)
+        : undefined
+    if (androidModule) {
+      const drift = androidVersionDrift(root, config)
+      if (drift) {
+        throw new KitError(
+          `Android version drift before the bump: ${file} says ${drift.toml}, ${androidModule} says ${drift.module}`,
+          'Make them equal (the TOML is the source), commit, then bump',
+          ExitCode.precondition,
+        )
+      }
+    }
     const subject = `chore(release): ${changes.map((c) => `${c.name} ${c.to}`).join(', ')}`
     const json = (extra: Record<string, unknown>) => {
       if (ctx.flags.json)
-        emitJson({ file, ...(xcconfig ? { xcconfig } : {}), changes, commit: subject, ...extra })
+        emitJson({
+          file,
+          ...(xcconfig ? { xcconfig } : {}),
+          ...(androidModule ? { module: androidModule } : {}),
+          changes,
+          commit: subject,
+          ...extra,
+        })
     }
     if (ctx.flags.dryRun) {
       json({ dryRun: true })
       if (!ctx.flags.json) {
         for (const c of changes) ctx.log.step(`${c.name}: ${c.from} → ${c.to}`)
         if (xcconfig) ctx.log.step(`${xcconfig}: MARKETING_VERSION → ${iosChange!.to}`)
+        if (androidModule) ctx.log.step(`${androidModule}: versionName → ${androidChange!.to}`)
         ctx.log.dim(
           `  commit "${subject}"${ctx.args['no-push'] ? '' : ctx.args.pr ? ', push a branch and open a PR' : ', push'}`,
         )
@@ -120,6 +147,24 @@ export default defineCommand({
         path: join(root, xcconfig),
         before,
         after: setXcconfigVersion(before, xcconfig, iosChange!.to),
+      })
+    }
+
+    if (androidModule) {
+      const r = await runPiped(['git', 'ls-files', '--error-unmatch', '--', androidModule], { cwd: root })
+      if (r.code !== 0) {
+        throw new KitError(
+          `${androidModule} is not tracked by git`,
+          'Commit it first; kit commits the bump to it with the TOML',
+          ExitCode.precondition,
+        )
+      }
+      const before = readFileSync(join(root, androidModule), 'utf8')
+      edits.push({
+        rel: androidModule,
+        path: join(root, androidModule),
+        before,
+        after: setModuleVersion(before, androidModule, androidChange!.to),
       })
     }
 

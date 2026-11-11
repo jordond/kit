@@ -4,7 +4,7 @@ export default defineCommand({
   description: 'Build every target',
   group: 'Develop',
   args: {
-    release: { type: 'boolean', description: 'Gradle: the signed release bundle (AAB)' },
+    release: { type: 'boolean', description: 'Gradle or Kotlin toolchain: the signed release bundle (AAB)' },
     apk: { type: 'boolean', description: 'Gradle: the signed release APK' },
   },
   examples: 'kit build\nkit build api admin\nkit build client --release',
@@ -18,9 +18,9 @@ export default defineCommand({
     if (release) {
       const name = ctx.positionals[0]
       const t = name ? ctx.config?.targets[name] : undefined
-      if (ctx.positionals.length !== 1 || t?.kind !== 'gradle') {
+      if (ctx.positionals.length !== 1 || (t?.kind !== 'gradle' && t?.kind !== 'kotlin')) {
         throw new KitError(
-          'A release build is for one gradle target',
+          'A release build is for one gradle or kotlin target',
           'Name it, e.g. `kit build client --release`',
           ExitCode.usage,
         )

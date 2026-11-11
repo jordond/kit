@@ -13,7 +13,13 @@ export default defineCommand({
     const { run } = await import('../lib/proc')
     const { root, config } = requireProject(ctx)
     if (!config.gradle) {
-      throw new KitError('No Gradle root configured', 'Set gradle.root in kit.config.ts', ExitCode.config)
+      throw new KitError(
+        'No Gradle root configured',
+        config.toolchain
+          ? 'This is a Kotlin toolchain project: use `kit kotlin …`'
+          : 'Set gradle.root in kit.config.ts',
+        ExitCode.config,
+      )
     }
     const dir = join(root, config.gradle.root)
     if (!existsSync(join(dir, 'gradlew'))) {

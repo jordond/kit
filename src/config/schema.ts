@@ -3,7 +3,7 @@ import { z } from 'zod'
 export const verbs = ['lint', 'format', 'typecheck', 'test', 'build', 'dev', 'deploy'] as const
 export type Verb = (typeof verbs)[number]
 
-export const kinds = ['gradle', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
+export const kinds = ['gradle', 'kotlin', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
 
 export const tracks = ['internal', 'alpha', 'beta', 'prod'] as const
@@ -60,6 +60,15 @@ export const configSchema = z
       })
       .strict()
       .optional(),
+    /** JetBrains Kotlin Toolchain (Amper): the dir holding the `kotlin` wrapper and project.yaml. */
+    toolchain: z
+      .object({
+        root: z.string(),
+        /** `./kotlin` argument strings `kit init` runs (`show dependencies -m shared`); default `--version`. */
+        init: z.union([z.string(), z.array(z.string())]).optional(),
+      })
+      .strict()
+      .optional(),
     versions: z
       .object({
         file: z.string(),
@@ -112,7 +121,7 @@ export const configSchema = z
     release: z
       .object({
         branches: z.array(z.string()).optional(),
-        /** Dir holding the app's one-line `fastlane/Fastfile`; default gradle.root, then the repo root. */
+        /** Dir holding the app's one-line `fastlane/Fastfile`; default gradle.root or toolchain.root, then the repo root. */
         fastlaneDir: z.string().optional(),
         notes: z.object({ maxLength: z.number().int().positive().optional() }).strict().optional(),
         preflight: z.array(z.string()).optional(),
@@ -133,11 +142,13 @@ export const configSchema = z
         android: z
           .object({
             packageName: z.string(),
+            /** Gradle project path (`:android`), or the toolchain module name (`androidApp`). */
             module: z.string(),
             prodRollout: z.number().gt(0).lte(1).optional(),
             gates: z
               .array(
                 z.object({
+                  /** Gradle task, or `./kotlin` arguments with a toolchain (`test -m shared`). */
                   task: z.string(),
                   tracks: z.array(z.enum(tracks)),
                 }),
@@ -158,6 +169,13 @@ export const configSchema = z
   })
   .strict()
   .superRefine((c, ctx) => {
+    if (c.gradle && c.toolchain) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['toolchain'],
+        message: 'Set gradle or toolchain, not both: kit builds Android with one of them',
+      })
+    }
     for (const [name, d] of Object.entries(c.cloudflare?.d1 ?? {})) {
       if (!c.targets[d.target]) {
         ctx.addIssue({

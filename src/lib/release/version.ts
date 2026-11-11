@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
 import { getTomlValue, setTomlValue } from '../toml'
+import { ANDROID_VERSION_NAME, moduleVersionName, moduleYamlPath, setYaml, yamlString } from '../toolchain'
 
 /**
  * Version names live in the catalog TOML (`[versions]`), keyed by `versions.keys` (PLAN §9.2):
@@ -166,4 +167,26 @@ export function iosVersionDrift(
   const toml = readVersion(root, config, 'ios')
   const xc = xcconfigVersion(readXcconfig(root, file), file)
   return xc === toml ? undefined : { toml, xcconfig: xc, file }
+}
+
+/**
+ * Kotlin toolchain: the Android version must read the same in the TOML and in the app module's
+ * module.yaml (`settings.android.versionName`), which local `./kotlin run` builds use. Returns the
+ * mismatch, or undefined when equal, when the module sets no versionName, or without a toolchain.
+ */
+export function androidVersionDrift(
+  root: string,
+  config: KitConfig,
+): { toml: string; module: string; file: string } | undefined {
+  const module = config.release?.android?.module
+  if (!config.toolchain || !module || !config.versions?.keys.android) return undefined
+  const yaml = moduleVersionName(root, config, module)
+  if (yaml === undefined) return undefined
+  const toml = readVersion(root, config, 'android')
+  return yaml === toml ? undefined : { toml, module: yaml, file: moduleYamlPath(config, module) }
+}
+
+/** module.yaml text with `settings.android.versionName` set (added when missing). */
+export function setModuleVersion(text: string, file: string, to: string): string {
+  return setYaml(text, ANDROID_VERSION_NAME, yamlString(to), file)
 }

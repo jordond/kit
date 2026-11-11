@@ -1,5 +1,6 @@
 import { defineCommand } from '../cli/command'
 import type { KitConfig } from '../config/schema'
+import { wrapperVersion } from '../lib/toolchain'
 
 /**
  * `kit doctor`: one line per check on stderr (✔ ok, ▲ warning, ✖ failure), `--json` on stdout.
@@ -226,6 +227,73 @@ export function checkIosVersion(
   }
 }
 
+export function checkAndroidVersion(
+  drift: () => { toml: string; module: string; file: string } | undefined,
+): Check {
+  const label = 'Android version'
+  try {
+    const d = drift()
+    if (!d) return { id: 'android-version', label, status: 'ok', detail: 'TOML and module.yaml agree' }
+    return {
+      id: 'android-version',
+      label,
+      status: 'fail',
+      detail: `TOML ${d.toml}, ${d.file} ${d.module}`,
+      hint: `Set settings.android.versionName: "${d.toml}" in ${d.file}`,
+    }
+  } catch (e) {
+    return {
+      id: 'android-version',
+      label,
+      status: 'fail',
+      detail: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
+/**
+ * The Kotlin toolchain wrapper in toolchain.root and its pinned version. `wrapper` is the
+ * script's text (undefined: missing); `executable` whether it can run.
+ */
+export function checkToolchain(
+  root: string | undefined,
+  wrapper: string | undefined,
+  executable: boolean,
+): Check {
+  const label = 'kotlin toolchain'
+  if (root === undefined) return { id: 'toolchain', label, status: 'skip', detail: 'no toolchain root' }
+  const path = `${root.replace(/\/+$/, '')}/kotlin`
+  if (wrapper === undefined) {
+    return {
+      id: 'toolchain',
+      label,
+      status: 'fail',
+      detail: `${path} missing`,
+      hint: 'Check toolchain.root in kit.config.ts, or run `kotlin init` there',
+    }
+  }
+  if (!executable) {
+    return {
+      id: 'toolchain',
+      label,
+      status: 'fail',
+      detail: `${path} not executable`,
+      hint: `chmod +x ${path}`,
+    }
+  }
+  const version = wrapperVersion(wrapper)
+  if (!version) {
+    return {
+      id: 'toolchain',
+      label,
+      status: 'warn',
+      detail: `${path}: no kotlin_cli_version`,
+      hint: 'Pin the toolchain version in the wrapper (`./kotlin update` writes it)',
+    }
+  }
+  return { id: 'toolchain', label, status: 'ok', detail: version }
+}
+
 /**
  * Release secrets for the configured platforms (PLAN §9.5), by name only. Missing ones only warn,
  * on GitHub Actions too: most jobs (lint, PRs, forks, the other platform) get no signing secrets,
@@ -361,7 +429,8 @@ export default defineCommand({
     const { ExitCode } = await import('../lib/errors')
 
     const { onGitHubActions, releaseSecrets, renameHints } = await import('../lib/release/creds')
-    const { iosVersionDrift } = await import('../lib/release/version')
+    const { androidVersionDrift, iosVersionDrift } = await import('../lib/release/version')
+    const { accessSync, constants } = await import('node:fs')
     const root = ctx.root ?? process.cwd()
     const config = ctx.config
     const read = (p: string) => (existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined)
@@ -371,7 +440,17 @@ export default defineCommand({
     }
 
     const targets = Object.values(config?.targets ?? {})
+    // The Kotlin toolchain provisions its own JDK and Android SDK: neither is required for it.
     const gradle = !!config?.gradle || targets.some((t) => t.kind === 'gradle')
+    const toolchainRoot = config?.toolchain?.root
+    const wrapperPath = toolchainRoot === undefined ? undefined : join(root, toolchainRoot, 'kotlin')
+    let wrapperExec = false
+    if (wrapperPath && existsSync(wrapperPath)) {
+      try {
+        accessSync(wrapperPath, constants.X_OK)
+        wrapperExec = true
+      } catch {}
+    }
     const ios = !!config?.release?.ios
     const fastlane = ios || !!config?.release?.android
     const worker = Object.values(config?.targets ?? {}).find((t) => t.kind === 'worker')
@@ -446,10 +525,22 @@ export default defineCommand({
         existsSync,
         gradle,
       ),
+      ...(toolchainRoot !== undefined
+        ? [
+            checkToolchain(
+              toolchainRoot,
+              wrapperPath && existsSync(wrapperPath) ? readFileSync(wrapperPath, 'utf8') : undefined,
+              wrapperExec,
+            ),
+          ]
+        : []),
       checkWranglerLogin(wrangler),
       miseCheck ?? checkMise(miseTools, detected),
       checkEnvFile(read('.env.example'), read('.env')),
       ...(config?.release?.ios?.xcconfig ? [checkIosVersion(() => iosVersionDrift(root, config))] : []),
+      ...(config?.toolchain && config.release?.android
+        ? [checkAndroidVersion(() => androidVersionDrift(root, config))]
+        : []),
       checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
         renameHints(m, (old) => !!process.env[old]),
       ),

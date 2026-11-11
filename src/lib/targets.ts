@@ -4,6 +4,7 @@ import type { CommandValue, Kind, KitConfig, TargetConfig, Verb } from '../confi
 import { ExitCode, KitError } from './errors'
 import { detectPackageManager, type PackageManager, packageScripts, pmExec, runScript } from './pm'
 import { shell } from './proc'
+import { moduleName } from './toolchain'
 
 /**
  * Targets and kinds (PLAN §6.4). A kind maps verbs to default commands; any verb on any target can
@@ -35,7 +36,7 @@ export interface PlanOptions {
   env?: string
   /** Staged files (repo-relative). Workspace commands get them appended; targets without one are skipped. */
   staged?: string[]
-  /** Gradle targets build the signed release artifact instead. */
+  /** Gradle and kotlin targets build the release artifact instead. */
   release?: 'aab' | 'apk'
 }
 
@@ -79,6 +80,13 @@ const list = (v: string | string[]): string[] => (Array.isArray(v) ? v : [v])
 
 /** A Gradle task name (`spotlessCheck`, `:shared:test`) rather than a shell command. */
 export const isGradleTask = (s: string): boolean => /^:?[A-Za-z][\w.-]*(:[A-Za-z][\w.-]*)*$/.test(s)
+
+/** `./kotlin <args>` in the toolchain root (else the target dir). */
+function kotlinCommand(c: Ctx, target: TargetConfig, args: string[]): PlannedCommand {
+  const cwd = resolve(c.root, c.config.toolchain?.root ?? target.dir)
+  const extra = c.opts.extra ?? []
+  return { title: `kotlin ${args.join(' ')}`, cmd: ['./kotlin', ...args, ...extra], cwd }
+}
 
 function gradleCommand(c: Ctx, target: TargetConfig, tasks: string[]): PlannedCommand {
   const cwd = resolve(c.root, c.config.gradle?.root ?? target.dir)
@@ -137,6 +145,29 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
         verb as string
       ]
       return task ? [gradleCommand(c, t, [task])] : undefined
+    }
+    case 'kotlin': {
+      if (verb === 'build' && c.opts.release) {
+        const module = c.config.release?.android?.module
+        if (c.opts.release === 'apk') {
+          throw new KitError(
+            'The Kotlin toolchain packages Android releases as an AAB only',
+            `Use \`kit build ${name} --release\``,
+            ExitCode.usage,
+          )
+        }
+        if (!module) {
+          throw new KitError(
+            'A release build needs release.android.module in kit.config.ts',
+            "e.g. release: { android: { module: 'androidApp', packageName: '…' } }",
+            ExitCode.config,
+          )
+        }
+        return [kotlinCommand(c, t, ['package', '-m', moduleName(module)])]
+      }
+      // lint/format: the toolchain has none built in (no Spotless); set e.g. `lint: 'ktlint'`.
+      const args = { test: ['test'], build: ['build'] }[verb as string]
+      return args ? [kotlinCommand(c, t, args)] : undefined
     }
     case 'worker':
       if (verb === 'test') return script(c, dir, pm, 'test')

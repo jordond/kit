@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import pc from 'picocolors'
@@ -9,17 +9,31 @@ import { ExitCode, KitError } from '../errors'
 import { appFastlaneDir, runLane } from '../fastlane'
 import { currentBranch, dirtyFiles, push, tag } from '../git'
 import { emitJson, withStdoutOnStderr } from '../log'
+import { ProcError, runLines } from '../proc'
 import { confirm, text } from '../prompt'
+import { secretFile } from '../secrets'
 import { commandStep, runSteps, type Step, type StepResult, summarize } from '../steps'
+import {
+  aabFromOutput,
+  findAab,
+  keystoreProperties,
+  moduleName,
+  moduleYamlPath,
+  releaseModuleYaml,
+  requireWrapper,
+  WRAPPER,
+} from '../toolchain'
 import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
 import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
 import { loadPreflights } from './preflight'
-import { iosVersionDrift, readVersion } from './version'
+import { androidVersionDrift, iosVersionDrift, readVersion } from './version'
 
 /**
  * `kit release ios|android --track …` (PLAN §9.3):
  *   preconditions → preflight + resolve (tree) → confirm → build + upload + post (tree) → tag → summary.
- * The working tree is never modified: version and build reach the build as lane inputs.
+ * The working tree is never modified: version and build reach the build as lane inputs. The one
+ * exception is a Kotlin toolchain Android build, which has no build properties: the app module's
+ * module.yaml gets versionName, versionCode and signing for the build and is restored after.
  */
 
 export type Platform = 'ios' | 'android'
@@ -82,9 +96,16 @@ export async function checkClean(root: string): Promise<void> {
   }
 }
 
-/** §9.3 step 1 (doctor --release): fail before secrets are decoded or the store is queried. */
-export function checkTools(platform: Platform, which: (bin: string) => string | null = Bun.which): void {
-  const need = platform === 'ios' ? ['bundle', 'xcodebuild', 'java'] : ['bundle', 'java']
+/**
+ * §9.3 step 1 (doctor --release): fail before secrets are decoded or the store is queried.
+ * `toolchain`: the Kotlin toolchain wrapper provisions its own JDK, so java isn't needed.
+ */
+export function checkTools(
+  platform: Platform,
+  which: (bin: string) => string | null = Bun.which,
+  toolchain = false,
+): void {
+  const need = ['bundle', ...(platform === 'ios' ? ['xcodebuild'] : []), ...(toolchain ? [] : ['java'])]
   const missing = need.filter((b) => !which(b))
   if (missing.length) {
     throw new KitError(
@@ -181,9 +202,14 @@ export async function releaseMobile(
   if (platform === 'android' && !android) {
     throw new KitError('No release.android in kit.config.ts', undefined, ExitCode.config)
   }
-  if (platform === 'android' && !config.gradle) {
-    throw new KitError('Android releases need gradle.root in kit.config.ts', undefined, ExitCode.config)
+  if (platform === 'android' && !config.gradle && !config.toolchain) {
+    throw new KitError(
+      'Android releases need gradle.root or toolchain.root in kit.config.ts',
+      undefined,
+      ExitCode.config,
+    )
   }
+  const toolchain = !!config.toolchain
   if (platform === 'ios' && process.platform !== 'darwin') {
     throw new KitError('iOS releases need macOS (xcodebuild)', undefined, ExitCode.precondition)
   }
@@ -209,7 +235,8 @@ export async function releaseMobile(
   if (opts.build !== undefined && !(Number.isInteger(opts.build) && opts.build > 0)) {
     throw new KitError(`--build must be a positive integer, got ${opts.build}`, undefined, ExitCode.usage)
   }
-  checkTools(platform)
+  checkTools(platform, Bun.which, toolchain)
+  if (platform === 'android' && toolchain) requireWrapper(root, config)
   await checkClean(root)
   const branch = await checkBranch(root, config)
   const version = readVersion(root, config, platform)
@@ -219,6 +246,16 @@ export async function releaseMobile(
       throw new KitError(
         `iOS version drift: ${config.versions!.file} says ${drift.toml}, ${drift.file} says ${drift.xcconfig ?? '(no MARKETING_VERSION)'}`,
         'Set MARKETING_VERSION to the TOML version and commit (`kit version bump` keeps them together)',
+        ExitCode.precondition,
+      )
+    }
+  }
+  if (platform === 'android' && toolchain) {
+    const drift = androidVersionDrift(root, config)
+    if (drift) {
+      throw new KitError(
+        `Android version drift: ${config.versions!.file} says ${drift.toml}, ${drift.file} says ${drift.module}`,
+        'Set versionName to the TOML version and commit (`kit version bump` keeps them together)',
         ExitCode.precondition,
       )
     }
@@ -251,7 +288,13 @@ export async function releaseMobile(
   if (platform === 'android') {
     for (const g of android!.gates ?? []) {
       if (!g.tracks.includes(track)) continue
-      pre.push(commandStep(`gate ${g.task}`, ['./gradlew', g.task], { cwd: abs(root, config.gradle!.root) }))
+      pre.push(
+        toolchain
+          ? commandStep(`gate kotlin ${g.task}`, [WRAPPER, ...g.task.split(/\s+/).filter(Boolean)], {
+              cwd: abs(root, config.toolchain!.root),
+            })
+          : commandStep(`gate ${g.task}`, ['./gradlew', g.task], { cwd: abs(root, config.gradle!.root) }),
+      )
     }
   }
   let build = opts.build
@@ -370,31 +413,45 @@ export async function releaseMobile(
       }
     }
   } else {
-    steps.push(
-      laneStep(
-        'build',
-        appRoot,
-        'android',
-        'build',
-        () => ({
-          ...common,
-          KIT_ANDROID_VERSION: version,
-          KIT_ANDROID_CODE: String(build),
-          ...internalFlag,
+    // Gradle writes into the module's build outputs; KIT_OUTPUT_DIR gets a copy (CI uploads it).
+    const keep = (p: string) => {
+      if (!process.env.KIT_OUTPUT_DIR) return p
+      const dest = join(out, basename(p))
+      copyFileSync(p, dest)
+      return dest
+    }
+    if (toolchain) {
+      steps.push(
+        toolchainBuildStep(root, config, {
+          version,
+          code: build,
+          keystore: common.KIT_ANDROID_KEYSTORE_FILE!,
+          env: internalFlag,
+          onArtifact: (aab) => {
+            artifacts.aab = keep(aab)
+          },
         }),
-        (o) => {
-          // Gradle writes into the module's build/outputs; KIT_OUTPUT_DIR gets a copy (CI uploads it).
-          const keep = (p: string) => {
-            if (!process.env.KIT_OUTPUT_DIR) return p
-            const dest = join(out, basename(p))
-            copyFileSync(p, dest)
-            return dest
-          }
-          if (o.ARTIFACT_AAB) artifacts.aab = keep(o.ARTIFACT_AAB)
-          if (o.ARTIFACT_APK) artifacts.apk = keep(o.ARTIFACT_APK)
-        },
-      ),
-    )
+      )
+    } else {
+      steps.push(
+        laneStep(
+          'build',
+          appRoot,
+          'android',
+          'build',
+          () => ({
+            ...common,
+            KIT_ANDROID_VERSION: version,
+            KIT_ANDROID_CODE: String(build),
+            ...internalFlag,
+          }),
+          (o) => {
+            if (o.ARTIFACT_AAB) artifacts.aab = keep(o.ARTIFACT_AAB)
+            if (o.ARTIFACT_APK) artifacts.apk = keep(o.ARTIFACT_APK)
+          },
+        ),
+      )
+    }
     if (!flags.dryRun) {
       steps.push(
         laneStep(`upload Play ${track}`, appRoot, 'android', 'upload_play', () => ({
@@ -469,4 +526,65 @@ export async function releaseMobile(
 function required(value: string | undefined, what: string): string {
   if (!value) throw new KitError(`The build lane reported no ${what}`)
   return value
+}
+
+/**
+ * `./kotlin package -m <module>` with the release values written into the module's module.yaml:
+ * versionName, versionCode, and signing pointing at a keystore.properties in kit's 0600 temp dir.
+ * The file is restored after the build, on failure, and on Ctrl-C.
+ */
+export function toolchainBuildStep(
+  root: string,
+  config: KitConfig,
+  opts: {
+    version: string
+    code: number
+    /** Decoded upload keystore (KIT_ANDROID_KEYSTORE_FILE). */
+    keystore: string
+    env?: Record<string, string>
+    onArtifact: (aab: string) => void
+  },
+): Step {
+  const module = config.release!.android!.module
+  return {
+    title: `build (kotlin package -m ${moduleName(module)})`,
+    task: async (update) => {
+      const dir = requireWrapper(root, config)
+      const rel = moduleYamlPath(config, module)
+      const path = join(root, rel)
+      const before = readFileSync(path, 'utf8')
+      const props = secretFile(
+        'keystore.properties',
+        keystoreProperties(
+          opts.keystore,
+          process.env.ANDROID_KEYSTORE_ALIAS!.trim(),
+          process.env.ANDROID_KEYSTORE_PASSWORD!,
+        ),
+      )
+      const after = releaseModuleYaml(
+        before,
+        { version: opts.version, code: opts.code, signingProperties: props },
+        rel,
+      )
+      const restore = () => writeFileSync(path, before)
+      const off = onCleanup(restore)
+      writeFileSync(path, after)
+      try {
+        const cmd = [WRAPPER, 'package', '-m', moduleName(module)]
+        const { code, output } = await runLines(cmd, { cwd: dir, env: opts.env, onLine: update })
+        if (code !== 0) throw new ProcError(cmd, code, output)
+        const aab = aabFromOutput(output, dir) ?? findAab(dir, module)
+        if (!aab) {
+          throw new KitError(
+            `kotlin package -m ${moduleName(module)} reported no .aab`,
+            `Look under ${join(config.toolchain!.root, 'build/tasks')}; the toolchain's output layout may have changed`,
+          )
+        }
+        opts.onArtifact(aab)
+      } finally {
+        restore()
+        off()
+      }
+    },
+  }
 }

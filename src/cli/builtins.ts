@@ -146,6 +146,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/gradle'),
   },
   {
+    path: ['kotlin'],
+    description: 'Run the Kotlin toolchain wrapper in toolchain.root',
+    group: 'Develop',
+    load: () => import('../commands/kotlin'),
+  },
+  {
     path: ['wrangler'],
     description: "Run wrangler in a worker target's directory",
     group: 'Develop',

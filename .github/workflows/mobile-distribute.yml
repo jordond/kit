@@ -130,12 +130,32 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Both platforms: the iOS archive builds the KMP framework with Gradle too.
+      # Both platforms: the iOS archive builds the KMP framework with Gradle too (Gradle apps only).
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           java-version: ${{ inputs.java-version }}
           distribution: temurin
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+
+      # Kotlin toolchain apps (a `kotlin` wrapper and project.yaml, no Gradle): the wrapper downloads
+      # its own JRE and the toolchain its JDK, so only its caches need restoring. Android builds use
+      # the runner's ANDROID_HOME, where the SDK licenses are already accepted.
+      - name: Kotlin toolchain cache dirs
+        if: hashFiles('**/project.yaml', '!**/node_modules/**') != ''
+        run: |
+          {
+            echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$RUNNER_TEMP/kotlin-cli"
+            echo "KOTLIN_SHARED_CACHE_DIR=$RUNNER_TEMP/kotlin-shared"
+            echo "KOTLIN_CLI_NO_WELCOME_BANNER=1"
+          } >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        if: hashFiles('**/project.yaml', '!**/node_modules/**') != ''
+        with:
+          path: |
+            ${{ runner.temp }}/kotlin-cli
+            ${{ runner.temp }}/kotlin-shared
+          key: kotlin-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/kotlin', '**/libs.versions.toml', '**/module.yaml', '!**/node_modules/**') }}
+          restore-keys: kotlin-toolchain-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Locate kit's fastlane Gemfile
         run: |

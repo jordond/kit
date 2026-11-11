@@ -8,6 +8,7 @@ import type { PackageManager } from '../lib/pm'
  * `kit init`, existing-repo mode (brewd `cli init` + WhaleSay `ws init`, generalized): `.env` from
  * `.env.example`, install, optional mise/lefthook scaffolds, `kit env sync`, `wrangler types`, then
  * the native side: `gradle.init` tasks (needs java, and an Android SDK when release.android is set)
+ * or the Kotlin toolchain's `toolchain.init` (default: `./kotlin --version`, which downloads it),
  * and `bundle install` where a Gemfile is (the Gradle root, else the repo root). A missing tool
  * skips its step with a hint instead of failing, so a JS-only machine still ends up set up.
  * Idempotent: whatever is already there is skipped. Every step runs even after a failure, so one
@@ -41,7 +42,7 @@ export interface InitState {
   /** ANDROID_HOME / ANDROID_SDK_ROOT set, or sdk.dir in `<gradle root>/local.properties`. */
   androidSdk?: boolean
   platform?: NodeJS.Platform
-  /** `--js-only`: skip the Gradle and bundler steps. */
+  /** `--js-only`: skip the Gradle, Kotlin toolchain and bundler steps. */
   jsOnly?: boolean
 }
 
@@ -114,11 +115,30 @@ function planNative(s: InitState): InitAction[] {
       plan.push({ kind: 'cmd', title, cmd, cwd: join(s.root, gradle.root) })
     }
   }
+  const toolchain = s.config?.toolchain
+  if (toolchain) {
+    // The wrapper downloads the pinned toolchain (and its JDK) on first use.
+    const runs = toolchain.init === undefined ? ['--version'] : [toolchain.init].flat()
+    for (const args of runs) {
+      const title = `kotlin ${args}`
+      if (s.jsOnly) plan.push({ kind: 'skip', title, reason: '--js-only' })
+      else if (!s.exists(join(toolchain.root, 'kotlin'))) {
+        plan.push({
+          kind: 'skip',
+          title,
+          reason: `no ${join(toolchain.root, 'kotlin')}; check toolchain.root`,
+        })
+      } else {
+        const cmd = ['./kotlin', ...args.split(/\s+/).filter(Boolean)]
+        plan.push({ kind: 'cmd', title, cmd, cwd: join(s.root, toolchain.root) })
+      }
+    }
+  }
   // Mobile releases use kit's own Gemfile (D7); otherwise install the app's Gemfile if it has one.
   const kitBundle = !!(s.config?.release?.ios || s.config?.release?.android)
   const gemDir = kitBundle
     ? '.'
-    : [gradle?.root, '.'].find((d) => d !== undefined && s.exists(join(d, 'Gemfile')))
+    : [gradle?.root ?? toolchain?.root, '.'].find((d) => d !== undefined && s.exists(join(d, 'Gemfile')))
   if (gemDir !== undefined) {
     const title = kitBundle
       ? 'bundle install (kit fastlane)'
@@ -167,7 +187,7 @@ export default defineCommand({
   description: 'Set up a fresh clone: .env, install, env sync, wrangler types, Gradle and bundler deps',
   group: 'Setup',
   args: {
-    'js-only': { type: 'boolean', description: 'Skip the Gradle and bundler steps' },
+    'js-only': { type: 'boolean', description: 'Skip the Gradle, Kotlin toolchain and bundler steps' },
   },
   examples: [
     'kit init',
