@@ -486,6 +486,7 @@ export default defineCommand({
     const { detectPackageManager, pmExec } = await import('../lib/pm')
     const { parseToml, readToml } = await import('../lib/toml')
     const { ExitCode } = await import('../lib/errors')
+    const { installDir } = await import('../config/load')
 
     const { onGitHubActions, releaseSecrets, renameHints } = await import('../lib/release/creds')
     const { androidVersionDrift, iosVersionDrift } = await import('../lib/release/version')
@@ -571,13 +572,15 @@ export default defineCommand({
           .filter((f) => /\.ya?ml$/.test(f))
           .map((f) => ({ file: f, text: readFileSync(join(wfDir, f), 'utf8') }))
       : []
-    const pkg = read('package.json')
+    // The kit pin: `.kit/package.json` when the repo installs kit there, else the root package.json.
+    const pkgFile = installDir(root) === '.' ? 'package.json' : `${installDir(root)}/package.json`
+    const pkg = read(pkgFile)
     let pin: { devDependencies?: Record<string, string>; dependencies?: Record<string, string> } | undefined
     let pkgCheck: Check | undefined
     try {
       pin = pkg ? JSON.parse(pkg) : undefined
     } catch (e) {
-      pkgCheck = checkUnreadable('package-json', 'package.json', 'package.json', e)
+      pkgCheck = checkUnreadable('package-json', 'package.json', pkgFile, e)
     }
     const kitPin = pin?.devDependencies?.['@jordond/kit'] ?? pin?.dependencies?.['@jordond/kit']
 

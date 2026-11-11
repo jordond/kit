@@ -8,6 +8,23 @@ bun add -d @jordond/kit
 kit --help
 ```
 
+Install it globally too (`bun add -g @jordond/kit`) to get `kit` on your `PATH`: the global launcher finds
+the nearest `kit.config.ts` and runs that repo's own pinned copy.
+
+### Install dir: the root or `.kit/`
+
+kit is a dev dependency in the root `package.json`, or in `.kit/package.json` for repos that must not have
+a root `package.json`:
+
+```sh
+mkdir -p .kit && cd .kit && bun init -y && bun add -d @jordond/kit   # then: .kit/node_modules/.bin/kit
+```
+
+`kit.config.ts` stays at the root and keeps `import { defineConfig } from '@jordond/kit'`: kit resolves that
+import to itself. The launcher, `kit init`, `kit doctor`, the setup action and `mobile-distribute.yml` all
+look in both places. Kotlin toolchain repos need `.kit/`: the toolchain runs `pnpm add` for its Kotlin/Wasm
+test browser in a build folder with no `package.json`, and pnpm installs into the nearest one above it.
+
 ## Shell completion
 
 ```sh
@@ -70,8 +87,9 @@ a repo with `mise.toml` warns when mise isn't installed or a pinned version diff
 ## Kotlin toolchain
 
 Apps built with the [JetBrains Kotlin Toolchain](https://kotlin-toolchain.org/latest/) (formerly Amper)
-have a `kotlin` wrapper, `project.yaml` and one `module.yaml` per module instead of Gradle. Set
-`toolchain.root` in place of `gradle` (they are exclusive) and use the `kotlin` target kind:
+have a `kotlin` wrapper, `project.yaml` and one `module.yaml` per module instead of Gradle. Install kit
+in [`.kit/`](#install-dir-the-root-or-kit), set `toolchain.root` in place of `gradle` (they are exclusive)
+and use the `kotlin` target kind:
 
 ```ts
 export default defineConfig({

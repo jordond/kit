@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { Args } from 'gunshi'
+import { registerSelf } from '../config/load'
 import { KitError } from '../lib/errors'
 import type { KitCommand } from './command'
 
@@ -27,6 +28,7 @@ export function listRepoCommands(root: string): RepoCommandFile[] {
 }
 
 export async function importRepoCommand(f: RepoCommandFile): Promise<KitCommand<Args>> {
+  registerSelf()
   const mod = await import(pathToFileURL(f.file).href)
   const cmd = mod.default as KitCommand<Args> | undefined
   if (!cmd || typeof cmd.run !== 'function') {

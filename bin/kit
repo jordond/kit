@@ -1,7 +1,8 @@
 #!/bin/sh
 # kit launcher. Hands off to the repo-pinned kit with exec, so only one Bun process starts.
 # 1. KIT_DEV=<kit checkout>  -> run that checkout's sources
-# 2. <root>/node_modules/@jordond/kit present (root = nearest dir with kit.config.ts) -> exec it
+# 2. <root>/node_modules/@jordond/kit or <root>/.kit/node_modules/@jordond/kit present
+#    (root = nearest dir with kit.config.ts) -> exec it
 # 3. otherwise run this copy (only init, doctor, help, completion are useful outside a repo)
 # Uses only shell builtins on the hot path (no dirname/readlink forks).
 
@@ -16,6 +17,9 @@ while :; do
     export KIT_ROOT
     if [ -f "$dir/node_modules/@jordond/kit/dist/cli.js" ]; then
       exec bun --no-env-file "$dir/node_modules/@jordond/kit/dist/cli.js" "$@"
+    fi
+    if [ -f "$dir/.kit/node_modules/@jordond/kit/dist/cli.js" ]; then
+      exec bun --no-env-file "$dir/.kit/node_modules/@jordond/kit/dist/cli.js" "$@"
     fi
     break
   fi

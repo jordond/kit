@@ -127,8 +127,17 @@ jobs:
         with:
           bun-version: ${{ inputs.bun-version }}
 
+      # kit lives in the root package.json, or in .kit/ (Kotlin toolchain apps keep the root free
+      # of a package.json). KIT_NODE_MODULES is where @jordond/kit is installed.
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: |
+          if [ -f package.json ]; then bun install --frozen-lockfile; fi
+          if [ -f .kit/package.json ]; then
+            (cd .kit && bun install --frozen-lockfile)
+            echo "KIT_NODE_MODULES=$PWD/.kit/node_modules" >> "$GITHUB_ENV"
+          else
+            echo "KIT_NODE_MODULES=$PWD/node_modules" >> "$GITHUB_ENV"
+          fi
 
       # Both platforms: the iOS archive builds the KMP framework with Gradle too (Gradle apps only).
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
@@ -159,7 +168,7 @@ jobs:
 
       - name: Locate kit's fastlane Gemfile
         run: |
-          gemfile=$PWD/node_modules/@jordond/kit/fastlane/Gemfile
+          gemfile=$KIT_NODE_MODULES/@jordond/kit/fastlane/Gemfile
           [ -f "$gemfile" ] || { echo "::error::$gemfile not found: add @jordond/kit as a devDependency"; exit 1; }
           {
             echo "BUNDLE_GEMFILE=$gemfile"
@@ -174,7 +183,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.temp }}/kit-bundle
-          key: kit-bundle-${{ runner.os }}-${{ runner.arch }}-ruby${{ inputs.ruby-version }}-${{ hashFiles('node_modules/@jordond/kit/fastlane/Gemfile.lock') }}
+          key: kit-bundle-${{ runner.os }}-${{ runner.arch }}-ruby${{ inputs.ruby-version }}-${{ hashFiles('node_modules/@jordond/kit/fastlane/Gemfile.lock', '.kit/node_modules/@jordond/kit/fastlane/Gemfile.lock') }}
       - name: Install kit's fastlane bundle
         run: bundle install --jobs 4
 
@@ -215,4 +224,4 @@ jobs:
           [ -n "$ROLLOUT" ] && args+=("--rollout=$ROLLOUT")
           [ "$DRAFT" = true ] && args+=(--draft)
           [ -n "$SKIP" ] && args+=("--skip=$SKIP")
-          node_modules/.bin/kit "${args[@]}"
+          "$KIT_NODE_MODULES/.bin/kit" "${args[@]}"

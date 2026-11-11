@@ -10,6 +10,7 @@ import {
   checkToolchain,
 } from '../../src/commands/doctor'
 import { type InitState, planInit } from '../../src/commands/init'
+import { installDir } from '../../src/config/load'
 import { configSchema } from '../../src/config/schema'
 import { checkTools } from '../../src/lib/release/mobile'
 import { androidVersionDrift, setModuleVersion } from '../../src/lib/release/version'
@@ -373,4 +374,29 @@ test('checkMise warns when mise.toml exists but mise is not installed', () => {
   })
   expect(checkMise({ ktlint: '1.8.0' }, { ktlint: '1.7.0' }).detail).toBe('ktlint 1.8.0 (have 1.7.0)')
   expect(checkMise(undefined, {}, false).status).toBe('skip')
+})
+
+describe('.kit install dir', () => {
+  test('installDir: .kit when .kit/package.json exists, else the root', () => {
+    expect(installDir('/r', (p) => p === '/r/.kit/package.json')).toBe('.kit')
+    expect(installDir('/r', () => false)).toBe('.')
+  })
+  test('init installs in .kit and does not report a missing root package.json', () => {
+    const s: InitState = {
+      root: '/r',
+      config,
+      exists: (p) => ['.kit/package.json', 'kotlin'].includes(p),
+      pm: 'bun',
+      accepted: [],
+      self: ['kit'],
+      exec: (_cwd, bin, ...args) => ['bun', 'x', bin, ...args],
+    }
+    const plan = planInit(s)
+    expect(plan.find((a) => a.title === 'bun install (.kit)')).toMatchObject({
+      kind: 'cmd',
+      cmd: ['bun', 'install'],
+      cwd: '/r/.kit',
+    })
+    expect(plan.find((a) => a.title === 'install')).toBeUndefined()
+  })
 })

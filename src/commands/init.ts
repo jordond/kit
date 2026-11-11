@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { defineCommand } from '../cli/command'
+import { KIT_DIR } from '../config/load'
 import type { KitConfig } from '../config/schema'
 import type { PackageManager } from '../lib/pm'
 
@@ -63,7 +64,18 @@ export function planInit(s: InitState): InitAction[] {
 
   if (s.exists('package.json')) {
     plan.push({ kind: 'cmd', title: `${s.pm} install`, cmd: [s.pm, 'install'], cwd: s.root })
-  } else plan.push({ kind: 'skip', title: 'install', reason: 'no package.json' })
+  } else if (!s.exists(join(KIT_DIR, 'package.json'))) {
+    plan.push({ kind: 'skip', title: 'install', reason: 'no package.json' })
+  }
+  // kit's own install dir (a Kotlin toolchain repo keeps package.json out of the root).
+  if (s.exists(join(KIT_DIR, 'package.json'))) {
+    plan.push({
+      kind: 'cmd',
+      title: `bun install (${KIT_DIR})`,
+      cmd: ['bun', 'install'],
+      cwd: join(s.root, KIT_DIR),
+    })
+  }
 
   for (const name of Object.keys(SCAFFOLDS) as Scaffold[]) {
     const { file, alt } = SCAFFOLDS[name]

@@ -8,8 +8,11 @@ Composite action for repos that use kit. Sets up Bun, installs dependencies, and
   with:
     java: true    # Temurin 21 + gradle/actions/setup-gradle
     ruby: true    # Ruby 3.4 + kit's fastlane bundle
-- run: ./node_modules/.bin/kit check
+- run: kit check
 ```
+
+Dependencies install from the root `package.json`, and from `.kit/package.json` when the repo keeps kit there
+(Kotlin toolchain apps). Either way `kit` is on `PATH` for later steps.
 
 | Input         | Default | Effect |
 |---------------|---------|--------|

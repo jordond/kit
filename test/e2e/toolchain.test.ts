@@ -178,3 +178,15 @@ test('kit lint / lint --fix run ktlint; doctor requires it', async () => {
   expect(bad.stderr).toContain('no-unused-imports')
   expect(bad.stderr).toContain('kit lint --fix')
 })
+
+test('kit installed in .kit: doctor reads the pin from .kit/package.json', async () => {
+  const { mkdirSync } = await import('node:fs')
+  mkdirSync(join(f.dir, '.github/workflows'), { recursive: true })
+  writeFileSync(
+    join(f.dir, '.github/workflows/ci.yml'),
+    'jobs:\n  a:\n    steps:\n      - uses: jordond/kit/.github/actions/setup@abc123 # v1.2.3\n',
+  )
+  const r = await run(['doctor', '--json'])
+  const checks = JSON.parse(r.stdout).checks as { id: string; status: string; detail?: string }[]
+  expect(checks.find((c) => c.id === 'ci-pin')).toMatchObject({ status: 'ok', detail: '1.2.3' })
+})

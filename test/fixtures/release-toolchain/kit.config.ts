@@ -1,4 +1,7 @@
-export default {
+// A bare import with no node_modules above this file: kit resolves it to itself (.kit install dir).
+import { defineConfig } from '@jordond/kit'
+
+export default defineConfig({
   name: 'App',
   toolchain: { root: '.' },
   versions: {
@@ -13,4 +16,4 @@ export default {
       gates: [{ task: 'test -m shared', tracks: ['beta', 'prod'] }],
     },
   },
-}
+})
