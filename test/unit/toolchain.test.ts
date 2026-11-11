@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkAndroidVersion, checkToolchain } from '../../src/commands/doctor'
+import {
+  checkAndroidVersion,
+  checkKtlint,
+  checkLefthook,
+  checkMise,
+  checkToolchain,
+} from '../../src/commands/doctor'
 import { type InitState, planInit } from '../../src/commands/init'
 import { configSchema } from '../../src/config/schema'
 import { checkTools } from '../../src/lib/release/mobile'
@@ -170,7 +176,7 @@ describe('config', () => {
 })
 
 describe('kotlin kind', () => {
-  test('test and build run the wrapper in toolchain.root; lint has no default', () => {
+  test('test and build run the wrapper in toolchain.root', () => {
     expect(targetCommands('/r', config, 'app', 'test')).toEqual([
       { title: 'kotlin test', cmd: ['./kotlin', 'test'], cwd: '/r' },
     ])
@@ -180,7 +186,6 @@ describe('kotlin kind', () => {
       '-m',
       'shared',
     ])
-    expect(targetCommands('/r', config, 'app', 'lint')).toBeUndefined()
   })
   test('--release packages the android module; --apk is refused', () => {
     expect(targetCommands('/r', config, 'app', 'build', { release: 'aab' })![0]!.cmd).toEqual([
@@ -296,4 +301,76 @@ test('replacing the last key keeps the trailing newline and comments after it', 
   expect(setModuleVersion('settings:\n  android:\n    versionName: "1"\n', 'm', '2')).toBe(
     'settings:\n  android:\n    versionName: "2"\n',
   )
+})
+
+describe('ktlint', () => {
+  test('lint and format default to ktlint over Kotlin sources, skipping build output', () => {
+    expect(targetCommands('/r', config, 'app', 'lint')).toEqual([
+      {
+        title: 'ktlint',
+        cmd: ['ktlint', '--relative', '**/*.kt', '**/*.kts', '!**/build/**', '!**/node_modules/**'],
+        cwd: '/r',
+      },
+    ])
+    expect(targetCommands('/r', config, 'app', 'format')![0]!.cmd.slice(0, 3)).toEqual([
+      'ktlint',
+      '--relative',
+      '-F',
+    ])
+  })
+  test('--staged passes only the staged Kotlin files under the toolchain root', () => {
+    const c = configSchema.parse({
+      name: 'X',
+      toolchain: { root: 'client' },
+      targets: { app: { kind: 'kotlin', dir: 'client' } },
+    })
+    const staged = ['client/shared/src/App.kt', 'client/build.kts', 'README.md', 'other/X.kt']
+    expect(targetCommands('/r', c, 'app', 'format', { staged })![0]).toEqual({
+      title: 'ktlint -F',
+      cmd: ['ktlint', '--relative', '-F', 'shared/src/App.kt', 'build.kts'],
+      cwd: '/r/client',
+    })
+    expect(targetCommands('/r', c, 'app', 'lint', { staged: ['README.md'] })).toBeUndefined()
+  })
+  test('false turns it off', () => {
+    const c = configSchema.parse({
+      name: 'X',
+      toolchain: { root: '.' },
+      targets: { app: { kind: 'kotlin', dir: '.', lint: false } },
+    })
+    expect(targetCommands('/r', c, 'app', 'lint')).toBeUndefined()
+  })
+  test('doctor: required, with the version', () => {
+    expect(checkKtlint(undefined, true)).toMatchObject({ status: 'fail', detail: 'not found' })
+    expect(checkKtlint({ code: 0, output: 'ktlint version 1.8.0\n' }, true)).toMatchObject({
+      status: 'ok',
+      detail: '1.8.0',
+    })
+  })
+})
+
+test('checkLefthook warns until lefthook and its hook are installed; skipped in CI', () => {
+  expect(checkLefthook(undefined, false, undefined, false).status).toBe('skip')
+  expect(checkLefthook('lefthook.yml', false, undefined, true).status).toBe('skip')
+  expect(checkLefthook('lefthook.yml', false, undefined, false)).toMatchObject({
+    status: 'warn',
+    detail: 'lefthook not installed',
+  })
+  expect(checkLefthook('lefthook.yml', true, undefined, false)).toMatchObject({
+    status: 'warn',
+    hint: 'Run `lefthook install`',
+  })
+  expect(checkLefthook('lefthook.yml', true, '#!/bin/sh\necho sample', false).status).toBe('warn')
+  expect(checkLefthook('lefthook.yml', true, '#!/bin/sh\ncall_lefthook run "pre-commit"', false).status).toBe(
+    'ok',
+  )
+})
+
+test('checkMise warns when mise.toml exists but mise is not installed', () => {
+  expect(checkMise({ bun: '1.3.14' }, { bun: '1.3.14' }, false)).toMatchObject({
+    status: 'warn',
+    detail: 'mise not installed',
+  })
+  expect(checkMise({ ktlint: '1.8.0' }, { ktlint: '1.7.0' }).detail).toBe('ktlint 1.8.0 (have 1.7.0)')
+  expect(checkMise(undefined, {}, false).status).toBe('skip')
 })

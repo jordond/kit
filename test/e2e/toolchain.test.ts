@@ -46,7 +46,7 @@ const run = (args: string[], env: Record<string, string> = {}) =>
   f.kit(args, { env: { ...SECRETS, GITHUB_ACTIONS: '', KIT_TEST_LOG: join(f.dir, '.kotlin.log'), ...env } })
 
 beforeEach(() => {
-  f = fixture('release-toolchain', ['bundle', 'java'])
+  f = fixture('release-toolchain', ['bundle', 'java', 'ktlint'])
   const laneLog = join(f.dir, '.lanes.log')
   writeFileSync(laneLog, '')
   f.script(
@@ -165,4 +165,16 @@ test('kit doctor: toolchain pinned, versions agree, java not required', async ()
   expect(by('android-version')).toMatchObject({ status: 'ok' })
   expect(by('java')?.status).toBe('warn')
   expect(by('android-sdk')?.status).not.toBe('fail')
+})
+
+test('kit lint / lint --fix run ktlint; doctor requires it', async () => {
+  expect((await run(['lint'])).code).toBe(0)
+  expect((await run(['lint', '--fix'])).code).toBe(0)
+  const calls = f.calls().filter((c) => c.bin === 'ktlint')
+  expect(calls.map((c) => c.argv.slice(0, 2).join(' '))).toEqual(['--relative **/*.kt', '--relative -F'])
+  f.fail('ktlint', 1, 'androidApp/src/Main.kt:1:1: Unused import (standard:no-unused-imports)')
+  const bad = await run(['lint'])
+  expect(bad.code).toBe(1)
+  expect(bad.stderr).toContain('no-unused-imports')
+  expect(bad.stderr).toContain('kit lint --fix')
 })

@@ -151,9 +151,19 @@ export function versionMatches(spec: string, actual: string): boolean {
 export function checkMise(
   tools: Record<string, string> | undefined,
   detected: Record<string, string | undefined>,
+  installed = true,
 ): Check {
   const label = 'mise.toml versions'
   if (!tools) return { id: 'mise', label, status: 'skip', detail: 'no mise.toml' }
+  if (!installed) {
+    return {
+      id: 'mise',
+      label,
+      status: 'warn',
+      detail: 'mise not installed',
+      hint: 'Install mise (`brew install mise`), then `mise install` for the pinned tool versions',
+    }
+  }
   const drift: string[] = []
   for (const [tool, spec] of Object.entries(tools)) {
     if (!(tool in detected)) continue
@@ -164,6 +174,55 @@ export function checkMise(
   if (drift.length)
     return { id: 'mise', label, status: 'warn', detail: drift.join(', '), hint: 'Run `mise install`' }
   return { id: 'mise', label, status: 'ok', detail: Object.keys(tools).join(', ') }
+}
+
+/** ktlint, which `kotlin` targets lint and format with; required when one uses the default. */
+export function checkKtlint(probe: Probe, required: boolean): Check {
+  const hint = 'Install ktlint (`mise install` with ktlint in mise.toml, or `brew install ktlint`)'
+  if (probe?.code !== 0) return missing('ktlint', 'ktlint', required, hint)
+  return { id: 'ktlint', label: 'ktlint', status: 'ok', detail: parseKtlintVersion(probe.output) ?? 'found' }
+}
+
+/** `ktlint --version` → '1.8.0'. */
+export function parseKtlintVersion(output: string): string | undefined {
+  return output.match(/(\d+\.\d+(?:\.\d+)?)/)?.[1]
+}
+
+export const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml', '.lefthook.yaml']
+
+/**
+ * A repo with a lefthook config: lefthook on PATH and its pre-commit hook installed in this clone.
+ * `hook` is the text of git's pre-commit hook (undefined: none). Warnings only; skipped in CI,
+ * where nothing commits.
+ */
+export function checkLefthook(
+  file: string | undefined,
+  installed: boolean,
+  hook: string | undefined,
+  ci: boolean,
+): Check {
+  const label = 'lefthook'
+  if (!file) return { id: 'lefthook', label, status: 'skip', detail: 'no lefthook.yml' }
+  if (ci) return { id: 'lefthook', label, status: 'skip', detail: 'CI' }
+  if (!installed) {
+    return {
+      id: 'lefthook',
+      label,
+      status: 'warn',
+      detail: 'lefthook not installed',
+      hint: 'Install it (`brew install lefthook`), then run `lefthook install`',
+    }
+  }
+  if (!hook || !/lefthook/.test(hook)) {
+    return {
+      id: 'lefthook',
+      label,
+      status: 'warn',
+      detail: `${file} hooks not installed in this clone`,
+      hint: 'Run `lefthook install`',
+    }
+  }
+  return { id: 'lefthook', label, status: 'ok', detail: 'pre-commit hook installed' }
 }
 
 /** A project file kit reads (mise.toml, package.json) that does not parse: a failure, not a crash. */
@@ -420,7 +479,7 @@ export default defineCommand({
   examples: 'kit doctor\nkit doctor --json\nkit doctor --ci',
   async run(ctx) {
     const { existsSync, readdirSync, readFileSync } = await import('node:fs')
-    const { join } = await import('node:path')
+    const { join, resolve } = await import('node:path')
     const pc = (await import('picocolors')).default
     const { emitJson } = await import('../lib/log')
     const { runQuiet } = await import('../lib/proc')
@@ -455,6 +514,20 @@ export default defineCommand({
     const fastlane = ios || !!config?.release?.android
     const worker = Object.values(config?.targets ?? {}).find((t) => t.kind === 'worker')
 
+    // kotlin targets lint and format with ktlint unless both verbs are overridden or off.
+    const ktlintUsed = targets.some(
+      (t) => t.kind === 'kotlin' && (t.lint === undefined || t.format === undefined),
+    )
+    const ktlint = ktlintUsed ? await probe(['ktlint', '--version']) : undefined
+    const lefthookFile = LEFTHOOK_FILES.find((f) => existsSync(join(root, f)))
+    let lefthookHook: string | undefined
+    if (lefthookFile) {
+      // --git-path follows worktrees and core.hooksPath.
+      const r = await probe(['git', 'rev-parse', '--git-path', 'hooks/pre-commit'])
+      const hookPath = r?.code === 0 ? resolve(root, r.output.trim()) : undefined
+      if (hookPath && existsSync(hookPath)) lefthookHook = readFileSync(hookPath, 'utf8')
+    }
+
     const [java, ruby, xcode, wrangler] = await Promise.all([
       probe(['java', '-version']),
       probe(['ruby', '--version']),
@@ -486,6 +559,9 @@ export default defineCommand({
       bun: Bun.version,
       java: java?.code === 0 ? parseJavaVersion(java.output) : undefined,
       ruby: ruby?.output.match(/ruby (\d[\w.]*)/)?.[1],
+    }
+    if (miseTools?.ktlint) {
+      detected.ktlint = ktlint?.code === 0 ? parseKtlintVersion(ktlint.output) : undefined
     }
     if (miseTools?.node) detected.node = (await probe(['node', '--version']))?.output.trim().replace(/^v/, '')
 
@@ -535,7 +611,9 @@ export default defineCommand({
           ]
         : []),
       checkWranglerLogin(wrangler),
-      miseCheck ?? checkMise(miseTools, detected),
+      ...(ktlintUsed ? [checkKtlint(ktlint, true)] : []),
+      miseCheck ?? checkMise(miseTools, detected, !!Bun.which('mise')),
+      checkLefthook(lefthookFile, !!Bun.which('lefthook'), lefthookHook, onGitHubActions()),
       checkEnvFile(read('.env.example'), read('.env')),
       ...(config?.release?.ios?.xcconfig ? [checkIosVersion(() => iosVersionDrift(root, config))] : []),
       ...(config?.toolchain && config.release?.android

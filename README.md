@@ -61,6 +61,12 @@ export default defineCommand({
 
 `kit test`, `kit test client` and `kit test --json` all keep working; only the noise is gone.
 
+## Doctor
+
+`kit doctor` checks the tools the config needs. Two checks only warn, because they are per-machine setup:
+a repo with `mise.toml` warns when mise isn't installed or a pinned version differs, and a repo with
+`lefthook.yml` warns when lefthook isn't installed or `lefthook install` hasn't been run in the clone.
+
 ## Kotlin toolchain
 
 Apps built with the [JetBrains Kotlin Toolchain](https://kotlin-toolchain.org/latest/) (formerly Amper)
@@ -85,11 +91,15 @@ export default defineConfig({
 | | Gradle | Kotlin toolchain |
 | --- | --- | --- |
 | `kit test` / `kit build` | `./gradlew test` / `build` | `./kotlin test` / `build` |
-| `kit lint` / `kit format` | `spotlessCheck` / `spotlessApply` | none built in; set a command (`ktlint`) |
+| `kit lint` / `kit format` | `spotlessCheck` / `spotlessApply` | `ktlint` / `ktlint -F` over `**/*.kt` and `**/*.kts`, skipping `build/` |
 | `kit build <t> --release` | `<module>:bundleRelease` | `./kotlin package -m <module>` (AAB only) |
 | passthrough | `kit gradle …` | `kit kotlin …` |
 | `kit init` | `gradle.init` tasks | `toolchain.init` (default `./kotlin --version`, which downloads the toolchain) |
-| `kit doctor` | java, Android SDK, catalog keys | the wrapper and its pinned `kotlin_cli_version`; no java or SDK needed |
+| `kit doctor` | java, Android SDK, catalog keys | the wrapper and its pinned `kotlin_cli_version`, and ktlint; no java or SDK needed |
+
+The toolchain has no linter, so `kotlin` targets use the standalone `ktlint` binary: pin it in `mise.toml`
+(`ktlint = "1.8.0"`) and style it with `.editorconfig`. `kit lint --staged --fix` passes only the staged
+Kotlin files. Override with `lint:` / `format:` on the target, or `false` to turn one off.
 
 `kit release android` runs `./kotlin package -m <release.android.module>`. The toolchain takes no build
 properties, so kit writes `versionName`, `versionCode` and `signing` (a `keystore.properties` in kit's

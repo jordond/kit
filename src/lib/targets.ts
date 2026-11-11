@@ -88,6 +88,33 @@ function kotlinCommand(c: Ctx, target: TargetConfig, args: string[]): PlannedCom
   return { title: `kotlin ${args.join(' ')}`, cmd: ['./kotlin', ...args, ...extra], cwd }
 }
 
+/** What `ktlint` checks with no staged list: every Kotlin file outside build output and node_modules. */
+export const KTLINT_PATTERNS = ['**/*.kt', '**/*.kts', '!**/build/**', '!**/node_modules/**']
+
+/**
+ * `ktlint` (lint) or `ktlint -F` (format) in the toolchain root: the Kotlin toolchain has no
+ * linter of its own. With `--staged`, only the staged Kotlin files under that dir; none = no command.
+ */
+function ktlintCommand(c: Ctx, target: TargetConfig, fix: boolean): PlannedCommand[] {
+  const cwd = resolve(c.root, c.config.toolchain?.root ?? target.dir)
+  let files = KTLINT_PATTERNS
+  if (c.opts.staged) {
+    files = c.opts.staged
+      .filter((f) => /\.kts?$/.test(f))
+      .map((f) => relative(cwd, resolve(c.root, f)))
+      .filter((f) => !f.startsWith('..'))
+    if (!files.length) return []
+  }
+  const flags = ['--relative', ...(fix ? ['-F'] : [])]
+  return [
+    {
+      title: fix ? 'ktlint -F' : 'ktlint',
+      cmd: ['ktlint', ...flags, ...files, ...(c.opts.extra ?? [])],
+      cwd,
+    },
+  ]
+}
+
 function gradleCommand(c: Ctx, target: TargetConfig, tasks: string[]): PlannedCommand {
   const cwd = resolve(c.root, c.config.gradle?.root ?? target.dir)
   const gradlew = existsSync(join(cwd, 'gradlew')) ? './gradlew' : 'gradle'
@@ -165,7 +192,7 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
         }
         return [kotlinCommand(c, t, ['package', '-m', moduleName(module)])]
       }
-      // lint/format: the toolchain has none built in (no Spotless); set e.g. `lint: 'ktlint'`.
+      if (verb === 'lint' || verb === 'format') return ktlintCommand(c, t, verb === 'format')
       const args = { test: ['test'], build: ['build'] }[verb as string]
       return args ? [kotlinCommand(c, t, args)] : undefined
     }
