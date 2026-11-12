@@ -2,6 +2,7 @@ import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { KitConfig } from '../config/schema'
+import { runPiped } from './proc'
 import { selectTargets, WORKSPACE } from './targets'
 
 /**
@@ -44,6 +45,11 @@ export interface CleanOptions {
   home?: string
   /** `KIT_OUTPUT_DIR`: where `kit release ios` keeps `release.ios.output`; default the repo root. */
   outputDir?: string
+  /**
+   * From `iosOutputTracked`. Only `false` lets the dir holding `release.ios.output` go with the
+   * artifacts; by default just the artifacts are planned.
+   */
+  outputTracked?: boolean
 }
 
 const inside = (parent: string, child: string): boolean => {
@@ -151,6 +157,36 @@ export function derivedDataDirs(project: string, home = homedir()): string[] {
     })
 }
 
+/** Where `kit release ios` writes: `release.ios.output` under `KIT_OUTPUT_DIR` (else the repo root). */
+export function iosOutput(
+  root: string,
+  config: KitConfig,
+  outputDir?: string,
+): { base: string; dir: string; artifacts: string[] } | undefined {
+  const ios = config.release?.ios
+  if (!ios) return undefined
+  const base = resolve(root, outputDir ?? '.')
+  const ipa = resolve(base, ios.output)
+  // gym names the dSYM zip after the .ipa: `App.ipa` → `App.app.dSYM.zip`, in the same dir.
+  const dsym = join(dirname(ipa), `${basename(ipa, extname(ipa))}.app.dSYM.zip`)
+  return { base, dir: dirname(ipa), artifacts: [ipa, dsym] }
+}
+
+/**
+ * Whether git tracks anything in the dir `release.ios.output` lands in. True when git cannot say
+ * (no repo, no git): the dir is then never removed, only the artifacts in it.
+ */
+export async function iosOutputTracked(
+  root: string,
+  config: KitConfig,
+  outputDir?: string,
+): Promise<boolean> {
+  const out = iosOutput(root, config, outputDir)
+  if (!out || !exists(out.dir)) return true
+  const { code, stdout } = await runPiped(['git', 'ls-files', '-z', '--', '.'], { cwd: out.dir })
+  return code !== 0 || stdout.length > 0
+}
+
 interface Candidate {
   path: string
   owner: string
@@ -173,7 +209,7 @@ const JS_OUTPUT = [
  * What `kit clean` would delete. Per kind: gradle → `.gradle/`, `.kotlin/` and every project's
  * `build/` under the Gradle root; kotlin → `build/` in the toolchain root; worker, vite, astro →
  * `dist/`, `.wrangler/tmp`, `.astro` and the caches in `node_modules`; with `release.ios`, the
- * release output. `deep` adds `node_modules` (root and `.kit/`), `.wrangler/state` and DerivedData.
+ * release .ipa and its dSYM zip. `deep` adds `node_modules` (root and `.kit/`), `.wrangler/state` and DerivedData.
  */
 export function planClean(root: string, config: KitConfig, opts: CleanOptions = {}): CleanPlan {
   const names = opts.targets ?? []
@@ -211,18 +247,17 @@ export function planClean(root: string, config: KitConfig, opts: CleanOptions = 
 
   const ios = config.release?.ios
   if (ios && (everything || sel.targets.some(([, t]) => t.kind === 'gradle' || t.kind === 'kotlin'))) {
-    const base = resolve(root, opts.outputDir ?? '.')
-    const artifact = resolve(base, ios.output)
-    const dir = dirname(artifact)
-    // The dir the .ipa lands in, unless that dir also holds sources: then only the artifact.
-    const sources = [
-      ...Object.values(config.targets).map((t) => t.dir),
-      ...(config.gradle ? [config.gradle.root] : []),
-      ...(config.toolchain ? [config.toolchain.root] : []),
-      ios.project,
-    ].map((p) => resolve(root, p))
-    const shared = dir === base || sources.some((s) => s === dir || inside(dir, s))
-    add('ios', root, [shared ? artifact : dir])
+    const out = iosOutput(root, config, opts.outputDir)!
+    // Only what `kit release ios` writes: the .ipa and gym's dSYM zip. Their dir goes too only when
+    // nothing else is in it and git tracks nothing there (never `fastlane/` or `ios/`).
+    const present = out.artifacts.filter(exists)
+    const dedicated =
+      opts.outputTracked === false &&
+      out.dir !== out.base &&
+      inside(resolve(root), out.dir) &&
+      present.length > 0 &&
+      readdirSync(out.dir).every((name) => out.artifacts.includes(join(out.dir, name)))
+    add('ios', root, dedicated ? [out.dir] : out.artifacts)
     if (opts.deep) {
       add('ios', root, derivedDataDirs(resolve(root, ios.project), opts.home), { deep: true, external: true })
     }

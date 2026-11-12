@@ -13,16 +13,18 @@ export default defineCommand({
   async run(ctx) {
     const { requireProject } = await import('../cli/command')
     const { ExitCode, KitError } = await import('../lib/errors')
-    const { formatBytes, planClean, removeItems } = await import('../lib/clean')
+    const { formatBytes, iosOutputTracked, planClean, removeItems } = await import('../lib/clean')
     const { emitJson } = await import('../lib/log')
     const { confirm } = await import('../lib/prompt')
     const pc = (await import('picocolors')).default
     const { root, config } = requireProject(ctx)
 
+    const outputDir = process.env.KIT_OUTPUT_DIR || undefined
     const { items, refused } = planClean(root, config, {
       targets: ctx.positionals,
       deep: ctx.args.deep === true,
-      outputDir: process.env.KIT_OUTPUT_DIR || undefined,
+      outputDir,
+      outputTracked: await iosOutputTracked(root, config, outputDir),
     })
     for (const r of refused) ctx.log.warn(`not removing ${r.path}: ${r.reason}`)
     const doc = (list: typeof items) => list.map((i) => ({ path: i.label, bytes: i.bytes }))
