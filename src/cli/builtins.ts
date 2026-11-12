@@ -187,6 +187,13 @@ export const builtins: BuiltinEntry[] = [
     group: 'Setup',
     load: () => import('../commands/upgrade'),
   },
+  // verb core
+  {
+    path: ['clean'],
+    description: 'Remove build output',
+    group: 'Develop',
+    load: () => import('../commands/clean'),
+  },
   // end setup
   {
     path: ['config'],
