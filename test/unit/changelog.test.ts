@@ -183,6 +183,18 @@ describe('headings and --write', () => {
         expect(prependSection(file, '## Unreleased (2026-02-01)', body, { replace: true })).toBeUndefined()
       }
     }
+    // Hand edits in a last section go too; only the trailer stays.
+    const edited = `Intro I wrote.\n\n1. numbered\n\n#### Notes\n\n+ plus bullet\n\n${body}`
+    expect(
+      prependSection(
+        `# Changelog\n\n## Unreleased (2026-02-01)\n\n${edited}\n${refs}`,
+        '## Unreleased (2026-02-03)',
+        more,
+        {
+          replace: true,
+        },
+      ),
+    ).toBe(`# Changelog\n\n## Unreleased (2026-02-03)\n\n${more}\n${refs}`)
     // A multi-group section with wrapped items is still replaced whole.
     const long = '### Features\n\n- one (1111111)\n  wrapped line\n\n### Fixes\n\n* two (2222222)\n'
     expect(
@@ -195,6 +207,30 @@ describe('headings and --write', () => {
         },
       ),
     ).toBe(`# Changelog\n\n## Unreleased (2026-02-03)\n\n${more}\n${refs}`)
+  })
+
+  test('replace: with a section below, everything up to its heading goes, hand edits included', () => {
+    const more = '### Features\n\n- widgets (1234567)\n'
+    const released = '## 1.0.0 (2026-01-01)\n\n- first\n\n[1.0.0]: https://example.com/v1.0.0\n'
+    const edited = [
+      'An intro line I added by hand.',
+      '',
+      '1. a numbered item',
+      '+ a plus bullet',
+      '',
+      '#### Notes',
+      '',
+      '[inline]: https://example.com/not-a-trailer',
+      '',
+      '---',
+      '',
+      body,
+    ].join('\n')
+    const file = `# Changelog\n\n## Unreleased (2026-02-01)\n\n${edited}\n${released}`
+    const out = prependSection(file, '## Unreleased (2026-02-03)', more, { replace: true })
+    expect(out).toBe(`# Changelog\n\n## Unreleased (2026-02-03)\n\n${more}\n${released}`)
+    for (const gone of ['intro line', 'numbered item', 'plus bullet', '#### Notes', 'not-a-trailer', 'crash'])
+      expect(out).not.toContain(gone)
   })
 
   test('a file without sections gains one at the end', () => {
