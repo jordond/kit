@@ -136,6 +136,17 @@ describe('--affected', () => {
         cwd: 'mono',
       })
       expect(JSON.parse(inside.stdout)).toMatchObject({ affected: ['web'], base: 'HEAD' })
+
+      // --staged: paths relative to the kit root select the target and reach the workspace tool;
+      // a staged file outside the kit root is neither passed nor fans out.
+      writeFileSync(join(nested.dir, 'root.lock'), 'v3')
+      g('add', 'mono/apps/web/src/a.astro', 'root.lock')
+      expect((await nested.kit(['lint', '--staged'], { cwd: 'mono' })).code).toBe(0)
+      expect(nested.calls().map((c) => `${c.cwd} ${c.bin} ${c.argv.join(' ')}`.trim())).toEqual([
+        './mono prep',
+        './mono biome check . apps/web/src/a.astro',
+        './mono/apps/web astro check',
+      ])
     } finally {
       nested.cleanup()
     }

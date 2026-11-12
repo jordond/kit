@@ -142,8 +142,12 @@ describe('affected', () => {
     })
     expect(names(['packages/shared/src/x.ts'], c)).toEqual(['api'])
     expect(names(['packages/shared/docs/guide.txt'], c)).toEqual(['ui'])
-    // Excluded by api, claimed by nobody else: unowned, so every target.
-    expect(names(['packages/shared/README.md'], c)).toEqual(['api', 'web', 'ui'])
+    // Claimed by api and excluded: ignored, not unowned, so it fans out to nobody.
+    expect(names(['packages/shared/README.md'], c)).toEqual([])
+    expect(names(['packages/shared/README.md', 'apps/ui/a.ts'], c)).toEqual(['ui'])
+    // Matched by an exclusion only (no positive entry, no dir): still unowned, every target.
+    expect(names(['docs/README.md'], c)).toEqual(['api', 'web', 'ui'])
+    expect(planVerbs(root, c, ['lint'], { affected: ['packages/shared/README.md'] })).toEqual([])
     // A target with only exclusions does not claim the rest of the repo.
     expect(touches(root, c.targets.web!, ['bun.lock', 'apps/api/a.ts'])).toBe(false)
     // Exclusions never apply to the target's own dir.

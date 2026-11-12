@@ -1,10 +1,14 @@
 import { posix } from 'node:path'
 import { ProcError, runCapture, runPiped } from './proc'
 
-/** Files staged for commit (added, copied, modified, renamed), repo-relative. */
+/**
+ * Files staged for commit (added, copied, modified, renamed), relative to `cwd` (the kit root),
+ * which is where the tools that get them run. Staged files outside `cwd`, when it sits below the
+ * git toplevel, are left out: no target owns them and no tool here could be handed them.
+ */
 export async function stagedFiles(cwd = '.'): Promise<string[]> {
   const { code, stdout } = await runCapture(
-    ['git', 'diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR'],
+    ['git', 'diff', '--cached', '--name-only', '-z', '--diff-filter=ACMR', '--relative'],
     { cwd },
   )
   if (code !== 0) throw new Error('git diff --cached failed')

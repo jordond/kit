@@ -288,11 +288,23 @@ function matchesPath(root: string, entry: string, file: string): boolean {
   return withAncestors(file).some((p) => glob.match(p))
 }
 
+/** A positive `paths` entry matches `file`, whatever the `!entries` say. */
+const included = (root: string, paths: string[], file: string): boolean =>
+  paths.some((p) => !p.startsWith('!') && matchesPath(root, p, file))
+
 /** `paths` as a whole: any positive entry matches, and no `!entry` (an exclusion) does. */
 function matchesPaths(root: string, paths: string[], file: string): boolean {
   const excluded = paths.filter((p) => p.startsWith('!')).map((p) => p.slice(1))
-  const included = paths.filter((p) => !p.startsWith('!'))
-  return included.some((p) => matchesPath(root, p, file)) && !excluded.some((p) => matchesPath(root, p, file))
+  return included(root, paths, file) && !excluded.some((p) => matchesPath(root, p, file))
+}
+
+/**
+ * Whether the target claims `file`: under its `dir` or matched by a positive `paths` entry. A file
+ * it claims and then excludes with a `!entry` does not affect it, but is not unowned either.
+ */
+function claims(root: string, t: Pick<TargetConfig, 'dir' | 'paths'>, file: string): boolean {
+  if (file.startsWith('../')) return false
+  return under(relative(root, resolve(root, t.dir)), file) || included(root, t.paths ?? [], file)
 }
 
 /**
@@ -307,14 +319,15 @@ export function touches(root: string, t: Pick<TargetConfig, 'dir' | 'paths'>, fi
 
 /**
  * Targets `--affected` runs for `files` (changed files, repo-relative). A file under no target's
- * `dir` and matching no target's `paths` (root lockfile, CI, shared tooling) affects every target.
- * A target at the repo root is affected by any change but claims no file, so that rule still holds.
+ * `dir` and matching no target's positive `paths` (root lockfile, CI, shared tooling) affects every
+ * target; one a target claims and then excludes with a `!entry` is ignored instead. A target at
+ * the repo root is affected by any change but claims no file, so the first rule still holds.
  */
 export function affectedTargets(root: string, config: KitConfig, files: string[]): string[] {
   const all = Object.entries(config.targets)
   if (!files.length) return []
   const owned = all.filter(([, t]) => relative(root, resolve(root, t.dir)) !== '')
-  const orphan = files.some((f) => !owned.some(([, t]) => touches(root, t, [f])))
+  const orphan = files.some((f) => !owned.some(([, t]) => claims(root, t, f)))
   // A root target takes every change, the ones outside the kit root included.
   return all
     .filter(([, t]) => orphan || touches(root, t, files) || relative(root, resolve(root, t.dir)) === '')
