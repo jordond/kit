@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { KitConfig } from '../../config/schema'
-import { dotenvValue } from '../dotenv'
+import { dotenvLine, dotenvValue } from '../dotenv'
 import type { EnvSchema, EnvValues } from './schema'
 
 /**
@@ -45,12 +45,14 @@ export function outputs(config: KitConfig, schema: EnvSchema): Output[] {
   })
 }
 
-/** One `.dev.vars` line. Multi-line values (a PEM) are double-quoted with `\n`, which dotenv expands. */
+/**
+ * One `.dev.vars` line. wrangler reads the file with dotenv, so values follow `dotenvLine`: quoted
+ * when bare would be cut or trimmed, multi-line values (a PEM) double-quoted with `\n`.
+ */
 function line(name: string, value: string | undefined, literal = false): string {
   if (!literal && (value === undefined || value === '')) return `# ${name}=\n`
   value ??= ''
-  if (/[\r\n]/.test(value)) return `${name}="${value.replace(/\r?\n/g, '\\n')}"\n`
-  return `${name}=${value}\n`
+  return `${dotenvLine(name, value)}\n`
 }
 
 /** Render an output. Pure. */

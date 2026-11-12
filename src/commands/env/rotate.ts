@@ -109,18 +109,19 @@ export default defineCommand({
       }
     }
 
-    // Everything that can refuse the push (account pin, wrangler / gh auth) runs before .env changes.
+    // Everything that can refuse the push (account pin, wrangler / gh auth) runs before .env changes,
+    // with --yes too: a listing that fails means the puts would fail on the same login.
     let preflight: PushPreflight | undefined
     if (pushing) {
       const parts: PushPreflight[] = []
       for (const selection of selections) {
-        parts.push(await preflightPush(ctx, root, config, next.values, selection))
+        parts.push(await preflightPush(ctx, root, config, next.values, selection, { strict: true }))
       }
       preflight = mergePreflights(parts)
       if (preflight.listFailed.length) {
         throw new KitError(
           `could not list secrets on ${preflight.listFailed.join(', ')}; nothing was rotated`,
-          'Fix the wrangler / gh login, or re-run with --yes to push without listing',
+          'Fix the wrangler / gh login and re-run; `kit env rotate` never writes before it can list its remotes',
           ExitCode.failed,
         )
       }

@@ -368,7 +368,7 @@ INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
 - It confirms first, since the old value stops working once the new one is pushed (`--yes` skips).
   `--dry-run` writes nothing and lists what would rotate and where it would be pushed.
 - `--push` pushes every secret of the remotes that hold the key. The remotes are listed first (a
-  remote kit cannot list stops the run unless `--yes`) and one confirm covers rotating and pushing,
+  remote kit cannot list stops the run, with `--yes` too) and one confirm covers rotating and pushing,
   so nothing is written until the push can go ahead.
 - `--json` reports `{ rotated: [{ key, destinations }], pushed }`, never a value. When `.env` holds
   a new value that is not on its remotes yet, `pending` is the command that finishes the job; the

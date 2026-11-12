@@ -132,6 +132,14 @@ echo "wrangler ok"`,
     expect(apiSecret()).toBe(OLD)
     expect(existsSync(join(fx.dir, 'apps/edge/.dev.vars'))).toBe(false)
     expect(summary().some((c) => c.includes('secret put'))).toBe(false)
+    // --yes does not turn the listing into a formality: same refusal, .env untouched.
+    const y = await fx.kit(['env', 'rotate', 'API_SECRET', '--push', '--yes', '--json'])
+    expect(y.code).toBe(1)
+    expect(JSON.parse(y.stdout)).toMatchObject({ ok: false })
+    expect(y.stdout).toContain('nothing was rotated')
+    expect(apiSecret()).toBe(OLD)
+    expect(existsSync(join(fx.dir, 'apps/edge/.dev.vars'))).toBe(false)
+    expect(summary().some((c) => c.includes('secret put'))).toBe(false)
   })
 
   test('--push off a terminal asks once, after the listing and before anything is written', async () => {
