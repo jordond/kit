@@ -1,3 +1,4 @@
+import { posix } from 'node:path'
 import { ProcError, runCapture, runPiped } from './proc'
 
 /** Files staged for commit (added, copied, modified, renamed), repo-relative. */
@@ -121,28 +122,42 @@ export async function mergeBase(base: string, cwd = '.'): Promise<string | undef
 export interface Changed {
   /** The ref compared against (`origin/main`). */
   base: string
-  /** Paths relative to `cwd`, sorted, without duplicates. Deleted files count. */
+  /**
+   * Paths relative to `cwd`, sorted, without duplicates. Deleted files count, and a moved file
+   * lists both its old and new path. A change outside `cwd` (kit root below the git toplevel)
+   * starts with `../`.
+   */
   files: string[]
+  /** HEAD is the fork point itself: nothing was committed since the base (the default branch, a new branch). */
+  headIsBase: boolean
 }
 
 /**
  * Files that differ from where HEAD forked from `base` (default `defaultBase`): commits on the
- * branch, plus staged, unstaged and untracked files. Undefined when the base cannot be resolved,
- * which callers must treat as "everything changed". Paths outside `cwd` are left out.
+ * branch, plus staged, unstaged and untracked files, anywhere in the git repo. Undefined when the
+ * base cannot be resolved, which callers must treat as "everything changed".
  */
 export async function changedFiles(cwd = '.', base?: string): Promise<Changed | undefined> {
   const ref = base ?? (await defaultBase(cwd))
   const fork = ref ? await mergeBase(ref, cwd) : undefined
   if (!ref || !fork) return undefined
+  // From the toplevel: a change outside the kit root (root lockfile, .github/) must not be dropped.
+  const top = (await read(['rev-parse', '--show-toplevel'], cwd)).trim()
+  const prefix = (await read(['rev-parse', '--show-prefix'], cwd)).trim().replace(/\/$/, '')
+  const head = (await read(['rev-parse', 'HEAD'], cwd)).trim()
+  // --no-renames: a move out of one target's dir into another's changes both.
+  const diff = ['diff', '--name-only', '-z', '--no-renames']
   const lists = await Promise.all([
     // Working tree against the fork point: committed and unstaged changes to tracked files.
-    read(['diff', '--name-only', '-z', '--relative', fork], cwd),
+    read([...diff, fork], top),
     // The index too: a staged change reverted in the working tree shows up only here.
-    read(['diff', '--cached', '--name-only', '-z', '--relative', fork], cwd),
-    read(['ls-files', '--others', '--exclude-standard', '-z'], cwd),
+    read([...diff, '--cached', fork], top),
+    read(['ls-files', '--others', '--exclude-standard', '-z'], top),
   ])
-  const files = new Set(lists.flatMap((out) => out.split('\0').filter(Boolean)))
-  return { base: ref, files: [...files].sort() }
+  const files = new Set(
+    lists.flatMap((out) => out.split('\0').filter(Boolean)).map((f) => posix.relative(prefix, f)),
+  )
+  return { base: ref, files: [...files].sort(), headIsBase: head === fork }
 }
 
 // changelog

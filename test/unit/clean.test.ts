@@ -7,6 +7,7 @@ import {
   derivedDataDirs,
   formatBytes,
   gradleBuildDirs,
+  iosOutputTracked,
   planClean,
   refusal,
   removeItems,
@@ -124,24 +125,88 @@ describe('planClean', () => {
     expect(labels(planClean(root, c, { deep: true }))).toEqual(['.kit/node_modules', 'dist', 'node_modules'])
   })
 
-  test('iOS: the release output dir, or only the .ipa when that dir holds sources', () => {
-    const ios = { bundleIds: ['a.b'], project: 'apps/client/ios/App.xcodeproj', scheme: 'App' }
-    file('build/ios/App.ipa')
-    file('build/ios/App.app.dSYM.zip')
-    file('apps/client/ios/App.ipa')
-    const dedicated = planClean(root, parse({ release: { ios: { ...ios, output: 'build/ios/App.ipa' } } }))
-    expect(labels(dedicated)).toContain('build/ios')
-    const shared = planClean(root, parse({ release: { ios: { ...ios, output: 'apps/client/ios/App.ipa' } } }))
-    expect(labels(shared)).toContain('apps/client/ios/App.ipa')
-    expect(labels(shared)).not.toContain('apps/client/ios')
-    // Not when only a JS target is named.
-    expect(
-      labels(
-        planClean(root, parse({ release: { ios: { ...ios, output: 'build/ios/App.ipa' } } }), {
-          targets: ['api'],
-        }),
-      ),
-    ).not.toContain('build/ios')
+  describe('iOS release output', () => {
+    const iosConfig = (output: string) =>
+      parse({
+        release: {
+          ios: { bundleIds: ['a.b'], project: 'apps/client/ios/App.xcodeproj', scheme: 'App', output },
+        },
+      })
+    const git = (...args: string[]) => {
+      const r = Bun.spawnSync(['git', ...args], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr.toString()}`)
+    }
+    /** Plan the way the command does: ask git first. */
+    const plan = async (output: string, opts: { targets?: string[] } = {}) => {
+      const c = iosConfig(output)
+      return planClean(root, c, { ...opts, outputTracked: await iosOutputTracked(root, c) })
+    }
+    const repo = (...tracked: string[]) => {
+      git('init', '-q', '-b', 'main')
+      git('config', 'user.email', 'kit@example.com')
+      git('config', 'user.name', 'kit')
+      git('config', 'commit.gpgsign', 'false')
+      git('add', 'apps/api/src/index.ts', ...tracked)
+      git('commit', '-q', '-m', 'chore: init')
+    }
+
+    test.each(['fastlane', 'ios'])(
+      '%s/App.ipa: only the .ipa and its dSYM zip, never the dir',
+      async (dir) => {
+        file(`${dir}/Fastfile`)
+        file(`${dir}/metadata/en-US/description.txt`)
+        file(`${dir}/App.ipa`)
+        file(`${dir}/App.app.dSYM.zip`)
+        file(`${dir}/Other.ipa`)
+        repo(`${dir}/Fastfile`, `${dir}/metadata/en-US/description.txt`)
+        const p = await plan(`${dir}/App.ipa`)
+        expect(labels(p).filter((l) => l.startsWith(dir))).toEqual([
+          `${dir}/App.app.dSYM.zip`,
+          `${dir}/App.ipa`,
+        ])
+        expect(removeItems(root, p.items).failed).toEqual([])
+        expect(existsSync(join(root, dir, 'Fastfile'))).toBe(true)
+        expect(existsSync(join(root, dir, 'metadata/en-US/description.txt'))).toBe(true)
+        expect(existsSync(join(root, dir, 'Other.ipa'))).toBe(true)
+        expect(existsSync(join(root, dir, 'App.ipa'))).toBe(false)
+      },
+    )
+
+    test('tracked files deleted from the working tree still keep the dir', async () => {
+      file('fastlane/Fastfile')
+      file('fastlane/App.ipa')
+      repo('fastlane/Fastfile')
+      rmSync(join(root, 'fastlane/Fastfile'))
+      expect(labels(await plan('fastlane/App.ipa'))).toContain('fastlane/App.ipa')
+      expect(labels(await plan('fastlane/App.ipa'))).not.toContain('fastlane')
+    })
+
+    test('a dedicated untracked build dir goes with its artifacts', async () => {
+      file('build/ios/App.ipa')
+      file('build/ios/App.app.dSYM.zip')
+      repo()
+      expect(labels(await plan('build/ios/App.ipa'))).toContain('build/ios')
+      // Anything else in it: only the artifacts.
+      file('build/ios/notes.txt')
+      const p = labels(await plan('build/ios/App.ipa'))
+      expect(p).toContain('build/ios/App.ipa')
+      expect(p).toContain('build/ios/App.app.dSYM.zip')
+      expect(p).not.toContain('build/ios')
+      // Not when only a JS target is named.
+      expect(labels(await plan('build/ios/App.ipa', { targets: ['api'] })).join()).not.toContain('build/ios')
+    })
+
+    test('the dir is kept when git cannot say (no repo) or was not asked; the repo root never goes', async () => {
+      file('build/ios/App.ipa')
+      const c = iosConfig('build/ios/App.ipa')
+      expect(await iosOutputTracked(root, c)).toBe(true)
+      expect(labels(planClean(root, c))).toContain('build/ios/App.ipa')
+      expect(labels(planClean(root, c))).not.toContain('build/ios')
+      file('App.ipa')
+      const atRoot = planClean(root, iosConfig('App.ipa'), { outputTracked: false })
+      expect(labels(atRoot)).toContain('App.ipa')
+      expect(atRoot.items.every((i) => i.path !== root)).toBe(true)
+    })
   })
 
   test('--deep: DerivedData of the configured project only', () => {

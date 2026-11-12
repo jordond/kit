@@ -271,19 +271,38 @@ function workspaceCommands(c: Ctx, verb: Verb | 'prepare'): PlannedCommand[] {
 /** `file` (repo-relative) is `dir` or under it. An empty `dir` is the repo root: every file. */
 const under = (dir: string, file: string): boolean => !dir || file === dir || file.startsWith(`${dir}/`)
 
-/** `targets.<name>.paths` entry: a dir (prefix match) or a glob. */
-function matchesPath(root: string, entry: string, file: string): boolean {
-  const dir = relative(root, resolve(root, entry))
-  return (!!dir && under(dir, file)) || new Bun.Glob(entry.replace(/^\.\//, '')).match(file)
+/** `file` and each of its ancestor dirs, nearest last: `a/b/c.ts` → `a`, `a/b`, `a/b/c.ts`. */
+function withAncestors(file: string): string[] {
+  const parts = file.split('/')
+  return parts.map((_, i) => parts.slice(0, i + 1).join('/'))
 }
 
 /**
- * Whether any of `files` (repo-relative) belongs to the target: under its `dir`, or matching one of
- * its `paths`. The one selection rule for `--staged` and `--affected`.
+ * One `targets.<name>.paths` entry against a file: a dir, or a glob matched against the file and
+ * each of its ancestor dirs, so an entry naming directories (`packages/*`) owns what is under them.
+ */
+function matchesPath(root: string, entry: string, file: string): boolean {
+  const dir = relative(root, resolve(root, entry))
+  if (dir && !dir.startsWith('..') && under(dir, file)) return true
+  const glob = new Bun.Glob(entry.replace(/^\.\//, '').replace(/\/+$/, ''))
+  return withAncestors(file).some((p) => glob.match(p))
+}
+
+/** `paths` as a whole: any positive entry matches, and no `!entry` (an exclusion) does. */
+function matchesPaths(root: string, paths: string[], file: string): boolean {
+  const excluded = paths.filter((p) => p.startsWith('!')).map((p) => p.slice(1))
+  const included = paths.filter((p) => !p.startsWith('!'))
+  return included.some((p) => matchesPath(root, p, file)) && !excluded.some((p) => matchesPath(root, p, file))
+}
+
+/**
+ * Whether any of `files` (repo-relative) belongs to the target: under its `dir`, or matching its
+ * `paths`. The one selection rule for `--staged` and `--affected`. A file outside the kit root
+ * (`../…`) belongs to no target.
  */
 export function touches(root: string, t: Pick<TargetConfig, 'dir' | 'paths'>, files: string[]): boolean {
   const dir = relative(root, resolve(root, t.dir))
-  return files.some((f) => under(dir, f) || (t.paths ?? []).some((p) => matchesPath(root, p, f)))
+  return files.some((f) => !f.startsWith('../') && (under(dir, f) || matchesPaths(root, t.paths ?? [], f)))
 }
 
 /**
@@ -296,7 +315,10 @@ export function affectedTargets(root: string, config: KitConfig, files: string[]
   if (!files.length) return []
   const owned = all.filter(([, t]) => relative(root, resolve(root, t.dir)) !== '')
   const orphan = files.some((f) => !owned.some(([, t]) => touches(root, t, [f])))
-  return all.filter(([, t]) => orphan || touches(root, t, files)).map(([n]) => n)
+  // A root target takes every change, the ones outside the kit root included.
+  return all
+    .filter(([, t]) => orphan || touches(root, t, files) || relative(root, resolve(root, t.dir)) === '')
+    .map(([n]) => n)
 }
 
 /**

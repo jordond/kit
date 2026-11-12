@@ -114,6 +114,51 @@ describe('affected', () => {
     expect(names(['schema/v2/0001_init.sql'])).toEqual(['api'])
     expect(names(['schema/v2/readme.md'])).toEqual(['api', 'web', 'client'])
   })
+  test('paths: a glob that matches directories owns everything under them', () => {
+    const c = configSchema.parse({
+      name: 'x',
+      targets: {
+        api: { kind: 'worker', dir: 'apps/api', paths: ['packages/*', 'libs/shared-*/'] },
+        web: { kind: 'astro', dir: 'apps/web', paths: ['design/**'] },
+      },
+    })
+    expect(names(['packages/core/src/deep/x.ts'], c)).toEqual(['api'])
+    expect(names(['libs/shared-ui/src/x.ts'], c)).toEqual(['api'])
+    expect(names(['design/tokens/a.json'], c)).toEqual(['web'])
+    expect(names(['libs/private/x.ts'], c)).toEqual(['api', 'web'])
+  })
+  test('paths: !entry excludes after the positive entries; alone it adds nothing', () => {
+    const c = configSchema.parse({
+      name: 'x',
+      targets: {
+        api: {
+          kind: 'worker',
+          dir: 'apps/api',
+          paths: ['packages/shared', '!packages/shared/docs', '!**/*.md'],
+        },
+        web: { kind: 'astro', dir: 'apps/web', paths: ['!packages/shared/docs'] },
+        ui: { kind: 'vite', dir: 'apps/ui', paths: ['packages/shared/docs'] },
+      },
+    })
+    expect(names(['packages/shared/src/x.ts'], c)).toEqual(['api'])
+    expect(names(['packages/shared/docs/guide.txt'], c)).toEqual(['ui'])
+    // Excluded by api, claimed by nobody else: unowned, so every target.
+    expect(names(['packages/shared/README.md'], c)).toEqual(['api', 'web', 'ui'])
+    // A target with only exclusions does not claim the rest of the repo.
+    expect(touches(root, c.targets.web!, ['bun.lock', 'apps/api/a.ts'])).toBe(false)
+    // Exclusions never apply to the target's own dir.
+    expect(names(['apps/api/README.md'], c)).toEqual(['api'])
+  })
+  test('a change outside the kit root (../) is unowned: every target', () => {
+    expect(names(['../bun.lock'])).toEqual(['api', 'web', 'client'])
+    expect(names(['apps/web/a.astro', '../../.github/ci.yml'])).toEqual(['api', 'web', 'client'])
+    const c = configSchema.parse({
+      name: 'x',
+      targets: { root: { kind: 'custom', dir: '.' }, any: { kind: 'vite', dir: 'a', paths: ['**'] } },
+    })
+    expect(touches(root, c.targets.any!, ['../x.ts'])).toBe(false)
+    expect(names(['../x.ts'], c)).toEqual(['root', 'any'])
+  })
   test('a file no target owns (lockfile, CI, root config) affects every target', () => {
     expect(names(['bun.lock'])).toEqual(['api', 'web', 'client'])
     expect(names(['.github/workflows/ci.yml'])).toEqual(['api', 'web', 'client'])
