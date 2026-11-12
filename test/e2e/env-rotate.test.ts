@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -54,7 +54,7 @@ describe('env rotate', () => {
     expect(r.stderr).toContain('API_SECRET  → edge, admin')
     expect(r.stderr).toContain('rotated API_SECRET in .env')
     expect(r.stderr).toContain('wrote apps/edge/.dev.vars')
-    expect(r.stderr).toContain('push the new value with: kit env push --workers')
+    expect(r.stderr).toContain('not pushed yet; push the new value with: kit env push --workers')
     expect(fx.calls()).toEqual([])
   })
 
@@ -67,7 +67,9 @@ describe('env rotate', () => {
       outputs: ['apps/edge/.dev.vars', 'apps/admin/.dev.vars'],
       push: ['kit env push --workers'],
       pushed: false,
+      pending: 'kit env push --workers',
     })
+    expect(r.stderr).toContain('not pushed yet; push the new value with: kit env push --workers')
     expect(apiSecret()).toMatch(/^[0-9a-f]{64}$/)
     expect(r.stdout + r.stderr).not.toContain(apiSecret())
   })
@@ -108,11 +110,59 @@ echo "wrangler ok"`,
     expect(r.stderr).toContain('push API_SECRET → edge failed')
     expect(r.stderr).toContain('rejected ***')
     expect(r.stderr).toContain('run: kit env push --workers')
+    // Under --json the note still reaches stderr and the document carries what is left to do.
+    const j = await fx.kit(['env', 'rotate', 'API_SECRET', '--push', '--yes', '--json'])
+    expect(j.code).toBe(1)
+    expect(j.stderr).toContain('.env holds the new value but the push did not finish')
+    expect(JSON.parse(j.stdout)).toMatchObject({ pushed: false, pending: 'kit env push --workers' })
+    expect(j.stdout + j.stderr).not.toContain(apiSecret())
+    expect(r.stdout + r.stderr).not.toContain(value)
+  })
+
+  test('--push: a remote that cannot be listed stops the run before .env changes', async () => {
+    fx.script(
+      'wrangler',
+      `${recordingFake('wrangler').replace(/\necho "wrangler ok"$/, '')}
+if [ "$2" = list ]; then echo "not authenticated" >&2; exit 1; fi
+echo "wrangler ok"`,
+    )
+    const r = await fx.kit(['env', 'rotate', 'API_SECRET', '--push'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('could not list secrets on edge, admin; nothing was rotated')
+    expect(apiSecret()).toBe(OLD)
+    expect(existsSync(join(fx.dir, 'apps/edge/.dev.vars'))).toBe(false)
+    expect(summary().some((c) => c.includes('secret put'))).toBe(false)
+  })
+
+  test('--push off a terminal asks once, after the listing and before anything is written', async () => {
+    const r = await fx.kit(['env', 'rotate', 'API_SECRET', '--push'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('--yes')
+    expect(summary()).toEqual([
+      './apps/edge wrangler secret list --format json',
+      './apps/admin wrangler secret list --format json',
+    ])
+    expect(apiSecret()).toBe(OLD)
+  })
+
+  test('a failed render says .env is rewritten and how to finish (exit 1)', async () => {
+    mkdirSync(join(fx.dir, 'apps/edge/.dev.vars'), { recursive: true })
+    const r = await fx.kit(['env', 'rotate', 'API_SECRET', '--push', '--yes', '--json'])
+    expect(r.code).toBe(1)
+    const value = apiSecret()
+    expect(value).toMatch(/^[0-9a-f]{64}$/)
+    expect(r.stderr).toContain('.env holds the new API_SECRET, but rendering outputs failed')
+    expect(r.stderr).toContain('run: kit env sync && kit env push --workers')
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      pushed: false,
+      pending: 'kit env sync && kit env push --workers',
+    })
+    expect(summary().some((c) => c.includes('secret put'))).toBe(false)
     expect(r.stdout + r.stderr).not.toContain(value)
   })
 
   test('without --yes off a terminal: refuses to confirm (exit 2), nothing written', async () => {
-    const r = await fx.kit(['env', 'rotate', 'API_SECRET', '--push'])
+    const r = await fx.kit(['env', 'rotate', 'API_SECRET'])
     expect(r.code).toBe(2)
     expect(r.stderr).toContain('--yes')
     expect(apiSecret()).toBe(OLD)

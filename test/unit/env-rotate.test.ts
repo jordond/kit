@@ -23,6 +23,17 @@ describe('rewriteKey', () => {
     expect(rewriteKey('A="\n', 'A', 'new')).toBe('A=new\n')
   })
 
+  test('an inline comment after the value stays; a # inside quotes is the value', () => {
+    expect(rewriteKey('A=old # note\n', 'A', 'new')).toBe('A=new # note\n')
+    expect(rewriteKey('A=old\t# note  \n', 'A', 'new')).toBe('A=new\t# note  \n')
+    expect(rewriteKey('A="old" # note\n', 'A', 'new')).toBe('A="new" # note\n')
+    expect(rewriteKey("A='old'   # it's \"quoted\"\n", 'A', 'new')).toBe("A='new'   # it's \"quoted\"\n")
+    expect(rewriteKey('A="old # not a comment"\n', 'A', 'new')).toBe('A="new"\n')
+    expect(rewriteKey('A="old # inside" # note\r\n', 'A', 'new')).toBe('A="new" # note\r\n')
+    // No whitespace before the #: it is part of an unquoted value.
+    expect(rewriteKey('A=old#frag\n', 'A', 'new')).toBe('A=new\n')
+  })
+
   test('a missing key is appended as its own line; a commented one is not the key', () => {
     expect(rewriteKey('A=1\n', 'B', 'new')).toBe('A=1\nB=new\n')
     expect(rewriteKey('A=1', 'B', 'new')).toBe('A=1\nB=new\n')

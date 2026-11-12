@@ -1,4 +1,5 @@
 import { defineCommand } from '../../cli/command'
+import type { PushPreflight } from '../../lib/env/push-run'
 
 export default defineCommand({
   description: 'Generate a new value for keys the env schema marks `generate`, then sync',
@@ -21,7 +22,10 @@ export default defineCommand({
     const { destinationsFor, generateValue, pushSelections, rewriteKey } = await import(
       '../../lib/env/rotate'
     )
-    const { pushCommand, runPush } = await import('../../lib/env/push-run')
+    const { executePreflight, mergePreflights, preflightPush, pushCommand } = await import(
+      '../../lib/env/push-run'
+    )
+    const { redact } = await import('../../lib/secrets')
     const { suggest } = await import('../../lib/targets')
     const { confirm } = await import('../../lib/prompt')
     const { emitJson } = await import('../../lib/log')
@@ -92,14 +96,41 @@ export default defineCommand({
     const dryRun = ctx.flags.dryRun
     const say = !ctx.flags.json
 
+    // With --push and something to push; a dry run calls no remote.
+    const pushing = !!ctx.args.push && !dryRun && commands.length > 0
+    const pending = commands.join(' && ')
+    const doc = { dryRun, rotated, outputs: [] as string[], push: commands }
+    const message = (err: unknown) => redact(err instanceof Error ? err.message : String(err))
+
     if (say) {
       for (const r of rotated) {
         const where = r.destinations.length ? r.destinations.join(', ') : 'no remote, local only'
         ctx.log.info(`${r.key}  → ${where}`)
       }
     }
+
+    // Everything that can refuse the push (account pin, wrangler / gh auth) runs before .env changes.
+    let preflight: PushPreflight | undefined
+    if (pushing) {
+      const parts: PushPreflight[] = []
+      for (const selection of selections) {
+        parts.push(await preflightPush(ctx, root, config, next.values, selection))
+      }
+      preflight = mergePreflights(parts)
+      if (preflight.listFailed.length) {
+        throw new KitError(
+          `could not list secrets on ${preflight.listFailed.join(', ')}; nothing was rotated`,
+          'Fix the wrangler / gh login, or re-run with --yes to push without listing',
+          ExitCode.failed,
+        )
+      }
+    }
+
     if (!dryRun) {
-      const question = `Rotate ${names.join(', ')}? The current value stops working once the new one is pushed.`
+      // One confirm for the whole run: nothing is asked once .env has changed.
+      const question = preflight
+        ? `Rotate ${names.join(', ')} and push ${preflight.count} secret(s) to ${preflight.plans.map((p) => p.destination.name).join(', ')}? The current value stops working.`
+        : `Rotate ${names.join(', ')}? The current value stops working once the new one is pushed.`
       if (!(await confirm(ctx.flags, question))) {
         throw new KitError('Cancelled', undefined, ExitCode.interrupted)
       }
@@ -112,46 +143,56 @@ export default defineCommand({
     }
 
     // The same render `kit env sync` does, so local outputs match the new value.
-    const written = writeOutputs(root, outputs(config, next.schema), next.values, dryRun).filter(
-      (r) => r.changed,
-    )
+    try {
+      doc.outputs = writeOutputs(root, outputs(config, next.schema), next.values, dryRun)
+        .filter((r) => r.changed)
+        .map((r) => r.path)
+    } catch (err) {
+      if (dryRun) throw err
+      // .env is already rewritten: say so, and how to finish, instead of a bare render error.
+      const finish = pending ? `kit env sync && ${pending}` : 'kit env sync'
+      const error = `.env holds the new ${names.join(', ')}, but rendering outputs failed (${message(err)}); outputs may be stale and nothing was pushed`
+      ctx.log.error(error, `Fix the cause, then run: ${finish}`)
+      if (ctx.flags.json) emitJson({ ...doc, pushed: false, pending: finish, error })
+      process.exitCode = ExitCode.failed
+      return
+    }
     if (say) {
       ctx.log.success(`${dryRun ? 'would rotate' : 'rotated'} ${names.join(', ')} in .env`)
-      for (const r of written) ctx.log.success(`${dryRun ? 'would write' : 'wrote'} ${r.path}`)
+      for (const path of doc.outputs) ctx.log.success(`${dryRun ? 'would write' : 'wrote'} ${path}`)
       if (!commands.length) ctx.log.dim('  no worker or GitHub secret holds these keys; nothing to push')
     }
 
-    const doc = { dryRun, rotated, outputs: written.map((r) => r.path), push: commands }
-    if (!ctx.args.push || dryRun || !commands.length) {
-      if (say && commands.length) {
-        const lead = ctx.args.push ? 'would push with' : 'push the new value with'
-        for (const c of commands) ctx.log.step(`${lead}: ${c}`)
+    if (!preflight) {
+      if (dryRun) {
+        if (say) for (const c of commands) ctx.log.step(`would push with: ${c}`)
+        if (ctx.flags.json) emitJson({ ...doc, pushed: false })
+        return
       }
-      if (ctx.flags.json) emitJson({ ...doc, pushed: false })
+      // Rotated but not pushed: said on stderr under --json too, and carried in the document.
+      if (pending) ctx.log.warn(`not pushed yet; push the new value with: ${pending}`)
+      if (ctx.flags.json) emitJson({ ...doc, pushed: false, ...(pending ? { pending } : {}) })
       return
     }
 
-    const outcomes: { destination: string; key: string; status: string }[] = []
-    let ok = true
+    let outcomes: { destination: string; key: string; status: string }[] = []
+    let ok = false
+    let error: string | undefined
     try {
-      for (const selection of selections) {
-        const report = await runPush(ctx, root, config, next.values, selection)
-        // Names and statuses only: child output stays out of the document.
-        outcomes.push(
-          ...report.outcomes.map(({ destination, key, status }) => ({ destination, key, status })),
-        )
-        ok = report.ok
-        if (!ok) break
-      }
+      const report = await executePreflight(ctx, preflight, next.values)
+      // Names and statuses only: child output stays out of the document.
+      outcomes = report.outcomes.map(({ destination, key, status }) => ({ destination, key, status }))
+      ok = report.ok
     } catch (err) {
-      if (say) ctx.log.warn(`.env holds the new value but it was not pushed; run: ${commands.join(' && ')}`)
-      throw err
+      error = message(err)
+      ctx.log.error(error)
     }
-    if (ctx.flags.json) emitJson({ ...doc, pushed: ok, outcomes })
-    if (!ok) {
-      if (say)
-        ctx.log.warn(`.env holds the new value; after fixing the failure run: ${commands.join(' && ')}`)
-      process.exitCode = ExitCode.failed
+    if (ok) {
+      if (ctx.flags.json) emitJson({ ...doc, pushed: true, outcomes })
+      return
     }
+    ctx.log.warn(`.env holds the new value but the push did not finish; after fixing it run: ${pending}`)
+    if (ctx.flags.json) emitJson({ ...doc, pushed: false, pending, outcomes, ...(error ? { error } : {}) })
+    process.exitCode = ExitCode.failed
   },
 })

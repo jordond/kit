@@ -24,21 +24,27 @@ export function generateValue(spec: EnvGenerate): string {
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
- * Replace the value on `KEY=…` lines and leave everything else as it was: comments, order, other
- * keys, `export`, spacing around `=`, the quote style and the file's line endings. A key the file
- * lacks is appended as its own line. A commented `# KEY=` is a comment, not the key.
+ * Replace the value on `KEY=…` lines and leave everything else as it was: comments (a trailing
+ * ` # note` after the value too), order, other keys, `export`, spacing around `=`, the quote style
+ * and the file's line endings. A `#` inside quotes is part of the value, not a comment. A key the
+ * file lacks is appended as its own line. A commented `# KEY=` is a comment, not the key.
  */
 export function rewriteKey(text: string, key: string, value: string): string {
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
-  const re = new RegExp(`^(\\s*(?:export\\s+)?${escapeRe(key)}\\s*=[ \\t]*)(.*?)([ \\t]*)$`)
+  const re = new RegExp(`^(\\s*(?:export\\s+)?${escapeRe(key)}\\s*=[ \\t]*)(.*)$`)
   let replaced = false
   const lines = text.split('\n').map((line) => {
     const cr = line.endsWith('\r') ? '\r' : ''
     const m = re.exec(cr ? line.slice(0, -1) : line)
     if (!m) return line
     replaced = true
-    const quote = /^(['"]).*\1$/.exec(m[2]!)?.[1] ?? ''
-    return `${m[1]}${quote}${value}${quote}${m[3]}${cr}`
+    const rest = m[2]!
+    // Quoted: the value runs to the closing quote; what follows is blank or a comment.
+    const quoted = /^(['"]).*?\1([ \t]+#.*|[ \t]*)$/.exec(rest)
+    if (quoted) return `${m[1]}${quoted[1]}${value}${quoted[1]}${quoted[2]}${cr}`
+    // Unquoted: the value ends at the first whitespace-then-#, else at trailing whitespace.
+    const tail = /[ \t]+#.*$/.exec(rest)?.[0] ?? /[ \t]*$/.exec(rest)?.[0] ?? ''
+    return `${m[1]}${value}${tail}${cr}`
   })
   if (replaced) return lines.join('\n')
   const head = text === '' || text.endsWith('\n') ? text : `${text}${eol}`
