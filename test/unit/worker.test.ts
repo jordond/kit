@@ -4,6 +4,7 @@ import { configSchema } from '../../src/config/schema'
 import { backupFile, type D1Database, d1Args, d1Tables, seedFile } from '../../src/lib/cloudflare'
 import {
   dashboardUrl,
+  gradualRollout,
   listArgs,
   localD1Files,
   localD1Hash,
@@ -201,6 +202,25 @@ describe('rollback and tail', () => {
         versions: [{ version_id: 'x', percentage: 50 }],
       }
       expect(pick([dep('a', 1), split, dep('b', 3)])?.version).toBe('a')
+    })
+
+    test('gradualRollout: a split newest deployment lists candidates instead of a guess', () => {
+      const split = {
+        created_on: '2026-03-03T10:00:00.000Z',
+        versions: [
+          { version_id: 'c', percentage: 10 },
+          { version_id: 'b', percentage: 90 },
+        ],
+      }
+      expect(gradualRollout(JSON.stringify([dep('a', 1), dep('b', 2), split]))).toEqual([
+        { version: 'b', deployed: '2026-03-03T10:00:00.000Z', percentage: 90 },
+        { version: 'c', deployed: '2026-03-03T10:00:00.000Z', percentage: 10 },
+        { version: 'a', deployed: '2026-03-01T10:00:00.000Z', percentage: 100 },
+      ])
+      // An older split under a 100% deployment is history, not the live state.
+      expect(gradualRollout(JSON.stringify([dep('a', 1), split, dep('d', 4)]))).toBeUndefined()
+      expect(gradualRollout('[]')).toBeUndefined()
+      expect(gradualRollout('nope')).toBeUndefined()
     })
 
     test('nothing to go back to, or not a listing: undefined', () => {
