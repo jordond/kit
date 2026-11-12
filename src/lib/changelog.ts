@@ -95,7 +95,7 @@ export const UNRELEASED = 'Unreleased'
  * `text` (undefined: no file yet) with the section put above the newest one. A section with the
  * same heading, whatever its date, is never added twice: the result is undefined. With `replace`
  * (the Unreleased section, which keeps growing) the existing one is rewritten in place instead,
- * and the result is undefined only when that changes nothing.
+ * keeping whatever follows its entries, and the result is undefined only when that changes nothing.
  */
 export function prependSection(
   text: string | undefined,
@@ -110,7 +110,12 @@ export function prependSection(
   const existing = lines.findIndex((l) => l === label || l.startsWith(`${label} `))
   if (existing >= 0) {
     if (!opts.replace) return undefined
-    const next = lines.findIndex((l, i) => i > existing && l.startsWith('## '))
+    // The section is what kit writes: `### <group>` headings, list items and blank lines. It ends
+    // at the next `## ` heading or at anything else (link reference definitions, a `---` rule,
+    // prose), all of which stays below it.
+    const next = lines.findIndex(
+      (l, i) => i > existing && (l.startsWith('## ') || !(l.trim() === '' || /^(### |[-*] |\s+\S)/.test(l))),
+    )
     const tail = next < 0 ? [] : ['', ...lines.slice(next)]
     const out = [...lines.slice(0, existing), ...section.trimEnd().split('\n'), ...tail].join('\n')
     const done = next < 0 ? `${out}\n` : out

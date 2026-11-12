@@ -16,7 +16,7 @@ import {
   checkWranglerLogin,
   checkXcode,
 } from '../../src/commands/doctor'
-import { workerInstall } from '../../src/lib/doctor/entries'
+import { hasBin, workerInstall } from '../../src/lib/doctor/entries'
 import {
   androidVersionFix,
   applyFix,
@@ -173,6 +173,32 @@ describe('the wrangler install is resolved like the probe', () => {
     for (const p of ['package.json', 'apps/api/package.json']) touch(p)
     expect(workerInstall(dir, 'apps/api')).toEqual({ cmd: ['bun', 'install'], cwd: 'apps/api' })
     expect(workerInstall(dir, 'apps/api/src')).toEqual({ cmd: ['bun', 'install'], cwd: 'apps/api' })
+  })
+
+  test('a lockfile in an intermediate dir: installed there, and found there by the probe', () => {
+    for (const p of [
+      'package.json',
+      'bun.lock',
+      'services/package.json',
+      'services/pnpm-lock.yaml',
+      'services/api/package.json',
+    ])
+      touch(p)
+    expect(workerInstall(dir, 'services/api')).toEqual({ cmd: ['pnpm', 'install'], cwd: 'services' })
+    expect(hasBin(dir, 'services/api', 'wrangler')).toBe(false)
+    touch('services/node_modules/.bin/wrangler')
+    expect(hasBin(dir, 'services/api', 'wrangler')).toBe(true)
+    expect(hasBin(dir, 'services/api', 'vitest')).toBe(false)
+  })
+
+  test('hasBin: the worker dir and the root count, a dir above the root does not', () => {
+    mkdirSync(join(dir, 'repo/api'), { recursive: true })
+    touch('node_modules/.bin/wrangler')
+    expect(hasBin(join(dir, 'repo'), 'api', 'wrangler')).toBe(false)
+    touch('repo/node_modules/.bin/wrangler')
+    expect(hasBin(join(dir, 'repo'), 'api', 'wrangler')).toBe(true)
+    touch('other/api/node_modules/.bin/wrangler')
+    expect(hasBin(join(dir, 'other'), 'api', 'wrangler')).toBe(true)
   })
 
   test('nothing at all: the worker dir, never above the repo root', () => {
