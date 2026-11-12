@@ -73,8 +73,10 @@ kit completion fish > ~/.config/fish/completions/kit.fish
 ```
 
 The script calls back into the `kit` on your `PATH`, so it follows each repo's pinned version and
-works outside a repo too. `kit init` offers to install it for your `$SHELL` (the fish completions file,
-or the `source` line in `~/.zshrc` / `~/.bashrc`) when `kit` is on `PATH`; it never does in CI.
+works outside a repo too. `kit init` offers to install it for your `$SHELL` when `kit` is on `PATH`, and
+never in CI: fish gets its completions file; zsh and bash get the script in `~/.config/kit/` and a line
+in `~/.zshrc` (`~/.bash_profile` on macOS, else `~/.bashrc`) that sources it. Sourcing a file means no
+kit process runs when a shell starts.
 
 ## Repo commands
 
