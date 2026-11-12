@@ -70,6 +70,7 @@ const ANSWERS = `  *"android status"*)
     echo "KIT_STATUS_APPSTORE_BUILD=5"; echo "KIT_STATUS_APPSTORE_VERSION=1.3.0"
     echo "KIT_STATUS_APPSTORE_PHASED=ACTIVE" ;;
   *"android rollout"*) echo "KIT_ROLLOUT_STATE=inProgress"; echo "KIT_ROLLOUT_FRACTION=0.25" ;;
+  *"ios promote_build"*) echo "KIT_PROMOTE_BUILD=7" ;;
   *"ios rollout"*) echo "KIT_ROLLOUT_VERSION=1.3.0"; echo "KIT_ROLLOUT_STATE=PAUSED" ;;`
 
 beforeEach(() => {
@@ -191,7 +192,7 @@ describe('kit release promote', () => {
     expect(lanes()).toEqual([])
   })
 
-  test('android alpha → beta: latest code on alpha, promote lane, tag pushed, nothing built', async () => {
+  test('android alpha → beta: latest code on alpha, promote lane, nothing built, no tag made', async () => {
     const r = await run([
       'release',
       'promote',
@@ -215,8 +216,14 @@ describe('kit release promote', () => {
       promoted: true,
       tag: 'android/v1.4.0+40',
       tagExisted: false,
-      tagPushed: true,
+      tagCommand:
+        'git tag -a android/v1.4.0+40 -m "android 1.4.0 (40)" <commit> && git push origin android/v1.4.0+40',
     })
+    expect(JSON.parse(r.stdout).tagPushed).toBeUndefined()
+    // HEAD did not build this build: kit warns and leaves the tag to the user.
+    expect(r.stderr).toContain('there is no android/v1.4.0+40 tag, and kit does not create it here')
+    expect(sh(['git', 'tag'])).toBe('')
+    expect(sh(['git', 'ls-remote', '--tags', 'origin'])).toBe('')
     expect(names()).toEqual(['android status', 'android promote'])
     const [status, promote] = lanes()
     expect(status!.env.KIT_STATUS_TRACKS).toBe('alpha')
@@ -233,7 +240,6 @@ describe('kit release promote', () => {
     expect(promote!.env.KIT_INTERNAL).toBeUndefined()
     expect(promote!.env.KIT_ANDROID_KEYSTORE_FILE).toBeUndefined()
     expect(promote!.cwd.replace(/^\/private/, '')).toBe(join(f.dir, 'client').replace(/^\/private/, ''))
-    expect(sh(['git', 'ls-remote', '--tags', 'origin'])).toContain('refs/tags/android/v1.4.0+40')
     // no build, so no gate task either
     expect(existsSync(join(f.dir, '.gradle.log'))).toBe(false)
   })
@@ -331,6 +337,8 @@ describe('kit release promote', () => {
     const doc = JSON.parse(r.stdout)
     expect(doc).toMatchObject({ promoted: true, tag: 'android/v1.4.0+40', tagExisted: true })
     expect(doc.tagPushed).toBeUndefined()
+    expect(doc.tagCommand).toBeUndefined()
+    expect(r.stderr).not.toContain('kit does not create it')
   })
 
   test('--dry-run prints the plan and runs nothing', async () => {
@@ -355,11 +363,7 @@ describe('kit release promote', () => {
       build: null,
       dryRun: true,
       promoted: false,
-      plan: [
-        'fastlane android status',
-        'fastlane android promote',
-        'git tag android/v1.4.0+<build> (unless it exists) && git push origin <tag>',
-      ],
+      plan: ['fastlane android status', 'fastlane android promote'],
     })
     expect(lanes()).toEqual([])
     expect(sh(['git', 'tag'])).toBe('')
@@ -395,8 +399,10 @@ describe('kit release promote', () => {
     expect(secrets.stderr).toContain('Missing release secrets: PLAY_SERVICE_ACCOUNT_BASE64')
 
     const empty = await run(['release', 'promote', 'android', '--from', 'beta', '--to', 'prod', '--yes'])
+    // beta could not be read (KIT_STATUS_BETA_ERROR): that is not "no release"
     expect(empty.code).toBe(4)
-    expect(empty.stderr).toContain('No release on the Play beta track to promote')
+    expect(empty.stderr).toContain('Could not read the Play beta track: Google Api Error: forbidden')
+    expect(empty.stderr).not.toContain('No release on the Play beta track')
 
     sh(['git', 'switch', '-qc', 'feature/x'])
     const branch = await run(args)
@@ -444,15 +450,17 @@ describe('kit release promote', () => {
     expect(lanes()).toEqual([])
   })
 
-  test('ios alpha → beta: distributes the latest TestFlight build to the configured group', async () => {
+  test('ios alpha → beta: the build comes from the alpha group, then goes to the configured beta group', async () => {
     const r = await run(['release', 'promote', 'ios', '--from', 'alpha', '--to', 'beta', '--yes', '--json'])
     expect(r.code).toBe(0)
-    expect(names()).toEqual(['ios status', 'ios promote_testflight'])
-    const [status, promote] = lanes()
-    expect(status!.env.KIT_IOS_VERSION).toBe('1.4.0')
+    expect(names()).toEqual(['ios promote_build', 'ios promote_testflight'])
+    const [lookup, promote] = lanes()
+    expect(lookup!.env).toMatchObject({ KIT_IOS_VERSION: '1.4.0', KIT_TESTFLIGHT_FROM_GROUP: 'alpha' })
+    expect(lookup!.env.KIT_IOS_BUILD).toBeUndefined()
     expect(promote!.env).toMatchObject({
       KIT_IOS_VERSION: '1.4.0',
       KIT_IOS_BUILD: '7',
+      KIT_TESTFLIGHT_FROM_GROUP: 'alpha',
       KIT_TESTFLIGHT_GROUPS: 'Beta Testers',
       KIT_IOS_BUNDLE_ID: 'app.example',
       ASC_KEY_ID: 'KEYID123',
@@ -464,8 +472,34 @@ describe('kit release promote', () => {
       build: 7,
       promoted: true,
       tag: 'ios/v1.4.0+7',
-      tagPushed: true,
+      tagExisted: false,
     })
+  })
+
+  test('ios: a build that is not in the source group (an internal build) is refused, exit 1', async () => {
+    fakeBundle(`  *"ios promote_build"*)
+    echo "Build 9 of 1.4.0 is not in the TestFlight group 'alpha': only a build released to that group can be promoted (internal builds are never promoted)"
+    exit 1 ;;`)
+    const r = await run([
+      'release',
+      'promote',
+      'ios',
+      '--from',
+      'alpha',
+      '--to',
+      'beta',
+      '--build',
+      '9',
+      '--yes',
+      '--json',
+    ])
+    expect(r.code).toBe(1)
+    expect(names()).toEqual(['ios promote_build'])
+    expect(lanes()[0]!.env).toMatchObject({ KIT_IOS_BUILD: '9', KIT_TESTFLIGHT_FROM_GROUP: 'alpha' })
+    const doc = JSON.parse(r.stdout)
+    expect(doc).toMatchObject({ ok: false, stage: 'resolve', promoted: false, build: 9 })
+    expect(doc.results[0].output).toContain("is not in the TestFlight group 'alpha'")
+    expect(sh(['git', 'tag'])).toBe('')
   })
 
   test('ios --app-version: a build from before a version bump; lane version and tag follow it', async () => {
@@ -483,11 +517,12 @@ describe('kit release promote', () => {
       '--json',
     ])
     expect(r.code).toBe(0)
-    const [status, promote] = lanes()
-    expect(status!.env.KIT_IOS_VERSION).toBe('1.3.0')
+    const [lookup, promote] = lanes()
+    expect(lookup!.env.KIT_IOS_VERSION).toBe('1.3.0')
     expect(promote!.env).toMatchObject({ KIT_IOS_VERSION: '1.3.0', KIT_IOS_BUILD: '7' })
-    expect(JSON.parse(r.stdout)).toMatchObject({ version: '1.3.0', tag: 'ios/v1.3.0+7', tagPushed: true })
-    expect(sh(['git', 'ls-remote', '--tags', 'origin'])).toContain('refs/tags/ios/v1.3.0+7')
+    const doc = JSON.parse(r.stdout)
+    expect(doc).toMatchObject({ version: '1.3.0', tag: 'ios/v1.3.0+7', tagExisted: false })
+    expect(doc.tagCommand).toContain('git tag -a ios/v1.3.0+7')
   })
 
   test('--app-version: bad format → exit 2; Android → exit 2', async () => {
@@ -547,13 +582,17 @@ describe('kit release promote', () => {
       { GITHUB_ACTIONS: 'true' },
     )
     expect(r.code).toBe(0)
-    expect(names()).toEqual(['ios promote_appstore'])
-    expect(lanes()[0]!.env).toMatchObject({
+    // --build is still checked against the source group (the configured beta group)
+    expect(names()).toEqual(['ios promote_build', 'ios promote_appstore'])
+    expect(lanes()[0]!.env).toMatchObject({ KIT_IOS_BUILD: '7', KIT_TESTFLIGHT_FROM_GROUP: 'Beta Testers' })
+    expect(lanes()[0]!.env.KIT_RELEASE_NOTES).toBeUndefined()
+    expect(lanes()[1]!.env).toMatchObject({
       KIT_IOS_VERSION: '1.4.0',
       KIT_IOS_BUILD: '7',
+      KIT_TESTFLIGHT_FROM_GROUP: 'Beta Testers',
       KIT_RELEASE_NOTES: 'Bug fixes',
     })
-    expect(lanes()[0]!.env.KIT_TESTFLIGHT_GROUPS).toBeUndefined()
+    expect(lanes()[1]!.env.KIT_TESTFLIGHT_GROUPS).toBeUndefined()
   })
 })
 
@@ -593,6 +632,17 @@ describe('kit release rollout', () => {
     expect(names()).toEqual(['android rollout'])
     expect(lanes()[0]!.env.KIT_ROLLOUT_ACTION).toBe(action)
     expect(lanes()[0]!.env.KIT_PLAY_ROLLOUT).toBeUndefined()
+  })
+
+  test('android --build names the release; on iOS it is a usage error', async () => {
+    const r = await run(['release', 'rollout', 'android', '--halt', '--build', '41', '--yes', '--json'])
+    expect(r.code).toBe(0)
+    expect(lanes()[0]!.env).toMatchObject({ KIT_ROLLOUT_ACTION: 'halt', KIT_ANDROID_CODE: '41' })
+    expect(JSON.parse(r.stdout)).toMatchObject({ action: 'halt', build: 41, changed: true })
+    const ios = await run(['release', 'rollout', 'ios', '--halt', '--build', '41', '--yes'])
+    expect(ios.code).toBe(2)
+    expect(ios.stderr).toContain('--build is Android only')
+    expect(names()).toEqual(['android rollout'])
   })
 
   test('ios --halt pauses the phased release', async () => {

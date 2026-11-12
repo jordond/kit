@@ -1216,6 +1216,7 @@ Options
       --halt              Halt the Play rollout, or pause the App Store phased release (--yes skips the confirm)
       --resume            Resume a halted rollout or a paused phased release; prod confirmation
       --complete          Release to everyone now; prod confirmation
+      --build <number>    Android: version code of the release to change (when the track holds more than one)
 
 "
 `;

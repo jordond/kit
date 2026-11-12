@@ -4,7 +4,6 @@ import { type KitConfig, type Track, tracks } from '../../config/schema'
 import { interrupted } from '../cleanup'
 import { ExitCode, KitError } from '../errors'
 import { appFastlaneDir } from '../fastlane'
-import { push, tag } from '../git'
 import { emitJson, withStdoutOnStderr } from '../log'
 import { runPiped } from '../proc'
 import { runSteps, type Step, type StepResult, summarize } from '../steps'
@@ -18,7 +17,9 @@ import { readVersion } from './version'
 /**
  * `kit release promote <ios|android> --from <alpha|beta> --to <beta|prod>`: move a build the store
  * already has to a later track. Nothing is built or uploaded.
- *   preconditions → preflight + resolve build (tree) → confirm → promote lane → tag → summary.
+ *   preconditions → preflight + resolve build (tree) → confirm → promote lane → summary.
+ * iOS resolves the build from the source tester group, so a build that never reached it is refused.
+ * The build keeps the tag from its first release; a promotion never tags (HEAD did not build it).
  * Internal builds are never promoted: they are compiled with KIT_INTERNAL set (see `internalFlag` in
  * mobile.ts), so a later track needs a rebuild.
  */
@@ -54,10 +55,12 @@ export interface PromoteResult {
   promoted: boolean
   /** The lanes and git commands, in order. */
   plan: string[]
+  /** The build's tag, `<platform>/v<version>+<build>`. A promotion never creates it. */
   tag?: string
-  tagPushed?: boolean
-  /** The tag was already there (the build was tagged when it was first released). */
+  /** The tag is there (the build was tagged when it was first released). */
   tagExisted?: boolean
+  /** When the tag is missing: the command to run on the commit the build was made from. */
+  tagCommand?: string
 }
 
 const APP_STORE_WHATS_NEW_MAX = 4000
@@ -88,15 +91,25 @@ export function validatePromotion(
   return { from, to }
 }
 
-/** The latest build on the source track, from the `status` lane's outputs. */
-export function buildToPromote(
-  platform: Platform,
-  from: PromoteFrom,
-  outputs: Record<string, string>,
-): number | undefined {
-  // TestFlight keeps one build list: tester groups are not tracks the API can be asked about.
-  const track = platform === 'ios' ? 'testflight' : from
-  return parseStatus(platform, outputs).find((t) => t.track === track)?.build ?? undefined
+/**
+ * Android: the highest version code on the source track, from the `status` lane's outputs. A track the
+ * store would not answer for is not an empty track: its error is the message.
+ */
+export function playBuildToPromote(from: PromoteFrom, outputs: Record<string, string>): number {
+  const track = parseStatus('android', outputs).find((t) => t.track === from)
+  if (!track || track.state === 'unknown') {
+    throw new KitError(
+      `Could not read the Play ${from} track: ${track?.error ?? 'the status lane reported nothing'}`,
+      'Check the Play service account, or pass --build <version code>',
+    )
+  }
+  if (track.build === null) {
+    throw new KitError(
+      `No release on the Play ${from} track to promote`,
+      `Release one first (kit release android --track ${from}), or pass --build`,
+    )
+  }
+  return track.build
 }
 
 const failed = (results: StepResult[]) => results.some((r) => !r.ok)
@@ -170,7 +183,11 @@ export async function promoteMobile(
   const common: Record<string, string> = { ...storeCreds(platform), ...laneConfigEnv(root, config) }
 
   const lane = platform === 'android' ? 'promote' : to === 'prod' ? 'promote_appstore' : 'promote_testflight'
+  // iOS: TestFlight tracks are tester groups. The build must be in the source group, which an internal
+  // build (sent to no group) never is.
+  const fromGroup = platform === 'ios' ? (ios!.testflightGroups?.[from] ?? from) : ''
   const groups = platform === 'ios' && to === 'beta' ? (ios!.testflightGroups?.beta ?? 'beta') : ''
+  const lookup = platform === 'ios' ? 'promote_build' : 'status'
   const where =
     platform === 'ios'
       ? to === 'prod'
@@ -181,9 +198,9 @@ export async function promoteMobile(
   const describe = () =>
     `${config.name} ${platform} ${version} (${build ?? `latest on ${from}`}): ${from} → ${where}`
   const plan = () => [
-    ...(opts.build === undefined ? [`fastlane ${platform} status`] : []),
+    // iOS always asks: --build is checked against the source group too.
+    ...(platform === 'ios' || opts.build === undefined ? [`fastlane ${platform} ${lookup}`] : []),
     `fastlane ${platform} ${lane}`,
-    `git tag ${mobileTag(platform, version, build ?? '<build>')} (unless it exists) && git push origin <tag>`,
   ]
   const result = (): PromoteResult => ({
     platform,
@@ -208,7 +225,7 @@ export async function promoteMobile(
     return
   }
 
-  // ---- preflight + resolve
+  // ---- preflight (+ Android: the version code to promote)
   const pre: Step[] = []
   for (const p of (await loadPreflights(root, config)).filter(
     (x) => !x.platforms || x.platforms.includes(platform),
@@ -222,27 +239,16 @@ export async function promoteMobile(
       task: () => p.check({ root, config, flags, log: ctx.log }, { platform, track: to as Track, version }),
     })
   }
-  if (build === undefined) {
+  if (platform === 'android' && build === undefined) {
     pre.push(
       laneStep(
-        `latest ${platform === 'ios' ? 'TestFlight build' : `version code on ${from}`}`,
+        `version code on ${from}`,
         appRoot,
-        platform,
+        'android',
         'status',
-        () => ({
-          ...common,
-          ...(platform === 'ios' ? { KIT_IOS_VERSION: version } : { KIT_STATUS_TRACKS: from }),
-        }),
+        () => ({ ...common, KIT_STATUS_TRACKS: from }),
         (o) => {
-          build = buildToPromote(platform, from, o)
-          if (build === undefined) {
-            throw new KitError(
-              platform === 'ios'
-                ? `No TestFlight build of ${version} to promote`
-                : `No release on the Play ${from} track to promote`,
-              `Release one first (kit release ${platform} --track ${from}), or pass --build`,
-            )
-          }
+          build = playBuildToPromote(from, o)
         },
       ),
     )
@@ -252,9 +258,37 @@ export async function promoteMobile(
       runSteps([{ title: 'preflight', steps: pre }], flags, { bail: true }),
     )
     if (failed(results)) {
-      const code = summarize('preflight', results, started, 'Pass --build to skip the store lookup')
+      const code = summarize('preflight', results, started)
       if (flags.json) emitJson({ ...result(), ok: false, stage: 'preflight', results })
       process.exitCode = code === 130 ? 130 : ExitCode.precondition
+      return
+    }
+  }
+
+  // ---- iOS: the build must be in the source tester group (the promote lanes check it again)
+  const iosEnv = (): Record<string, string> => ({
+    ...common,
+    KIT_IOS_VERSION: version,
+    KIT_TESTFLIGHT_FROM_GROUP: fromGroup,
+    ...(build !== undefined ? { KIT_IOS_BUILD: String(build) } : {}),
+  })
+  if (platform === 'ios') {
+    const steps = [
+      laneStep(`build in TestFlight group "${fromGroup}"`, appRoot, 'ios', 'promote_build', iosEnv, (o) => {
+        const n = Number(o.PROMOTE_BUILD)
+        if (!Number.isInteger(n) || n <= 0) throw new KitError('fastlane ios promote_build reported no build')
+        build = n
+      }),
+    ]
+    const results = await runSteps([{ title: 'resolve', steps }], flags, { bail: true })
+    if (failed(results) || results.length !== steps.length || interrupted()) {
+      if (flags.json) emitJson({ ...result(), ok: false, stage: 'resolve', results })
+      process.exitCode = summarize(
+        'promote ios',
+        results,
+        started,
+        `Only a build released to "${fromGroup}" can be promoted: kit release ios --track ${from}`,
+      )
       return
     }
   }
@@ -284,9 +318,7 @@ export async function promoteMobile(
           ...(notes ? { KIT_RELEASE_NOTES: notes } : {}),
         }
       : {
-          ...common,
-          KIT_IOS_VERSION: version,
-          KIT_IOS_BUILD: String(build),
+          ...iosEnv(),
           ...(to === 'beta' ? { KIT_TESTFLIGHT_GROUPS: groups } : {}),
           ...(notes ? { KIT_RELEASE_NOTES: notes } : {}),
         }
@@ -300,30 +332,20 @@ export async function promoteMobile(
   }
   out.promoted = true
 
-  // ---- tag (the existing scheme has no track in it, so a build tagged at its first release keeps that tag)
+  // ---- tag: a tag names a build, so the one from its first release stands. kit never creates it here:
+  // HEAD is not the commit that built this build.
   const name = mobileTag(platform, version, build)
   out.tag = name
-  if (await tagExists(root, name)) {
-    out.tagExisted = true
-  } else {
-    out.tagExisted = false
-    try {
-      await tag(name, { cwd: root, message: `${platform} ${version} (${build}) → ${to}` })
-      await push([`refs/tags/${name}`], { cwd: root })
-      out.tagPushed = true
-    } catch (e) {
-      out.tagPushed = false
-      const msg = `promoted, but tagging ${name} failed: ${e instanceof Error ? e.message : String(e)}`
-      ctx.log.warn(msg)
-      if (onGitHubActions())
-        process.stderr.write(`::warning title=kit release::${msg.replace(/\r?\n/g, ' ')}\n`)
-      ctx.log.dim(`  › git tag -a ${name} -m "${platform} ${version} (${build})" && git push origin ${name}`)
-    }
+  out.tagExisted = await tagExists(root, name)
+  if (!out.tagExisted) {
+    out.tagCommand = `git tag -a ${name} -m "${platform} ${version} (${build})" <commit> && git push origin ${name}`
+    const msg = `promoted, but there is no ${name} tag, and kit does not create it here: HEAD is not the commit that built this build`
+    ctx.log.warn(msg)
+    if (onGitHubActions()) process.stderr.write(`::warning title=kit release::${msg}\n`)
+    ctx.log.dim(`  › on the commit the build was made from: ${out.tagCommand}`)
   }
 
   if (flags.json) emitJson({ ...out, ok: true })
   summarize(`promote ${platform}`, results, started)
-  if (!flags.json) {
-    ctx.log.dim(`  tag: ${name}${out.tagExisted ? ' (already there)' : out.tagPushed ? '' : ' (not pushed)'}`)
-  }
+  if (!flags.json && out.tagExisted) ctx.log.dim(`  tag: ${name}`)
 }

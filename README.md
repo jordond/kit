@@ -406,9 +406,11 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
   only when a platform has no readable track.
 - `kit release promote`: `--build` picks the build number / version code (default: the latest on the
   source track). It runs the branch check, the store credentials, `release.preflight` and the same
-  confirmation as a release to `--to`, then tags `<platform>/v<version>+<build>` unless that tag exists.
-  A promotion gets no tag of its own: a tag names a build, not a track, and release notes are computed
-  from the last `<platform>/v*` tag.
+  confirmation as a release to `--to`. A promotion never tags: a tag names a build, not a track
+  (release notes are computed from the last `<platform>/v*` tag), so the tag from the build's first
+  release stands. When `<platform>/v<version>+<build>` is missing, kit warns and prints the `git tag`
+  command to run on the commit that built it (`tagExisted` and `tagCommand` in `--json`); HEAD is not
+  that commit.
   `--dry-run` prints the plan and runs nothing.
   - **Internal builds are never promoted** (`--from internal` exits 2): they are compiled with
     `KIT_INTERNAL` set, so a later track needs `kit release <platform> --track <track>`.
@@ -417,14 +419,19 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
   - iOS: `--app-version <x.y.z>` promotes a build from before a version bump (default: the TOML version);
     it is the lane's app version and the tag's version. On Android it is a usage error (the version
     code alone finds the release).
-  - iOS: `alpha → beta` distributes the TestFlight build to `release.ios.testflightGroups.beta`;
+  - iOS: the build must be in the source tester group (`release.ios.testflightGroups.<from>`, default
+    the track name). A build that never reached it, an internal build included, is refused with
+    exit 1, `--build` or not; so is a destination group the app does not have.
+  - iOS: `alpha → beta` distributes the build to `release.ios.testflightGroups.beta`;
     `→ prod` submits it for App Store review (phased, manual release) and requires `--notes`.
 - `kit release rollout` takes exactly one action. `--percent`, `--resume` and `--complete` widen
   production exposure, so they use the `prod` confirmation: type `prod` locally (`--yes` doesn't skip),
   the `production` environment's reviewers in CI. `--halt` is the emergency brake: a prompt that
   `--yes` skips. `--dry-run` runs nothing.
   Android changes the production staged rollout; `--percent 100` completes it, and a halted rollout
-  must be resumed before its percentage changes. The App Store has no percentage (a phased release
+  must be resumed before its percentage changes. Only a rollout in progress (or, for `--resume`, a
+  halted one) is touched, never a draft; `--build <version code>` names the release when the track
+  holds more than one. The App Store has no percentage (a phased release
   follows Apple's 7-day schedule), so `--percent` is a usage error on iOS: `--halt` pauses the phased
   release, `--resume` and `--complete` do what they say.
 - Build numbers are never committed: `max(store) + 1`, or `--build` / `--code`.
@@ -520,6 +527,41 @@ jobs:
       MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
+
+The same workflow promotes and changes rollouts through `operation` (default `release`):
+
+| `operation` | Runs | Inputs |
+| --- | --- | --- |
+| `release` | `kit release <platform> --track <track>` | `track`, `build`, `notes`, `rollout`, `draft`, `skip` |
+| `promote` | `kit release promote <platform> --from <from> --to <track>` | `from`, `track` (the destination), `build`, `app-version`, `notes`, `rollout`, `draft`, `skip` |
+| `rollout` | `kit release rollout <platform> --<rollout-action>` | `rollout-action` (`percent`, `halt`, `resume`, `complete`), `percent`, `build` |
+
+```yaml
+  promote:
+    uses: jordond/kit/.github/workflows/mobile-distribute.yml@<sha> # vX.Y.Z
+    permissions: { contents: write }
+    with: { operation: promote, platform: android, from: beta, track: prod }
+    secrets:
+      PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}
+```
+
+The job runs in the `production` environment for a release or promote to `prod` and for every
+rollout, so its required reviewers approve whatever widens production. That is the gate kit relies on
+when it skips the typed `prod` confirmation on GitHub Actions: run `kit release promote --to prod` and
+`kit release rollout` in CI through this workflow, or from a job that sets `environment: production`.
+
+### Lane tests
+
+The shared Fastfile's selection logic (which build a promotion moves, which Play release a rollout
+changes, tester-group resolution) has Ruby tests that run it against stubbed store objects:
+
+```sh
+ruby test/fastlane/run.rb
+```
+
+They need only Ruby and its bundled minitest, not kit's fastlane bundle. `bun test` runs them too
+(`test/e2e/fastlane-lanes.test.ts`), plus a `fastlane lanes` parse of the Fastfile when the bundle is
+installed; each part is skipped when its tool is missing.
 
 ## Cloudflare workers
 
