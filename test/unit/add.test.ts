@@ -5,6 +5,7 @@ import { addTemplates } from '../../src/lib/add/apply'
 import {
   configTargets,
   includedProjects,
+  includeLines,
   withInclude,
   withProjectModule,
   withTarget,
@@ -75,6 +76,102 @@ describe('withInclude (settings.gradle.kts)', () => {
   test('a directory that is not the path gets a projectDir line', () => {
     expect(withInclude('include(":a")\n', 'ui', 'libs/ui')).toBe(
       'include(":a")\ninclude(":ui")\nproject(":ui").projectDir = file("libs/ui")\n',
+    )
+  })
+})
+
+describe('withInclude: statements are scanned, the edit is read back, line endings are kept', () => {
+  test('Groovy command form continued over lines after a comma: the include goes after the list', () => {
+    const text = "include ':a',\n        ':b' // apps\nrootProject.name = 'x'\n"
+    expect(includedProjects(text)).toEqual(['a', 'b'])
+    expect(withInclude(text, 'core', undefined, true)).toBe(
+      "include ':a',\n        ':b' // apps\ninclude ':core'\nrootProject.name = 'x'\n",
+    )
+    expect(withInclude(text, 'b', undefined, true)).toBeUndefined()
+    expect(withInclude("include ':a', // one\n  /* two */ ':b'\n", 'c', undefined, true)).toBe(
+      "include ':a', // one\n  /* two */ ':b'\ninclude ':c'\n",
+    )
+  })
+
+  test('a `)` in a comment or a string inside include(...) does not end the call', () => {
+    const text = 'include(\n    ":a", // first )\n    /* ) */ ":b",\n)\n'
+    expect(includedProjects(text)).toEqual(['a', 'b'])
+    expect(withInclude(text, 'core')).toBe(`${text}include(":core")\n`)
+    expect(withInclude('include(":a)")\n', 'core')).toBe('include(":a)")\ninclude(":core")\n')
+  })
+
+  test('includes inside comments and strings are neither counted nor the anchor', () => {
+    const text = '/*\ninclude(":old")\n*/\nval s = "include(\\":x\\")"\nrootProject.name = "x"\n'
+    expect(includedProjects(text)).toEqual([])
+    expect(withInclude(text, 'core')).toBe(`${text}\ninclude(":core")\n`)
+    expect(withInclude(text, 'old')).toBe(`${text}\ninclude(":old")\n`)
+    const live = `include(":a")\n${text}`
+    expect(withInclude(live, 'core')).toBe(`include(":a")\ninclude(":core")\n${text}`)
+  })
+
+  test('Groovy syntax in settings.gradle, Kotlin in settings.gradle.kts', () => {
+    expect(withInclude("include(':a')\n", 'ui', 'libs/ui', true)).toBe(
+      "include(':a')\ninclude ':ui'\nproject(':ui').projectDir = file('libs/ui')\n",
+    )
+    expect(includeLines('ui', 'libs/ui')).toEqual([
+      'include(":ui")',
+      'project(":ui").projectDir = file("libs/ui")',
+    ])
+  })
+
+  test('read-back guard: an edit that does not parse to the old projects plus the new one is manual', () => {
+    // The last include opens a block comment on its own line: the new line would land inside it.
+    expect(withInclude('include(":a") /* retired:\ninclude(":b")\n*/\n', 'core')).toBe('manual')
+    // Not scannable at all: unbalanced call, unterminated comment, a dangling comma.
+    expect(withInclude('include(":a"\n', 'core')).toBe('manual')
+    expect(withInclude('include(":a")\n/* open\n', 'core')).toBe('manual')
+    expect(withInclude("include ':a',\nrootProject.name = 'x'\n", 'core', undefined, true)).toBe('manual')
+    expect(includedProjects('include(":a"\n')).toBeUndefined()
+  })
+
+  test('CRLF files get CRLF lines, in all three edits; LF files stay LF', () => {
+    expect(withInclude('include(":a")\r\ninclude(":b")\r\n', 'core')).toBe(
+      'include(":a")\r\ninclude(":b")\r\ninclude(":core")\r\n',
+    )
+    expect(withInclude('rootProject.name = "x"\r\n', 'ui', 'libs/ui')).toBe(
+      'rootProject.name = "x"\r\n\r\ninclude(":ui")\r\nproject(":ui").projectDir = file("libs/ui")\r\n',
+    )
+    expect(withProjectModule('modules:\r\n  - a # app\r\n\r\nplugins:\r\n  - x\r\n', 'core')).toBe(
+      'modules:\r\n  - a # app\r\n  - core\r\n\r\nplugins:\r\n  - x\r\n',
+    )
+    expect(withProjectModule('plugins:\r\n  - x\r\n', 'core')).toBe(
+      'plugins:\r\n  - x\r\n\r\nmodules:\r\n  - core\r\n',
+    )
+    const config =
+      "export default {\r\n  name: 'x',\r\n  targets: {\r\n    a: { kind: 'custom', dir: 'a' },\r\n  },\r\n}\r\n"
+    expect(withTarget(config, 'api', { kind: 'worker', dir: 'apps/api' })).toEqual({
+      status: 'edited',
+      content: config.replace('  },\r\n}', "    api: { kind: 'worker', dir: 'apps/api' },\r\n  },\r\n}"),
+    })
+    expect(
+      withTarget("export default {\r\n  name: 'x',\r\n}\r\n", 'api', { kind: 'worker', dir: 'apps/api' }),
+    ).toEqual({
+      status: 'edited',
+      content:
+        "export default {\r\n  name: 'x',\r\n  targets: {\r\n    api: { kind: 'worker', dir: 'apps/api' },\r\n  },\r\n}\r\n",
+    })
+    for (const out of [
+      withInclude('include(":a")\n', 'core'),
+      withProjectModule('modules:\n  - a\n', 'core'),
+    ]) {
+      expect(out).not.toContain('\r')
+    }
+  })
+})
+
+describe('withProjectModule: read-back guard', () => {
+  test('an edit a YAML parser does not read as the old list plus the entry is manual', () => {
+    // Text kit can edit line by line, but the list is not what YAML sees.
+    expect(withProjectModule('modules:\n  - a\n  - |\n    text\n', 'core')).toBe('manual')
+    expect(withProjectModule('modules:\n  - a\nmodules:\n  - b\n', 'core')).toBe('manual')
+    expect(withProjectModule('modules:\n  - a\n\tbad: [\n', 'core')).toBe('manual')
+    expect(withProjectModule('modules:\n  - a\n  - "b" # two\n', 'core')).toBe(
+      'modules:\n  - a\n  - "b" # two\n  - core\n',
     )
   })
 })
@@ -332,6 +429,21 @@ describe('plans', () => {
     const forced = gradle({ force: true }, files)
     expect(forced.conflicts).toEqual([])
     expect(forced.actions.map((a) => a.kind)).toEqual(['write', 'write', 'skip'])
+  })
+
+  test('gradle module: settings.gradle gets Groovy; a settings file kit cannot edit is manual', () => {
+    const groovy = 'apps/client/settings.gradle'
+    const plan = gradle({ settings: groovy }, { [groovy]: "include ':shared',\n        ':android'\n" })
+    const edit = plan.actions.at(-1) as { content: string; note: string }
+    expect(edit.content).toBe("include ':shared',\n        ':android'\ninclude ':feature:login'\n")
+    expect(edit.note).toBe("include ':feature:login'")
+    const manual = gradle({ dir: 'libs/login' }, { [settings]: 'include(":shared"\n' })
+    expect(manual.actions.map((a) => a.path)).not.toContain(settings)
+    expect(manual.manual).toEqual({
+      file: settings,
+      where: 'the includes',
+      snippet: 'include(":feature:login")\nproject(":feature:login").projectDir = file("libs/login")',
+    })
   })
 
   const toolchain = (

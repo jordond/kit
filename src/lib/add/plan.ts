@@ -1,7 +1,7 @@
 import { join, normalize } from 'node:path'
 import { ExitCode, KitError } from '../errors'
 import { type FileAction, fill, type ReadFile } from '../scaffold'
-import { withInclude, withProjectModule, withTarget } from './edits'
+import { includeLines, withInclude, withProjectModule, withTarget } from './edits'
 
 /**
  * Plans for `kit add module` and `kit add target`: the files to write and the one-line edits to
@@ -167,12 +167,29 @@ export function planGradleModule(input: ModuleInput & { settings: string }): Add
     input.force === true,
   )
   const settings = read(input.settings)
-  const edited =
-    settings === undefined ? undefined : withInclude(settings, path, dir === natural ? undefined : dir)
+  // settings.gradle is Groovy: the include is written in its syntax.
+  const groovy = !input.settings.endsWith('.kts')
+  const custom = dir === natural ? undefined : dir
+  const edited = settings === undefined ? undefined : withInclude(settings, path, custom, groovy)
+  if (edited === 'manual') {
+    return {
+      ...plan,
+      manual: {
+        file: input.settings,
+        where: 'the includes',
+        snippet: includeLines(path, custom, groovy).join('\n'),
+      },
+    }
+  }
   plan.actions.push(
     edited === undefined
       ? { kind: 'skip', path: input.settings, reason: `already includes :${path}` }
-      : { kind: 'edit', path: input.settings, content: edited, note: `include(":${path}")` },
+      : {
+          kind: 'edit',
+          path: input.settings,
+          content: edited,
+          note: includeLines(path, undefined, groovy)[0]!,
+        },
   )
   return plan
 }

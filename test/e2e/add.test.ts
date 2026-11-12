@@ -120,6 +120,29 @@ describe('kit add module (Gradle)', () => {
     expect(read(SETTINGS)).toBe(settings)
   })
 
+  test('a settings file kit cannot edit: nothing written, the include on stdout, exit 1', async () => {
+    gradle()
+    const text = 'include(":shared") /* retired:\ninclude(":old")\n*/\n'
+    put(SETTINGS, text)
+    const r = await f.kit(['add', 'module', 'core'])
+    expect(r.code).toBe(1)
+    expect(r.stdout).toBe('include(":core")\n')
+    expect(r.stderr).toContain('nothing was written')
+    expect(read(SETTINGS)).toBe(text)
+    expect(has('apps/client/core')).toBe(false)
+  })
+
+  test('settings.gradle (Groovy) with a continued include list and CRLF endings', async () => {
+    f = fixture('setup-repo', [])
+    put('apps/client/settings.gradle', "include ':shared',\r\n        ':android'\r\n")
+    const r = await f.kit(['add', 'module', 'core'])
+    expect(r.code).toBe(0)
+    expect(read('apps/client/settings.gradle')).toBe(
+      "include ':shared',\r\n        ':android'\r\ninclude ':core'\r\n",
+    )
+    expect(has('apps/client/core/build.gradle.kts')).toBe(true)
+  })
+
   test('usage errors: no name, a bad name, an unknown target; no settings file is a precondition', async () => {
     gradle()
     expect((await f.kit(['add', 'module'])).code).toBe(2)
