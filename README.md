@@ -195,7 +195,29 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 | `kit release <service>` | `release.services.<name>`: build, deploy, tag `<name>/v<version>` |
 | `kit release certs [--add]` | match `appstore`, readonly; `--add` creates only what this app is missing (never nuke) |
 | `kit fastlane …` | fastlane with kit's env and the ASC/Play key files |
+| `kit release status [ios\|android]` | The TOML version and the latest build per store track (`--json`) |
+| `kit release promote <ios\|android> --from alpha\|beta --to beta\|prod` | Move a build the store already has to a later track: no rebuild, no upload |
+| `kit release rollout <ios\|android> --percent <1-100>\|--halt\|--resume\|--complete` | Change the production rollout of the released build |
 
+- `kit release status`: Android lists every Play track (version codes and release names); iOS lists
+  `testflight` (one build list for every group) and `prod` (the live App Store build and its phased
+  release state). A track the store will not answer for is `unknown` with a warning; the command fails
+  only when a platform has no readable track.
+- `kit release promote`: `--build` picks the build number / version code (default: the latest on the
+  source track). It runs the branch check, the store credentials, `release.preflight` and the same
+  confirmation as a release to `--to`, then tags `<platform>/v<version>+<build>` unless that tag exists.
+  `--dry-run` prints the plan and runs nothing.
+  - **Internal builds are never promoted** (`--from internal` exits 2): they are compiled with
+    `KIT_INTERNAL` set, so a later track needs `kit release <platform> --track <track>`.
+  - Android: `--rollout` (prod, default `release.android.prodRollout` or 0.1) and `--draft` work as in
+    `kit release android`; `--notes` sets the changelog except on production.
+  - iOS: `alpha → beta` distributes the TestFlight build to `release.ios.testflightGroups.beta`;
+    `→ prod` submits it for App Store review (phased, manual release) and requires `--notes`.
+- `kit release rollout` takes exactly one action and asks you to type `prod` (`--yes` skips).
+  Android changes the production staged rollout; `--percent 100` completes it, and a halted rollout
+  must be resumed before its percentage changes. The App Store has no percentage (a phased release
+  follows Apple's 7-day schedule), so `--percent` is a usage error on iOS: `--halt` pauses the phased
+  release, `--resume` and `--complete` do what they say.
 - Build numbers are never committed: `max(store) + 1`, or `--build` / `--code`.
 - iOS: set `release.ios.xcconfig` to the xcconfig holding `MARKETING_VERSION` (what local Xcode builds
   show). `kit version bump` rewrites it in the same commit, and `kit release ios` / `kit doctor` fail
