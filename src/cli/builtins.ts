@@ -72,6 +72,24 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/release/certs'),
   },
   {
+    path: ['release', 'status'],
+    description: 'Show the version and the latest build on each store track',
+    group: 'Release',
+    load: () => import('../commands/release/status'),
+  },
+  {
+    path: ['release', 'promote'],
+    description: 'Promote a build the store already has to a later track (no rebuild)',
+    group: 'Release',
+    load: () => import('../commands/release/promote'),
+  },
+  {
+    path: ['release', 'rollout'],
+    description: 'Change the production rollout: Play staged rollout, App Store phased release',
+    group: 'Release',
+    load: () => import('../commands/release/rollout'),
+  },
+  {
     path: ['version', 'show'],
     description: 'Show version names and last release tags',
     group: 'Release',

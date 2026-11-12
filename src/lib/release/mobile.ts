@@ -148,7 +148,7 @@ export function laneConfigEnv(root: string, config: KitConfig): Record<string, s
   }
 }
 
-function laneStep(
+export function laneStep(
   title: string,
   appRoot: string,
   platform: Platform,
@@ -174,7 +174,7 @@ function failed(results: StepResult[]): boolean {
 }
 
 /** Ask per §9.1. Returns false when the user declines. */
-async function confirmTrack(flags: Flags, track: Track, summary: string): Promise<boolean> {
+export async function confirmTrack(flags: Flags, track: Track, summary: string): Promise<boolean> {
   if (flags.dryRun || track === 'internal') return true
   if (track !== 'prod') return confirm(flags, `Release ${summary}?`)
   // prod: GitHub Actions runs it in the `production` environment, which needs reviewer approval (§9.6).
