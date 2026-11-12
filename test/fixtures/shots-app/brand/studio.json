@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "platform": "ios",
+  "dimensionId": "ios-6.9",
+  "slides": [
+    {
+      "id": "slide-1",
+      "order": 0,
+      "name": "1 - Home",
+      "platform": "ios",
+      "sourceFile": "home.png",
+      "imageSrc": "/brand/screenshots/ios/home.png",
+      "badge": {
+        "enabled": true,
+        "text": "NEW",
+        "icon": "star",
+        "backgroundColor": "rgba(201, 123, 49, 0.12)",
+        "textColor": "#c97b31",
+        "borderColor": "rgba(201, 123, 49, 0.25)",
+        "fontSize": 100
+      },
+      "headline": {
+        "id": "h-1",
+        "text": "Everything in one place",
+        "fontFamily": "Kit Fixture",
+        "fontSize": 150,
+        "fontWeight": 800,
+        "color": "#2c1e14",
+        "align": "center",
+        "lineHeight": 1.12,
+        "letterSpacing": 0,
+        "yOffset": 0,
+        "shadow": false,
+        "shadowColor": "rgba(0, 0, 0, 0.15)",
+        "shadowBlur": 10
+      },
+      "subheadline": {
+        "id": "sub-1",
+        "text": "Your day at a glance",
+        "fontFamily": "Kit Fixture",
+        "fontSize": 100,
+        "fontWeight": 600,
+        "color": "#7a5a40",
+        "align": "center",
+        "lineHeight": 1.12,
+        "letterSpacing": 0,
+        "yOffset": 0,
+        "shadow": false,
+        "shadowColor": "rgba(0, 0, 0, 0.15)",
+        "shadowBlur": 10
+      },
+      "device": {
+        "frameType": "iphone-pro",
+        "color": "titanium-natural",
+        "position": "bottom-peek",
+        "scale": 0.76,
+        "yOffset": 2,
+        "xOffset": 0,
+        "rotation": 0,
+        "perspectiveTilt": 0,
+        "shadowElevation": "deep",
+        "shadowColor": "rgba(44, 30, 20, 0.35)",
+        "showReflection": true,
+        "cornerRadius": 56
+      },
+      "background": {
+        "type": "linear-gradient",
+        "primaryColor": "#faf2e4",
+        "secondaryColor": "#f1e1c7",
+        "accentColor": "#c97b31",
+        "angle": 180,
+        "blur": 0,
+        "pattern": "none"
+      },
+      "showMascot": true,
+      "mascotPosition": "top-center"
+    },
+    {
+      "id": "slide-2",
+      "order": 1,
+      "name": "2 - Journal",
+      "platform": "ios",
+      "sourceFile": "journal.png",
+      "imageSrc": "/brand/screenshots/ios/journal.png",
+      "badge": {
+        "enabled": false,
+        "text": "NEW",
+        "icon": "star",
+        "backgroundColor": "rgba(201, 123, 49, 0.12)",
+        "textColor": "#c97b31",
+        "borderColor": "rgba(201, 123, 49, 0.25)",
+        "fontSize": 100
+      },
+      "headline": {
+        "id": "h-2",
+        "text": "Remember what you loved",
+        "fontFamily": "Kit Fixture",
+        "fontSize": 150,
+        "fontWeight": 800,
+        "color": "#2c1e14",
+        "align": "center",
+        "lineHeight": 1.12,
+        "letterSpacing": 0,
+        "yOffset": 0,
+        "shadow": false,
+        "shadowColor": "rgba(0, 0, 0, 0.15)",
+        "shadowBlur": 10
+      },
+      "subheadline": {
+        "id": "sub-2",
+        "text": "",
+        "fontFamily": "Kit Fixture",
+        "fontSize": 100,
+        "fontWeight": 600,
+        "color": "#7a5a40",
+        "align": "center",
+        "lineHeight": 1.12,
+        "letterSpacing": 0,
+        "yOffset": 0,
+        "shadow": false,
+        "shadowColor": "rgba(0, 0, 0, 0.15)",
+        "shadowBlur": 10
+      },
+      "device": {
+        "frameType": "clay-minimal",
+        "color": "titanium-natural",
+        "position": "bottom-peek",
+        "scale": 0.76,
+        "yOffset": 2,
+        "xOffset": 0,
+        "rotation": 0,
+        "perspectiveTilt": 0,
+        "shadowElevation": "deep",
+        "shadowColor": "rgba(44, 30, 20, 0.35)",
+        "showReflection": true,
+        "cornerRadius": 40
+      },
+      "background": {
+        "type": "linear-gradient",
+        "primaryColor": "#faf2e4",
+        "secondaryColor": "#f1e1c7",
+        "accentColor": "#c97b31",
+        "angle": 180,
+        "blur": 0,
+        "pattern": "none"
+      },
+      "showMascot": false,
+      "mascotPosition": "top-center"
+    }
+  ],
+  "savedAt": "2026-11-01T12:00:00.000Z",
+  "locales": {
+    "fr-FR": {
+      "slide-1": {
+        "headline": "Tout au même endroit",
+        "subheadline": "Votre journée en un coup d'œil",
+        "badge": "NOUVEAU"
+      },
+      "slide-2": {
+        "headline": "Souvenez-vous de vos coups de cœur"
+      }
+    }
+  }
+}
