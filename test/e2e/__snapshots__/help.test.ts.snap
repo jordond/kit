@@ -403,6 +403,8 @@ Examples
   kit doctor
   kit doctor --json
   kit doctor --ci
+  kit doctor --fix
+  kit doctor --fix --dry-run
 
 Options
   -h, --help     Show help
@@ -414,6 +416,7 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --ci       Fail when CI workflow pins drift from the package.json pin
+      --fix      Apply the safe, local fixes, then check again
 
 "
 `;
