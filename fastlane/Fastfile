@@ -225,21 +225,29 @@ platform :ios do
 
     UI.user_error!("KIT_RELEASE_NOTES is empty: App Store Connect will not submit an update without What's New.") if whats_new.empty?
 
-    upload_to_app_store(
-      api_key: kit_asc_api_key,
-      app_identifier: kit_ios_bundle_id,
-      ipa: ipa,
-      submit_for_review: kit_flag?("KIT_APPSTORE_SUBMIT", default: true),
-      automatic_release: false, # the operator releases from App Store Connect after approval
-      phased_release: kit_flag?("KIT_APPSTORE_PHASED", default: true),
-      precheck_include_in_app_purchases: false,
-      # No skip_metadata: deliver applies automatic_release and phased_release
-      # inside its metadata step, so skipping it silently drops both. What's New
-      # is the only listing field this writes.
-      release_notes: { "en-US" => whats_new },
-      skip_screenshots: true,
-      force: true # skip the interactive HTML preview
-    )
+    # deliver defaults metadata_path to <app>/fastlane/metadata, where the
+    # repo's store listing can live (`kit metadata pull`): a release must not
+    # upload that listing or its stale per-locale release notes. An empty dir
+    # loads nothing; the metadata step still runs (see below).
+    Dir.mktmpdir("kit-deliver") do |empty|
+      upload_to_app_store(
+        api_key: kit_asc_api_key,
+        app_identifier: kit_ios_bundle_id,
+        ipa: ipa,
+        submit_for_review: kit_flag?("KIT_APPSTORE_SUBMIT", default: true),
+        automatic_release: false, # the operator releases from App Store Connect after approval
+        phased_release: kit_flag?("KIT_APPSTORE_PHASED", default: true),
+        precheck_include_in_app_purchases: false,
+        # No skip_metadata: deliver applies automatic_release and phased_release
+        # inside its metadata step, so skipping it silently drops both. What's New
+        # is the only listing field this writes.
+        release_notes: { "en-US" => whats_new },
+        metadata_path: File.join(empty, "metadata"),
+        screenshots_path: File.join(empty, "screenshots"),
+        skip_screenshots: true,
+        force: true # skip the interactive HTML preview
+      )
+    end
     UI.success("Submitted to the App Store for review.")
   end
 
@@ -593,6 +601,8 @@ end
 
 # ------------------------------------------- status, promote, rollout ---
 # `kit release status|promote|rollout`: no lane here builds or uploads a binary.
+# The selection helpers (which build, which release, which group) are plain
+# methods over the API objects so `test/fastlane` can run them against stubs.
 
 # A track that cannot be read is reported, not fatal: kit shows it as unknown.
 def kit_status_error(key, error)
@@ -601,23 +611,70 @@ def kit_status_error(key, error)
   kit_emit("STATUS_#{key}_ERROR", message)
 end
 
-# Spaceship calls outside an action (the phased release) need the token set.
+# Spaceship calls outside an action (groups, builds, the phased release) need the token set.
 def kit_asc_login
   require "spaceship"
   Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: kit_asc_api_key)
 end
 
-def kit_ios_live_version
+def kit_ios_app
   app = Spaceship::ConnectAPI::App.find(kit_ios_bundle_id)
   UI.user_error!("No app with bundle id #{kit_ios_bundle_id} in App Store Connect") unless app
-  app.get_live_app_store_version
+  app
 end
 
-# nil when the version has no phased release (the API answers 404 or no data).
+# nil when the version has no phased release: Spaceship raises a bare
+# RuntimeError "No data" for that answer. Anything else (auth, network) is a
+# real failure and must not read as "no phased release".
 def kit_ios_phased_release(version)
   version.fetch_app_store_version_phased_release
-rescue StandardError
+rescue RuntimeError => e
+  raise unless e.instance_of?(RuntimeError) && e.message == "No data"
+
   nil
+end
+
+# Group names (or ids) -> the app's TestFlight groups. pilot skips a name it
+# cannot match and still reports success, so a miss fails here.
+def kit_ios_resolve_groups(all_groups, names)
+  names.map do |name|
+    all_groups.find { |g| g.name == name || g.id == name } ||
+      UI.user_error!("No TestFlight group '#{name}' for this app (groups: #{all_groups.map(&:name).join(', ')})")
+  end
+end
+
+# Builds of one version that were distributed to one TestFlight group.
+def kit_ios_group_builds(app, group, version)
+  Spaceship::ConnectAPI.get_builds(
+    filter: { app: app.id, betaGroups: group.id, "preReleaseVersion.version" => version, expired: "false" },
+    includes: "preReleaseVersion",
+    sort: "-uploadedDate",
+    limit: 200
+  ).all_pages.flat_map(&:to_models)
+end
+
+# The build to promote, from the source group's builds only: `number` when
+# given, else the highest build number. An internal build (compiled with
+# KIT_INTERNAL, sent to no group) is never among them.
+def kit_ios_select_build(builds, number, version, group_name)
+  if number
+    builds.find { |b| b.version.to_s == number.to_s } ||
+      UI.user_error!("Build #{number} of #{version} is not in the TestFlight group '#{group_name}': only a build " \
+                     "released to that group can be promoted (internal builds are never promoted)")
+  else
+    builds.max_by { |b| b.version.to_i } ||
+      UI.user_error!("No build of #{version} in the TestFlight group '#{group_name}': nothing to promote")
+  end
+end
+
+# [app, build]: looked up and checked against the source group before anything is changed.
+def kit_ios_promote_build
+  kit_asc_login
+  app = kit_ios_app
+  version = kit_env("KIT_IOS_VERSION")
+  group = kit_ios_resolve_groups(app.get_beta_groups, [kit_env("KIT_TESTFLIGHT_FROM_GROUP")]).first
+  builds = kit_ios_group_builds(app, group, version)
+  [app, kit_ios_select_build(builds, kit_env_opt("KIT_IOS_BUILD"), version, group.name)]
 end
 
 platform :ios do
@@ -652,7 +709,7 @@ platform :ios do
     end
     begin
       kit_asc_login
-      live = kit_ios_live_version
+      live = kit_ios_app.get_live_app_store_version
       phased = live && kit_ios_phased_release(live)
       kit_emit("STATUS_APPSTORE_PHASED", phased.phased_release_state) if phased
     rescue StandardError => e
@@ -660,50 +717,69 @@ platform :ios do
     end
   end
 
-  desc "Distribute a build that is already in TestFlight to tester groups (no upload)."
-  desc "In: KIT_IOS_BUNDLE_ID, KIT_IOS_VERSION, KIT_IOS_BUILD, KIT_TESTFLIGHT_GROUPS (comma list), " \
-       "KIT_RELEASE_NOTES (optional: replaces What to Test), ASC_*."
+  desc "Print the build a promotion would move: it must be in the source TestFlight group."
+  desc "In: KIT_IOS_BUNDLE_ID, KIT_IOS_VERSION, KIT_TESTFLIGHT_FROM_GROUP, KIT_IOS_BUILD (optional: check this " \
+       "build; default the highest build number in the group), ASC_*. Out: KIT_PROMOTE_BUILD=<n>."
+  lane :promote_build do
+    _app, build = kit_ios_promote_build
+    kit_emit("PROMOTE_BUILD", build.version)
+  end
+
+  desc "Distribute a build from one TestFlight group to others (no upload)."
+  desc "In: KIT_IOS_BUNDLE_ID, KIT_IOS_VERSION, KIT_TESTFLIGHT_FROM_GROUP, KIT_IOS_BUILD (optional), " \
+       "KIT_TESTFLIGHT_GROUPS (comma list: the destination groups), KIT_RELEASE_NOTES (optional: replaces What " \
+       "to Test), KIT_TESTFLIGHT_WAIT_TIMEOUT (seconds, default 900), ASC_*."
   lane :promote_testflight do
-    groups = kit_list("KIT_TESTFLIGHT_GROUPS")
-    UI.user_error!("KIT_TESTFLIGHT_GROUPS is empty: a promotion needs the destination tester group") if groups.empty?
+    names = kit_list("KIT_TESTFLIGHT_GROUPS")
+    UI.user_error!("KIT_TESTFLIGHT_GROUPS is empty: a promotion needs the destination tester group") if names.empty?
+    app, build = kit_ios_promote_build
+    groups = kit_ios_resolve_groups(app.get_beta_groups, names).map(&:name)
     params = {
       api_key: kit_asc_api_key,
       app_identifier: kit_ios_bundle_id,
       distribute_only: true,
       app_version: kit_env("KIT_IOS_VERSION"),
-      build_number: kit_env("KIT_IOS_BUILD"),
+      build_number: build.version.to_s,
       distribute_external: true,
-      groups: groups
+      groups: groups,
+      # The build exists (looked up above); never poll without an end for one still processing.
+      wait_processing_timeout_duration: kit_env_opt("KIT_TESTFLIGHT_WAIT_TIMEOUT", "900").to_i
     }
     notes = kit_env_opt("KIT_RELEASE_NOTES")
     params[:changelog] = notes if notes
     upload_to_testflight(params)
-    UI.success("Distributed build #{params[:build_number]} to TestFlight groups: #{groups.join(', ')}.")
+    UI.success("Distributed build #{build.version} to TestFlight groups: #{groups.join(', ')}.")
   end
 
-  desc "Submit a build that is already in App Store Connect for App Store review (no upload)."
-  desc "In: KIT_IOS_BUNDLE_ID, KIT_IOS_VERSION, KIT_IOS_BUILD, KIT_RELEASE_NOTES (What's New, en-US), " \
-       "KIT_APPSTORE_PHASED (default 1), KIT_APPSTORE_SUBMIT (default 1), ASC_*."
+  desc "Submit a build from a TestFlight group for App Store review (no upload)."
+  desc "In: KIT_IOS_BUNDLE_ID, KIT_IOS_VERSION, KIT_TESTFLIGHT_FROM_GROUP, KIT_IOS_BUILD (optional), " \
+       "KIT_RELEASE_NOTES (What's New, en-US), KIT_APPSTORE_PHASED (default 1), KIT_APPSTORE_SUBMIT (default 1), ASC_*."
   lane :promote_appstore do
     whats_new = kit_env_opt("KIT_RELEASE_NOTES", "")
     UI.user_error!("KIT_RELEASE_NOTES is empty: App Store Connect will not submit an update without What's New.") if whats_new.empty?
+    _app, build = kit_ios_promote_build
 
-    # Same submit, phased and What's New rules as upload_appstore.
-    upload_to_app_store(
-      api_key: kit_asc_api_key,
-      app_identifier: kit_ios_bundle_id,
-      app_version: kit_env("KIT_IOS_VERSION"),
-      build_number: kit_env("KIT_IOS_BUILD"),
-      skip_binary_upload: true,
-      submit_for_review: kit_flag?("KIT_APPSTORE_SUBMIT", default: true),
-      automatic_release: false,
-      phased_release: kit_flag?("KIT_APPSTORE_PHASED", default: true),
-      precheck_include_in_app_purchases: false,
-      release_notes: { "en-US" => whats_new },
-      skip_screenshots: true,
-      force: true
-    )
-    UI.success("Submitted build #{kit_env('KIT_IOS_BUILD')} to the App Store for review.")
+    # Same submit, phased and What's New rules as upload_appstore, and the same
+    # empty metadata dir: deliver must not load the repo's listing.
+    Dir.mktmpdir("kit-deliver") do |empty|
+      upload_to_app_store(
+        api_key: kit_asc_api_key,
+        app_identifier: kit_ios_bundle_id,
+        app_version: kit_env("KIT_IOS_VERSION"),
+        build_number: build.version.to_s,
+        skip_binary_upload: true,
+        submit_for_review: kit_flag?("KIT_APPSTORE_SUBMIT", default: true),
+        automatic_release: false,
+        phased_release: kit_flag?("KIT_APPSTORE_PHASED", default: true),
+        precheck_include_in_app_purchases: false,
+        release_notes: { "en-US" => whats_new },
+        metadata_path: File.join(empty, "metadata"),
+        screenshots_path: File.join(empty, "screenshots"),
+        skip_screenshots: true,
+        force: true
+      )
+    end
+    UI.success("Submitted build #{build.version} to the App Store for review.")
   end
 
   # The App Store has no rollout percentage: a phased release follows Apple's
@@ -716,7 +792,7 @@ platform :ios do
     UI.user_error!("KIT_ROLLOUT_ACTION must be halt, resume or complete, got '#{action}'") unless %w[halt resume complete].include?(action)
 
     kit_asc_login
-    live = kit_ios_live_version
+    live = kit_ios_app.get_live_app_store_version
     UI.user_error!("No live App Store version for #{kit_ios_bundle_id}") unless live
     phased = kit_ios_phased_release(live)
     UI.user_error!("#{live.version_string} has no phased release (it was released to everyone at once)") unless phased
@@ -747,10 +823,50 @@ def kit_play_no_upload
     skip_upload_images: true, skip_upload_screenshots: true, skip_upload_changelogs: true }
 end
 
-# Halt or resume the production staged rollout. supply's own rollout update
-# only finds inProgress and draft releases (so it cannot resume a halted one)
-# and rewrites the user fraction; this edits the status alone and keeps it.
-def kit_play_set_rollout_status(status, code)
+# The production release a rollout change applies to: the one staged rollout
+# in progress, or the halted one for `resume`. Never a draft (supply's own
+# rollout update would publish it) and never a guess between two.
+def kit_play_rollout_release(releases, action, code)
+  want = action == "resume" ? "halted" : "inProgress"
+  found = (releases || []).select { |r| r.status == want }
+  found = found.select { |r| (r.version_codes || []).map(&:to_s).include?(code.to_s) } if code
+  if found.empty?
+    why = want == "halted" ? "there is no halted rollout to resume" : "no staged rollout is in progress (resume a halted one first)"
+    UI.user_error!("No #{want} release on the production track#{code ? " with version code #{code}" : ''}: #{why}")
+  end
+  if found.size > 1
+    codes = found.flat_map { |r| r.version_codes || [] }.join(", ")
+    UI.user_error!("More than one #{want} release on the production track (version codes #{codes}): pass --build <version code>")
+  end
+  found.first
+end
+
+# Set the release's status and user fraction for the action. Halt and resume
+# keep the fraction the rollout had.
+def kit_play_apply_rollout(release, action, fraction)
+  case action
+  when "percent"
+    value = fraction.to_f
+    UI.user_error!("KIT_PLAY_ROLLOUT must be in (0, 1], got '#{fraction}'") unless value.positive? && value <= 1
+    release.status = value >= 1 ? "completed" : "inProgress"
+    release.user_fraction = value >= 1 ? nil : value
+  when "complete"
+    release.status = "completed"
+    release.user_fraction = nil
+  when "halt"
+    release.status = "halted"
+  when "resume"
+    release.status = "inProgress"
+  else
+    UI.user_error!("KIT_ROLLOUT_ACTION must be percent, halt, resume or complete, got '#{action}'")
+  end
+  release
+end
+
+# One Play edit: pick the release, change it, commit. Not the supply action:
+# its rollout update also matches draft releases, cannot find a halted one and
+# overwrites the user fraction.
+def kit_play_update_rollout(action, fraction, code)
   require "supply"
   package = kit_env("KIT_ANDROID_PACKAGE")
   Supply.config = FastlaneCore::Configuration.create(
@@ -762,13 +878,7 @@ def kit_play_set_rollout_status(status, code)
   begin
     track = client.tracks("production").first
     UI.user_error!("The app has no production track") unless track
-    want = status == "halted" ? "inProgress" : "halted"
-    releases = (track.releases || []).select { |r| r.status == want }
-    releases = releases.select { |r| (r.version_codes || []).map(&:to_s).include?(code) } if code
-    UI.user_error!("No #{want} release on the production track#{code ? " with version code #{code}" : ''}") if releases.empty?
-    UI.user_error!("More than one #{want} release on the production track: set KIT_ANDROID_CODE") if releases.size > 1
-    release = releases.first
-    release.status = status
+    release = kit_play_apply_rollout(kit_play_rollout_release(track.releases, action, code), action, fraction)
     # Play keeps the track's other releases when the update names only this one.
     track.releases = [release]
     client.update_track("production", track)
@@ -863,31 +973,16 @@ platform :android do
 
   desc "Change the production staged rollout: set the fraction, halt, resume or complete it."
   desc "In: KIT_ROLLOUT_ACTION (percent|halt|resume|complete), KIT_PLAY_ROLLOUT (percent: fraction in (0, 1]), " \
-       "KIT_ANDROID_CODE (optional), KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY. Out: KIT_ROLLOUT_STATE=, KIT_ROLLOUT_FRACTION=."
+       "KIT_ANDROID_CODE (optional: the release's version code), KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY. " \
+       "Out: KIT_ROLLOUT_STATE=, KIT_ROLLOUT_FRACTION=, KIT_ROLLOUT_CODE=."
   lane :rollout do
     action = kit_env("KIT_ROLLOUT_ACTION")
-    code = kit_env_opt("KIT_ANDROID_CODE")
-    case action
-    when "percent", "complete"
-      fraction = action == "complete" ? "1" : kit_env("KIT_PLAY_ROLLOUT")
-      status = fraction.to_f >= 1 ? "completed" : "inProgress"
-      params = kit_play_no_upload.merge(
-        package_name: kit_env("KIT_ANDROID_PACKAGE"),
-        json_key: kit_play_json_key,
-        track: "production",
-        release_status: status,
-        rollout: fraction
-      )
-      params[:version_code] = code.to_i if code
-      upload_to_play_store(params)
-      kit_emit("ROLLOUT_STATE", status)
-      kit_emit("ROLLOUT_FRACTION", fraction) if status == "inProgress"
-    when "halt", "resume"
-      release = kit_play_set_rollout_status(action == "halt" ? "halted" : "inProgress", code)
-      kit_emit("ROLLOUT_STATE", release.status)
-      kit_emit("ROLLOUT_FRACTION", release.user_fraction) if release.user_fraction
-    else
-      UI.user_error!("KIT_ROLLOUT_ACTION must be percent, halt, resume or complete, got '#{action}'")
-    end
+    UI.user_error!("KIT_ROLLOUT_ACTION must be percent, halt, resume or complete, got '#{action}'") unless %w[percent halt resume complete].include?(action)
+
+    fraction = action == "percent" ? kit_env("KIT_PLAY_ROLLOUT") : nil
+    release = kit_play_update_rollout(action, fraction, kit_env_opt("KIT_ANDROID_CODE"))
+    kit_emit("ROLLOUT_STATE", release.status)
+    kit_emit("ROLLOUT_FRACTION", release.user_fraction) if release.user_fraction
+    kit_emit("ROLLOUT_CODE", (release.version_codes || []).map(&:to_i).max)
   end
 end

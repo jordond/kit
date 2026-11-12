@@ -17,6 +17,10 @@ export default defineCommand({
       description: 'Resume a halted rollout or a paused phased release; prod confirmation',
     },
     complete: { type: 'boolean', description: 'Release to everyone now; prod confirmation' },
+    build: {
+      type: 'number',
+      description: 'Android: version code of the release to change (when the track holds more than one)',
+    },
   },
   examples:
     'kit release rollout android --percent 25\nkit release rollout android --halt --yes\nkit release rollout ios --resume\nkit release rollout ios --complete --dry-run',
@@ -34,6 +38,7 @@ export default defineCommand({
       halt: ctx.args.halt,
       resume: ctx.args.resume,
       complete: ctx.args.complete,
+      build: ctx.args.build,
     })
   },
 })

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { ExitCode, KitError } from '../../src/lib/errors'
-import { buildToPromote, validatePromotion } from '../../src/lib/release/promote'
+import { playBuildToPromote, validatePromotion } from '../../src/lib/release/promote'
 import { describeRollout, rolloutPlan, widensExposure } from '../../src/lib/release/rollout'
 import {
   parseAndroidStatus,
@@ -94,12 +94,17 @@ describe('status parsing', () => {
     ])
   })
 
-  test('buildToPromote reads the source track (iOS: the one TestFlight list)', () => {
+  test('playBuildToPromote: the highest code on the source track; empty and unreadable differ', () => {
     const android = { STATUS_ALPHA_CODES: '39,40', STATUS_BETA_CODES: '' }
-    expect(buildToPromote('android', 'alpha', android)).toBe(40)
-    expect(buildToPromote('android', 'beta', android)).toBeUndefined()
-    expect(buildToPromote('ios', 'beta', { STATUS_TESTFLIGHT_BUILD: '7' })).toBe(7)
-    expect(buildToPromote('ios', 'alpha', {})).toBeUndefined()
+    expect(playBuildToPromote('alpha', android)).toBe(40)
+    expect(thrown(() => playBuildToPromote('beta', android)).message).toBe(
+      'No release on the Play beta track to promote',
+    )
+    const unreadable = thrown(() => playBuildToPromote('beta', { STATUS_BETA_ERROR: 'forbidden' }))
+    expect(unreadable.message).toBe('Could not read the Play beta track: forbidden')
+    expect(thrown(() => playBuildToPromote('alpha', {})).message).toContain(
+      'Could not read the Play alpha track',
+    )
   })
 })
 
@@ -116,6 +121,20 @@ describe('rolloutPlan', () => {
     )
     expect(thrown(() => rolloutPlan('android', { percent: 10, complete: true })).exitCode).toBe(
       ExitCode.usage,
+    )
+  })
+
+  test('--build is an Android version code', () => {
+    expect(rolloutPlan('android', { halt: true, build: 41 })).toEqual({ action: 'halt', build: 41 })
+    expect(rolloutPlan('android', { percent: 50, build: 41 })).toEqual({
+      action: 'percent',
+      percent: 50,
+      fraction: 0.5,
+      build: 41,
+    })
+    expect(thrown(() => rolloutPlan('android', { halt: true, build: 0 })).exitCode).toBe(ExitCode.usage)
+    expect(thrown(() => rolloutPlan('ios', { halt: true, build: 41 })).message).toContain(
+      '--build is Android only',
     )
   })
 

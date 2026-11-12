@@ -378,9 +378,11 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
   only when a platform has no readable track.
 - `kit release promote`: `--build` picks the build number / version code (default: the latest on the
   source track). It runs the branch check, the store credentials, `release.preflight` and the same
-  confirmation as a release to `--to`, then tags `<platform>/v<version>+<build>` unless that tag exists.
-  A promotion gets no tag of its own: a tag names a build, not a track, and release notes are computed
-  from the last `<platform>/v*` tag.
+  confirmation as a release to `--to`. A promotion never tags: a tag names a build, not a track
+  (release notes are computed from the last `<platform>/v*` tag), so the tag from the build's first
+  release stands. When `<platform>/v<version>+<build>` is missing, kit warns and prints the `git tag`
+  command to run on the commit that built it (`tagExisted` and `tagCommand` in `--json`); HEAD is not
+  that commit.
   `--dry-run` prints the plan and runs nothing.
   - **Internal builds are never promoted** (`--from internal` exits 2): they are compiled with
     `KIT_INTERNAL` set, so a later track needs `kit release <platform> --track <track>`.
@@ -389,14 +391,19 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
   - iOS: `--app-version <x.y.z>` promotes a build from before a version bump (default: the TOML version);
     it is the lane's app version and the tag's version. On Android it is a usage error (the version
     code alone finds the release).
-  - iOS: `alpha → beta` distributes the TestFlight build to `release.ios.testflightGroups.beta`;
+  - iOS: the build must be in the source tester group (`release.ios.testflightGroups.<from>`, default
+    the track name). A build that never reached it, an internal build included, is refused with
+    exit 1, `--build` or not; so is a destination group the app does not have.
+  - iOS: `alpha → beta` distributes the build to `release.ios.testflightGroups.beta`;
     `→ prod` submits it for App Store review (phased, manual release) and requires `--notes`.
 - `kit release rollout` takes exactly one action. `--percent`, `--resume` and `--complete` widen
   production exposure, so they use the `prod` confirmation: type `prod` locally (`--yes` doesn't skip),
   the `production` environment's reviewers in CI. `--halt` is the emergency brake: a prompt that
   `--yes` skips. `--dry-run` runs nothing.
   Android changes the production staged rollout; `--percent 100` completes it, and a halted rollout
-  must be resumed before its percentage changes. The App Store has no percentage (a phased release
+  must be resumed before its percentage changes. Only a rollout in progress (or, for `--resume`, a
+  halted one) is touched, never a draft; `--build <version code>` names the release when the track
+  holds more than one. The App Store has no percentage (a phased release
   follows Apple's 7-day schedule), so `--percent` is a usage error on iOS: `--halt` pauses the phased
   release, `--resume` and `--complete` do what they say.
 - Build numbers are never committed: `max(store) + 1`, or `--build` / `--code`.

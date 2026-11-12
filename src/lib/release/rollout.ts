@@ -25,6 +25,8 @@ export interface RolloutArgs {
   halt?: boolean
   resume?: boolean
   complete?: boolean
+  /** Android: the version code of the release to change, when the track holds more than one. */
+  build?: number
 }
 
 export interface RolloutPlan {
@@ -33,6 +35,8 @@ export interface RolloutPlan {
   percent?: number
   /** `--percent` as the Play user fraction (0.01-1). */
   fraction?: number
+  /** `--build`: the Android version code of the release to change. */
+  build?: number
 }
 
 const usage = (message: string, hint?: string) => new KitError(message, hint, ExitCode.usage)
@@ -58,13 +62,22 @@ export function rolloutPlan(platform: Platform, args: RolloutArgs): RolloutPlan 
       `kit release rollout ${platform} needs exactly one of ${flags}${given.length ? ` (got ${given.map((g) => `--${g}`).join(', ')})` : ''}`,
     )
   }
+  if (args.build !== undefined) {
+    if (platform === 'ios') {
+      throw usage('--build is Android only: the App Store phased release belongs to the one live version')
+    }
+    if (!(Number.isInteger(args.build) && args.build > 0)) {
+      throw usage(`--build must be a positive integer, got ${args.build}`)
+    }
+  }
+  const build = args.build === undefined ? {} : { build: args.build }
   const action = given[0]!
-  if (action !== 'percent') return { action }
+  if (action !== 'percent') return { action, ...build }
   const percent = args.percent!
   if (!(Number.isFinite(percent) && percent >= 1 && percent <= 100)) {
     throw usage(`--percent must be between 1 and 100, got ${percent}`)
   }
-  return { action, percent, fraction: Number((percent / 100).toFixed(4)) }
+  return { action, percent, fraction: Number((percent / 100).toFixed(4)), ...build }
 }
 
 /** What the action does, for the confirmation and the plan. */
@@ -135,6 +148,7 @@ export async function rolloutMobile(
     ...laneConfigEnv(root, config),
     KIT_ROLLOUT_ACTION: plan.action,
     ...(plan.fraction !== undefined ? { KIT_PLAY_ROLLOUT: String(plan.fraction) } : {}),
+    ...(plan.build !== undefined ? { KIT_ANDROID_CODE: String(plan.build) } : {}),
   }
 
   if (!flags.json) process.stderr.write(`\n${pc.bold(summary)}\n\n`)
