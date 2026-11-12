@@ -5,7 +5,7 @@ import type { Flags } from '../../cli/command'
 import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
 import type { Logger } from '../log'
-import { runPiped, spawnDetached } from '../proc'
+import { exitOf, runPiped, spawnDetached } from '../proc'
 import { confirm, select } from '../prompt'
 import {
   type DeviceOption,
@@ -512,11 +512,12 @@ async function bootEmulator(env: DeviceEnv, name?: string): Promise<string> {
   const proc = spawnDetached([emulator, '-avd', avd, ...headless], logFile)
   // An emulator that dies at once (no hypervisor, a locked AVD) would otherwise cost the whole timeout.
   const alive = (): void => {
-    if (proc.exitCode === null) return
+    const exit = exitOf(proc)
+    if (exit === undefined) return
     const tail = existsSync(logFile)
       ? readFileSync(logFile, 'utf8').trim().split('\n').slice(-5).join('\n')
       : ''
-    throw new KitError(`The ${avd} emulator exited (code ${proc.exitCode})`, tail || `See ${logFile}`)
+    throw new KitError(`The ${avd} emulator exited (${exit})`, tail || `See ${logFile}`)
   }
   env.log.dim(`  booting ${avd}…`)
   let serial: string | undefined

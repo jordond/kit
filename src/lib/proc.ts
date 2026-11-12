@@ -86,6 +86,16 @@ export function spawnDetached(
   return proc
 }
 
+/**
+ * How a child ended, or undefined while it runs. A child killed by a signal (an emulator that
+ * segfaults) has no exit code, so `exitCode` alone reads as still running.
+ */
+export function exitOf(proc: Pick<Bun.Subprocess, 'exitCode' | 'signalCode'>): string | undefined {
+  if (proc.exitCode !== null) return `code ${proc.exitCode}`
+  if (proc.signalCode !== null) return `signal ${proc.signalCode}`
+  return undefined
+}
+
 /** Like `run`, but throws on a non-zero exit. */
 export async function runOrThrow(cmd: readonly string[], opts: RunOptions = {}): Promise<void> {
   const code = await run(cmd, opts)
