@@ -90,6 +90,9 @@ Commands
   ios      Build and upload iOS to a track
   android  Build and upload Android to a track
   certs    Install App Store signing with match; --add creates what is missing
+  status   Show the version and the latest build on each store track
+  promote  Promote a build the store already has to a later track (no rebuild)
+  rollout  Change the production rollout: Play staged rollout, App Store phased release
 
 Options
   -h, --help     Show help
@@ -733,6 +736,91 @@ Options
       --build <number>  Build number (default: max in App Store Connect + 1)
       --notes <string>  Release notes (default: commits since the last ios/v* tag); prod: What's New, required
       --skip <string>   Skip release.preflight checks by skipFlag (comma-separated)
+
+"
+`;
+
+exports[`help kit release promote --help 1`] = `
+"Promote a build the store already has to a later track (no rebuild)
+
+Usage
+  kit release promote [options]
+
+Examples
+  kit release promote android --from alpha --to beta --yes
+  kit release promote android --from beta --to prod --rollout 0.2
+  kit release promote ios --from beta --to prod --build 42 --notes "Bug fixes"
+  kit release promote ios --from alpha --to beta --dry-run
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --from <string>     Source track: alpha | beta (internal builds are never promoted)
+      --to <string>       Destination track, later than --from: beta | prod
+      --build <number>    Build number (iOS) or version code (Android); default: the latest on the source track
+      --rollout <number>  Android prod staged-rollout fraction, 0 < r <= 1 (default release.android.prodRollout or 0.1)
+      --notes <string>    Release notes; iOS prod: What's New, required (default: the build keeps its notes)
+      --draft             Android: promote as a draft release
+      --skip <string>     Skip release.preflight checks by skipFlag (comma-separated)
+
+"
+`;
+
+exports[`help kit release rollout --help 1`] = `
+"Change the production rollout: Play staged rollout, App Store phased release
+
+Usage
+  kit release rollout [options]
+
+Examples
+  kit release rollout android --percent 25
+  kit release rollout android --halt
+  kit release rollout ios --resume
+  kit release rollout ios --complete --dry-run
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --percent <number>  Android: staged-rollout percentage, 1-100 (100 completes it)
+      --halt              Halt the Play rollout, or pause the App Store phased release
+      --resume            Resume a halted rollout or a paused phased release
+      --complete          Release to everyone now
+
+"
+`;
+
+exports[`help kit release status --help 1`] = `
+"Show the version and the latest build on each store track
+
+Usage
+  kit release status [options]
+
+Examples
+  kit release status
+  kit release status android
+  kit release status ios --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
 
 "
 `;
