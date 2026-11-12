@@ -28,7 +28,7 @@ Quality
   check       Lint and typecheck every target
   test        Run the test suites
   qa          Run the Maestro flows on a device: build, install, fixture, flows
-  shots       Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs
+  shots       Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs …
 
 Release
   release     Ship to the stores …
@@ -187,6 +187,41 @@ Commands
 Options
   -h, --help     Show help
   -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit shots --help 1`] = `
+"Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs
+
+Usage
+  kit shots <command> [options]
+
+Examples
+  kit shots android
+  kit shots ios --full
+  kit shots ipad --no-build --out brand/screenshots/ipad
+  kit shots android --dry-run --json
+
+Commands
+  export  Render the store screenshots from the raw shots and the saved project
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --suite <string>    Run this maestro.suites entry
+      --device <string>   Simulator UDID or adb serial (default: the running one)
+      --no-build          Install the newest existing build
+      --fixture <string>  Load this fixture instead of the suite's
+      --no-fixture        Load no fixture
+      --full              Run the shots-full suite (define it under maestro.suites)
+      --out <string>      Copy the screenshots here instead of the suite dir (used as is)
 
 "
 `;
@@ -1616,17 +1651,20 @@ Options
 "
 `;
 
-exports[`help kit shots --help 1`] = `
+exports[`help kit shots --help 2`] = `
 "Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs
 
 Usage
-  kit shots [options]
+  kit shots <command> [options]
 
 Examples
   kit shots android
   kit shots ios --full
   kit shots ipad --no-build --out brand/screenshots/ipad
   kit shots android --dry-run --json
+
+Commands
+  export  Render the store screenshots from the raw shots and the saved project
 
 Options
   -h, --help              Show help
@@ -1644,6 +1682,35 @@ Options
       --no-fixture        Load no fixture
       --full              Run the shots-full suite (define it under maestro.suites)
       --out <string>      Copy the screenshots here instead of the suite dir (used as is)
+
+"
+`;
+
+exports[`help kit shots export --help 1`] = `
+"Render the store screenshots from the raw shots and the saved project
+
+Usage
+  kit shots export [options]
+
+Examples
+  kit shots export
+  kit shots export --store apple --locale en-US
+  kit shots export --out build/store-shots --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --store <string>   apple, google or both (default both)
+      --locale <string>  Only these locales, comma-separated (en-US,fr-FR)
+      --out <string>     Write under <dir>/apple and <dir>/google instead of the store listing dirs
+      --allow-missing    Skip slides whose raw shot is absent
+      --force            Replace images in a set that kit did not write
 
 "
 `;
