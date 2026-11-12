@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { ExitCode, KitError } from '../../src/lib/errors'
 import { buildToPromote, validatePromotion } from '../../src/lib/release/promote'
-import { describeRollout, rolloutPlan } from '../../src/lib/release/rollout'
+import { describeRollout, rolloutPlan, widensExposure } from '../../src/lib/release/rollout'
 import {
   parseAndroidStatus,
   parseIosStatus,
@@ -142,6 +142,11 @@ describe('rolloutPlan', () => {
     expect(thrown(() => rolloutPlan('ios', {})).message).toContain(
       'exactly one of --halt, --resume, --complete',
     )
+  })
+
+  test('only --halt narrows production exposure', () => {
+    expect(widensExposure('halt')).toBe(false)
+    expect((['percent', 'resume', 'complete'] as const).map(widensExposure)).toEqual([true, true, true])
   })
 
   test('describeRollout', () => {

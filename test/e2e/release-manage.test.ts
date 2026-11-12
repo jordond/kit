@@ -468,6 +468,62 @@ describe('kit release promote', () => {
     })
   })
 
+  test('ios --app-version: a build from before a version bump; lane version and tag follow it', async () => {
+    const r = await run([
+      'release',
+      'promote',
+      'ios',
+      '--from',
+      'alpha',
+      '--to',
+      'beta',
+      '--app-version',
+      '1.3.0',
+      '--yes',
+      '--json',
+    ])
+    expect(r.code).toBe(0)
+    const [status, promote] = lanes()
+    expect(status!.env.KIT_IOS_VERSION).toBe('1.3.0')
+    expect(promote!.env).toMatchObject({ KIT_IOS_VERSION: '1.3.0', KIT_IOS_BUILD: '7' })
+    expect(JSON.parse(r.stdout)).toMatchObject({ version: '1.3.0', tag: 'ios/v1.3.0+7', tagPushed: true })
+    expect(sh(['git', 'ls-remote', '--tags', 'origin'])).toContain('refs/tags/ios/v1.3.0+7')
+  })
+
+  test('--app-version: bad format → exit 2; Android → exit 2', async () => {
+    for (const v of ['1.3', 'v1.3.0', '1.3.0-beta']) {
+      const bad = await run([
+        'release',
+        'promote',
+        'ios',
+        '--from',
+        'alpha',
+        '--to',
+        'beta',
+        '--app-version',
+        v,
+        '--yes',
+      ])
+      expect(bad.code).toBe(2)
+      expect(bad.stderr).toContain('--app-version must be MAJOR.MINOR.PATCH')
+    }
+    const android = await run([
+      'release',
+      'promote',
+      'android',
+      '--from',
+      'alpha',
+      '--to',
+      'beta',
+      '--app-version',
+      '1.3.0',
+      '--yes',
+    ])
+    expect(android.code).toBe(2)
+    expect(android.stderr).toContain('--app-version applies to iOS only')
+    expect(lanes()).toEqual([])
+  })
+
   test('ios → prod: needs --notes, then submits the build that is already uploaded', async () => {
     const bare = await run(['release', 'promote', 'ios', '--from', 'beta', '--to', 'prod', '--build', '7'])
     expect(bare.code).toBe(2)
@@ -503,7 +559,9 @@ describe('kit release promote', () => {
 
 describe('kit release rollout', () => {
   test('android --percent: fraction to the rollout lane, --json shape', async () => {
-    const r = await run(['release', 'rollout', 'android', '--percent', '25', '--yes', '--json'])
+    const r = await run(['release', 'rollout', 'android', '--percent', '25', '--json'], {
+      GITHUB_ACTIONS: 'true',
+    })
     expect(r.code).toBe(0)
     expect(names()).toEqual(['android rollout'])
     const env = lanes()[0]!.env
@@ -526,7 +584,11 @@ describe('kit release rollout', () => {
   })
 
   test.each(['halt', 'resume', 'complete'])('android --%s', async (action) => {
-    const r = await run(['release', 'rollout', 'android', `--${action}`, '--yes'])
+    // --halt is the brake: --yes is enough. The others widen exposure: the production environment answers.
+    const r = await run(
+      ['release', 'rollout', 'android', `--${action}`, '--yes'],
+      action === 'halt' ? {} : { GITHUB_ACTIONS: 'true' },
+    )
     expect(r.code).toBe(0)
     expect(names()).toEqual(['android rollout'])
     expect(lanes()[0]!.env.KIT_ROLLOUT_ACTION).toBe(action)
@@ -565,7 +627,20 @@ describe('kit release rollout', () => {
     expect(lanes()).toEqual([])
   })
 
-  test('asks before acting: off a terminal without --yes nothing runs', async () => {
+  test.each([
+    'android --percent 25',
+    'android --resume',
+    'android --complete',
+    'ios --resume',
+    'ios --complete',
+  ])('%s widens exposure: --yes off a terminal is refused', async (args) => {
+    const r = await run(['release', 'rollout', ...args.split(' '), '--yes'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('--yes does not skip it')
+    expect(lanes()).toEqual([])
+  })
+
+  test('--halt without --yes off a terminal: nothing runs', async () => {
     const r = await run(['release', 'rollout', 'android', '--halt'])
     expect(r.code).toBe(2)
     expect(r.stderr).toContain('Re-run with --yes')
@@ -590,7 +665,7 @@ describe('kit release rollout', () => {
 
   test('a failing lane exits 1 with the resume hint', async () => {
     fakeBundle('  *"android rollout"*) echo "Unable to find the requested release"; exit 1 ;;')
-    const r = await run(['release', 'rollout', 'android', '--percent', '50', '--yes'])
+    const r = await run(['release', 'rollout', 'android', '--percent', '50'], { GITHUB_ACTIONS: 'true' })
     expect(r.code).toBe(1)
     expect(r.stderr).toContain('Unable to find the requested release')
     expect(r.stderr).toContain('kit release rollout android --resume')

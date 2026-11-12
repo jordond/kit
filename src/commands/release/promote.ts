@@ -10,6 +10,12 @@ export default defineCommand({
       type: 'number',
       description: 'Build number (iOS) or version code (Android); default: the latest on the source track',
     },
+    // Not `--version`: that is kit's own global flag.
+    'app-version': {
+      type: 'string',
+      description:
+        'iOS: version name of the build, when it predates a version bump (default: the TOML version)',
+    },
     rollout: {
       type: 'number',
       description:
@@ -23,7 +29,7 @@ export default defineCommand({
     skip: { type: 'string', description: 'Skip release.preflight checks by skipFlag (comma-separated)' },
   },
   examples:
-    'kit release promote android --from alpha --to beta --yes\nkit release promote android --from beta --to prod --rollout 0.2\nkit release promote ios --from beta --to prod --build 42 --notes "Bug fixes"\nkit release promote ios --from alpha --to beta --dry-run',
+    'kit release promote android --from alpha --to beta --yes\nkit release promote android --from beta --to prod --rollout 0.2\nkit release promote ios --from beta --to prod --build 42 --notes "Bug fixes"\nkit release promote ios --from beta --to prod --app-version 1.3.0 --build 40 --notes "Hotfix"\nkit release promote ios --from alpha --to beta --dry-run',
   async run(ctx) {
     const { requireProject } = await import('../../cli/command')
     const { promoteMobile, validatePromotion } = await import('../../lib/release/promote')
@@ -37,6 +43,7 @@ export default defineCommand({
       platform,
       ...validatePromotion(ctx.args.from, ctx.args.to),
       build: ctx.args.build,
+      version: ctx.args['app-version'],
       rollout: ctx.args.rollout,
       notes: ctx.args.notes,
       draft: ctx.args.draft,

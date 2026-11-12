@@ -5,7 +5,7 @@ import { interrupted } from '../cleanup'
 import { ExitCode, KitError } from '../errors'
 import { appFastlaneDir } from '../fastlane'
 import { emitJson } from '../log'
-import { text } from '../prompt'
+import { confirm, text } from '../prompt'
 import { runSteps, summarize } from '../steps'
 import { onGitHubActions } from './creds'
 import { laneConfigEnv, laneStep, type Platform } from './mobile'
@@ -87,11 +87,20 @@ export function describeRollout(platform: Platform, plan: RolloutPlan): string {
   }
 }
 
-/** Production-level confirmation; `--yes` (or the GitHub `production` environment) answers it. */
-async function confirmRollout(flags: Flags, summary: string): Promise<boolean> {
-  if (flags.yes || onGitHubActions()) return true
-  const typed = await text(flags, `Type "prod" to ${summary}`, {
-    hint: 'Re-run with --yes',
+/** `--halt` narrows production exposure; every other action widens it. */
+export const widensExposure = (action: RolloutAction): boolean => action !== 'halt'
+
+/**
+ * PLAN §9.1. Widening production exposure (`--percent`, `--resume`, `--complete`) uses the prod release
+ * gate: type "prod" locally (`--yes` does not skip it); on GitHub Actions the `production` environment's
+ * reviewers answer it. `--halt` is the emergency brake: a plain confirmation that `--yes` skips.
+ */
+async function confirmRollout(flags: Flags, action: RolloutAction, summary: string): Promise<boolean> {
+  if (!widensExposure(action)) return confirm(flags, `${summary}?`)
+  // Only GITHUB_ACTIONS counts: CI=true can come from a shell or the root .env.
+  if (onGitHubActions()) return true
+  const typed = await text({ ...flags, yes: false }, `Type "prod" to ${summary}`, {
+    hint: 'Widening a production rollout needs a terminal (or CI with the production environment); --yes does not skip it',
   })
   return typed.trim() === 'prod'
 }
@@ -129,7 +138,7 @@ export async function rolloutMobile(
   }
 
   if (!flags.json) process.stderr.write(`\n${pc.bold(summary)}\n\n`)
-  if (!(await confirmRollout(flags, summary))) {
+  if (!(await confirmRollout(flags, plan.action, summary))) {
     throw new KitError('Rollout cancelled', undefined, ExitCode.interrupted)
   }
 

@@ -32,6 +32,8 @@ export interface PromoteOptions {
   to: PromoteTo
   /** Build number (iOS) or version code (Android); default: the latest on the source track. */
   build?: number
+  /** iOS: the version name of the build, when it predates a version bump; default: the TOML version. */
+  version?: string
   /** Android prod staged-rollout fraction. */
   rollout?: number
   notes?: string
@@ -59,6 +61,7 @@ export interface PromoteResult {
 }
 
 const APP_STORE_WHATS_NEW_MAX = 4000
+const VERSION = /^\d+\.\d+\.\d+$/
 
 const usage = (message: string, hint?: string) => new KitError(message, hint, ExitCode.usage)
 
@@ -151,7 +154,18 @@ export async function promoteMobile(
   }
   requireBundle()
   const branch = await checkBranch(root, config)
-  const version = readVersion(root, config, platform)
+  if (opts.version !== undefined) {
+    if (platform !== 'ios') {
+      throw usage(
+        '--app-version applies to iOS only: a Play release is found by its version code alone',
+        'Pass --build <version code>',
+      )
+    }
+    if (!VERSION.test(opts.version)) {
+      throw usage(`--app-version must be MAJOR.MINOR.PATCH, got "${opts.version}"`)
+    }
+  }
+  const version = opts.version ?? readVersion(root, config, platform)
   const appRoot = appFastlaneDir(root, config)
   const common: Record<string, string> = { ...storeCreds(platform), ...laneConfigEnv(root, config) }
 
