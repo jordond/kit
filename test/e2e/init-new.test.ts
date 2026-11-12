@@ -60,6 +60,9 @@ const run = (args: string[], opts: { cwd?: string; env?: Record<string, string> 
       KIT_TEST_LOG: join(f.dir, '.kotlin.log'),
       KIT_BUN_LOG: join(f.dir, '.bun.log'),
       HOME: home,
+      // Runners set these; completion must land in the test's home.
+      XDG_CONFIG_HOME: '',
+      ZDOTDIR: '',
       SHELL: '/bin/zsh',
       ...opts.env,
     },
