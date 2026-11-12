@@ -1,4 +1,5 @@
 import type { KitConfig } from '../../config/schema'
+import { CHROME_HINT, CHROME_MIN_MAJOR } from '../chrome'
 import { dotenvAmbiguities } from '../dotenv'
 import { maestroInstallHint } from '../maestro/bin'
 import { wrapperVersion } from '../toolchain'
@@ -151,6 +152,33 @@ export function checkMaestroJava(probe: Probe, java: Check): Check | undefined {
   if (java.status === 'fail') return undefined
   const detail = version === undefined ? 'not found' : `${version} (need ${MAESTRO_MIN_JAVA}+)`
   return { ...base, status: 'warn', detail, hint }
+}
+
+/** `chrome --version` → '131.0.6778.86' ("Google Chrome 131.0.6778.86", "Chromium 120.0.6099.109 built on …"). */
+export function parseChromeVersion(output: string): string | undefined {
+  const version = /\b(\d+(?:\.\d+){1,3})\b/
+  // The line that names the browser wins over numbers in a warning printed around it.
+  return (
+    output.match(new RegExp(`Chrom(?:e|ium)\\b[^\\d\\n]*${version.source}`))?.[1] ??
+    output.match(version)?.[1]
+  )
+}
+
+/** Chrome for `kit shots export`: a warning, since only that command needs it. */
+export function checkChrome(probe: Probe): Check {
+  const base = { id: 'chrome', label: 'chrome' }
+  if (probe === undefined) return { ...base, status: 'warn', detail: 'not found', hint: CHROME_HINT }
+  const version = probe.code === 0 ? parseChromeVersion(probe.output) : undefined
+  if (version === undefined) return { ...base, status: 'warn', detail: 'unknown version', hint: CHROME_HINT }
+  if (Number(version.split('.')[0]) < CHROME_MIN_MAJOR) {
+    return {
+      ...base,
+      status: 'warn',
+      detail: `${version} (need ${CHROME_MIN_MAJOR}+)`,
+      hint: `Update Chrome to ${CHROME_MIN_MAJOR} or newer, or set KIT_CHROME to a newer Chrome or Chromium binary`,
+    }
+  }
+  return { ...base, status: 'ok', detail: version }
 }
 
 /** adb for `kit app install` and `kit device`: only a warning, a release never needs it. */

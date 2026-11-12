@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readdirSync, readFileSync } from 'no
 import { dirname, join, relative, resolve } from 'node:path'
 import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
+import { findChrome } from '../chrome'
 import { androidSdkDir, findSdkTool, hostAbi, installedSystemImages, SDK_TOOLS } from '../devices'
 import { preferredSystemImage, systemImagePackage } from '../devices/pick'
 import { findMaestro } from '../maestro/bin'
@@ -18,6 +19,7 @@ import {
   checkAndroidVersion,
   checkBun,
   checkCatalogKeys,
+  checkChrome,
   checkCiPin,
   checkEmulator,
   checkEnvFile,
@@ -277,6 +279,16 @@ export function doctorEntries(
       id: 'maestro-java',
       run: async () =>
         config?.maestro ? checkMaestroJava(await java(), checkJava(await java(), gradle)) : undefined,
+    },
+    {
+      id: 'chrome',
+      run: async () => {
+        if (!config?.shots) return undefined
+        const bin = findChrome(process.env)
+        return checkChrome(
+          bin ? await runQuiet([bin, '--version'], { cwd: root }).catch(() => undefined) : undefined,
+        )
+      },
     },
     { id: 'toolchain', run: () => (toolchainRoot !== undefined ? toolchain() : undefined) },
     {

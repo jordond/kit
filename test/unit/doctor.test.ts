@@ -5,6 +5,7 @@ import {
   checkAdb,
   checkAndroidSdk,
   checkCatalogKeys,
+  checkChrome,
   checkCiPin,
   checkEmulator,
   checkEnvFile,
@@ -17,12 +18,14 @@ import {
   checkUnreadable,
   checkWranglerLogin,
   checkXcode,
+  parseChromeVersion,
   parseEnvKeys,
   parseJavaVersion,
   parseMiseTools,
   versionMatches,
 } from '../../src/commands/doctor'
 import type { KitConfig } from '../../src/config/schema'
+import { CHROME_HINT, CHROME_MIN_MAJOR } from '../../src/lib/chrome'
 
 const out = (output: string, code = 0) => ({ code, output })
 
@@ -257,6 +260,48 @@ describe('devices', () => {
     expect(checkSimulator({ code: 0, output: 'not json' }, 'darwin').status).toBe('warn')
     expect(checkSimulator(undefined, 'darwin').status).toBe('warn')
     expect(checkSimulator(undefined, 'linux').status).toBe('skip')
+  })
+})
+
+describe('chrome', () => {
+  test.each([
+    ['Google Chrome 131.0.6778.86 \n', '131.0.6778.86'],
+    ['Chromium 120.0.6099.109 built on Debian 12.4, running on Debian 12.4\n', '120.0.6099.109'],
+    ['Google Chrome for Testing 112.0.5615.49', '112.0.5615.49'],
+    ['[0412/101500.123:WARNING:x.cc(42)] 9.8.7\nGoogle Chrome 131.0.6778.86\n', '131.0.6778.86'],
+    ['no version here', undefined],
+  ])('parseChromeVersion(%s) → %s', (s, want) => expect(parseChromeVersion(s)).toBe(want))
+
+  test('not installed warns with the install hint', () => {
+    expect(checkChrome(undefined)).toEqual({
+      id: 'chrome',
+      label: 'chrome',
+      status: 'warn',
+      detail: 'not found',
+      hint: CHROME_HINT,
+    })
+  })
+
+  test('older than the minimum major warns; the minimum and newer pass with the version', () => {
+    expect(CHROME_MIN_MAJOR).toBe(112)
+    const old = checkChrome(out('Google Chrome 111.0.5563.146\n'))
+    expect(old).toMatchObject({ status: 'warn', detail: '111.0.5563.146 (need 112+)' })
+    expect(old.hint).toContain('KIT_CHROME')
+    expect(checkChrome(out('Google Chrome 112.0.5615.49\n'))).toEqual({
+      id: 'chrome',
+      label: 'chrome',
+      status: 'ok',
+      detail: '112.0.5615.49',
+    })
+    expect(checkChrome(out('Chromium 131.0.6778.86 built on Debian\n'))).toMatchObject({
+      status: 'ok',
+      detail: '131.0.6778.86',
+    })
+  })
+
+  test('a binary that fails or prints no version warns, never fails', () => {
+    expect(checkChrome(out('', 1))).toMatchObject({ status: 'warn', detail: 'unknown version' })
+    expect(checkChrome(out('hello\n'))).toMatchObject({ status: 'warn', detail: 'unknown version' })
   })
 })
 
