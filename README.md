@@ -590,7 +590,7 @@ For targets of kind `worker`. Every command runs wrangler from the target's dire
   is a deployment, so "the previous deployment" would only undo the last secret. kit picks the last
   deployment whose code differs from what is live, shows its id and date, and warns when secrets
   changed since then: their values go back too, so run `kit env push` afterwards. `--to` names a
-  version outright. Git tags are never moved or deleted: it names the `<service>/v*` tag that no
+  version outright, and is required while a gradual deployment is live (exit 4 lists the candidates). Git tags are never moved or deleted: it names the `<service>/v*` tag that no
   longer matches production. A service whose deploy is not a worker exits 2.
 - `kit db restore`: a backup carries the schema and the applied-migrations table, so it loads into
   an empty database only. Locally kit deletes the database first (after a confirm, like `reset`).
