@@ -2,14 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { addTemplates } from '../../src/lib/add/apply'
-import {
-  configTargets,
-  includedProjects,
-  includeLines,
-  withInclude,
-  withProjectModule,
-  withTarget,
-} from '../../src/lib/add/edits'
+import { configTargets, withProjectModule, withTarget } from '../../src/lib/add/edits'
 import {
   kotlinPackage,
   modulePackage,
@@ -21,6 +14,7 @@ import {
   planToolchainModule,
   validateTargetName,
 } from '../../src/lib/add/plan'
+import { includedProjects, includeLines, withInclude } from '../../src/lib/add/settings'
 import { stripJsonc } from '../../src/lib/cloudflare'
 import { KitError } from '../../src/lib/errors'
 import { moduleProduct, projectModules } from '../../src/lib/scaffold'
