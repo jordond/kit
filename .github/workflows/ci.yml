@@ -41,3 +41,21 @@ jobs:
       # Installs the packed tarball into a temp app and runs the launcher, like a consumer repo does.
       - name: Packed tarball test
         run: bun run test:pack
+
+  # Renovate's own validator on the shared preset and the `kit init` templates. CI only: `bun test`
+  # checks the rules kit relies on (test/unit/renovate.test.ts) without the network.
+  renovate:
+    name: Validate the Renovate preset
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+      - name: renovate-config-validator
+        run: >-
+          npx --yes --package renovate@44.235.0 -- renovate-config-validator --strict
+          renovate/default.json
+          templates/gradle/renovate.json
+          templates/toolchain/renovate.json

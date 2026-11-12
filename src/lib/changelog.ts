@@ -88,16 +88,34 @@ export function heading(version: string, date: string, platform?: string): strin
 
 export const CHANGELOG_HEADER = '# Changelog\n'
 
+/** The heading version when nothing names one: its section is rewritten, not kept, on each write. */
+export const UNRELEASED = 'Unreleased'
+
 /**
- * `text` (undefined: no file yet) with the section put above the newest one. Undefined when a
- * section with the same heading, whatever its date, is already there.
+ * `text` (undefined: no file yet) with the section put above the newest one. A section with the
+ * same heading, whatever its date, is never added twice: the result is undefined. With `replace`
+ * (the Unreleased section, which keeps growing) the existing one is rewritten in place instead,
+ * and the result is undefined only when that changes nothing.
  */
-export function prependSection(text: string | undefined, head: string, body: string): string | undefined {
+export function prependSection(
+  text: string | undefined,
+  head: string,
+  body: string,
+  opts: { replace?: boolean } = {},
+): string | undefined {
   const section = `${head}\n\n${body.trimEnd()}\n`
   if (text === undefined || text.trim() === '') return `${CHANGELOG_HEADER}\n${section}`
   const label = head.replace(/\s*\([^)]*\)$/, '')
   const lines = text.split('\n')
-  if (lines.some((l) => l === label || l.startsWith(`${label} `))) return undefined
+  const existing = lines.findIndex((l) => l === label || l.startsWith(`${label} `))
+  if (existing >= 0) {
+    if (!opts.replace) return undefined
+    const next = lines.findIndex((l, i) => i > existing && l.startsWith('## '))
+    const tail = next < 0 ? [] : ['', ...lines.slice(next)]
+    const out = [...lines.slice(0, existing), ...section.trimEnd().split('\n'), ...tail].join('\n')
+    const done = next < 0 ? `${out}\n` : out
+    return done === text ? undefined : done
+  }
   const at = lines.findIndex((l) => l.startsWith('## '))
   if (at < 0) return `${text.trimEnd()}\n\n${section}`
   return [...lines.slice(0, at), ...section.split('\n'), ...lines.slice(at)].join('\n')

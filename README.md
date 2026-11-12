@@ -244,20 +244,24 @@ kit doctor --fix --yes       # no question (needed without a terminal)
 kit doctor --fix --dry-run   # list them only
 ```
 
-`--fix` repairs what is safe and local, then reports (and exits on) the state after the fixes:
+`--fix` repairs what is safe and local, runs the touched checks again, then reports (and exits on)
+the state after the fixes. A fix is "fixed" only when its check passes afterwards: a command that ran
+and left the check failing (tools `mise install` put somewhere this shell does not look yet) is
+reported as applied, with the next step.
 
 | Check | Fix |
 | --- | --- |
 | lefthook hook not installed | `lefthook install` |
 | mise tool missing or drifted | `mise install` |
-| wrangler not installed | the package manager's install (`bun install`, `pnpm install`, …) |
+| wrangler not installed | the worker's install: the package manager of the nearest lockfile above the worker dir, run where that lockfile is |
 | iOS / Android version drift | writes the TOML version to the xcconfig's `MARKETING_VERSION` / the module.yaml's `versionName` |
 | Kotlin toolchain wrapper not executable | `chmod +x` |
 | workflow pins behind the npm pin | moves them to that release's tag commit, as `kit upgrade` does; skipped with a note when the tag cannot be resolved (offline) |
 
 Xcode, the JDK, the Android SDK, logins, `.env` values and secrets are never fixed: those checks keep
 their hint. Plain `kit doctor` ends with `N fixable with kit doctor --fix` when there is something to
-apply, and `--json` adds `fixes: [{ id, description, applied, ok, error? }]`.
+apply, and `--json` adds `fixes: [{ id, description, applied, ok, error?, hint? }]`, where `ok` is whether
+the check passes after the fix.
 
 ## Changelog
 
@@ -278,7 +282,13 @@ tag it is the whole history. `--to <tag>` lists that release: the range starts a
 `--write` puts a `## <version> (<date>)` section above the newest one in `CHANGELOG.md` (or the file
 named after it), creating the file when needed. The version is the `--to` tag's, else the platform's
 version in the catalog TOML, else the root `package.json` version, else `Unreleased`; with `--platform`
-the heading is `## ios 1.4.0 (…)`. A version that already has a section is not added again.
+the heading is `## ios 1.4.0 (…)`. A version that already has a section is not added again; the
+`Unreleased` section is rewritten in place on each run, so new commits keep landing in it.
+
+In a shallow clone with no release tag in it (CI's default checkout) the range would be whatever was
+fetched: `kit changelog` warns, and `--write` refuses (exit 4) until the history is there
+(`git fetch --unshallow --tags`, or `fetch-depth: 0`). Any other git failure (a ref that does not
+exist, not a repository) is an error, never an empty changelog.
 `--json` prints `{ from, to, sections: [{ title, commits }] }`.
 
 ## Kotlin toolchain

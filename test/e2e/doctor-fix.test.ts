@@ -56,7 +56,7 @@ interface Doc {
     detail?: string
     fix?: { description: string; cmd?: string[]; cwd?: string }
   }[]
-  fixes?: { id: string; description: string; applied: boolean; ok: boolean; error?: string }[]
+  fixes?: { id: string; description: string; applied: boolean; ok: boolean; error?: string; hint?: string }[]
 }
 const status = (doc: Doc) => Object.fromEntries(doc.checks.map((c) => [c.id, c.status]))
 
@@ -119,7 +119,11 @@ test('--fix --yes applies every fix in order, re-checks, and exits on the state 
     expect(r.stderr).toContain(`✔ fixed ${label}`)
     expect(r.stderr).toMatch(new RegExp(`\\n✔ ${label} `))
   }
-  // The fake mise installs nothing: the drift is still there, and still reported.
+  // `mise install` exits 0 and this process still sees the old ktlint: applied, never "fixed".
+  expect(r.stderr).not.toContain('fixed mise.toml versions')
+  expect(r.stderr).toContain(
+    '▲ applied mise install, but mise.toml versions still warns: ktlint 9.9.9 (have 1.8.0)\n  › Open a new shell (or activate mise in this one) so the installed tools are on PATH',
+  )
   expect(r.stderr).toMatch(/\n▲ mise\.toml versions\s+ktlint 9\.9\.9 \(have 1\.8\.0\)/)
   expect(r.stderr).not.toContain('fixable with')
   expect(r.code).toBe(0)
@@ -131,7 +135,14 @@ test('--fix --json: one document with the fixes and the checks after them', asyn
   const doc = JSON.parse(r.stdout) as Doc
   expect(doc.fixes).toEqual([
     { id: 'toolchain', description: 'chmod +x ./kotlin', applied: true, ok: true },
-    { id: 'mise', description: 'mise install', applied: true, ok: true },
+    {
+      id: 'mise',
+      description: 'mise install',
+      applied: true,
+      ok: false,
+      error: 'mise.toml versions still warns: ktlint 9.9.9 (have 1.8.0)',
+      hint: 'Open a new shell (or activate mise in this one) so the installed tools are on PATH',
+    },
     { id: 'lefthook', description: 'lefthook install', applied: true, ok: true },
     {
       id: 'android-version',
@@ -220,6 +231,52 @@ test('a fix that fails is reported and the check keeps failing', async () => {
     },
   ])
   expect(status(doc)).toMatchObject({ mise: 'warn', lefthook: 'warn', toolchain: 'ok' })
+})
+
+test('a standalone worker: the install runs in its own dir with its own package manager', async () => {
+  // The root has package.json + bun.lock; services/api has its own pnpm-lock.yaml and no wrangler.
+  const w = fixture('standalone-worker', [])
+  const log = join(w.dir, '.pm.log')
+  const pm = (bin: string, extra = '') =>
+    w.script(bin, `echo "$(basename "$PWD") ${bin} $*" >> "${log}"\n${extra}`)
+  try {
+    const plain = JSON.parse((await w.kit(['doctor', '--json'])).stdout) as Doc
+    expect(plain.checks.find((c) => c.id === 'wrangler')).toMatchObject({
+      status: 'warn',
+      detail: 'wrangler not installed',
+      hint: 'Run `pnpm install`',
+      fix: { description: 'pnpm install', cmd: ['pnpm', 'install'], cwd: 'services/api' },
+    })
+
+    // An install that leaves no wrangler behind is applied, not fixed.
+    pm('bun')
+    pm('pnpm')
+    const still = JSON.parse((await w.kit(['doctor', '--fix', '--yes', '--json'])).stdout) as Doc
+    expect(still.fixes).toEqual([
+      {
+        id: 'wrangler',
+        description: 'pnpm install',
+        applied: true,
+        ok: false,
+        error: 'wrangler login still warns: wrangler not installed',
+        hint: 'Run `pnpm install`',
+      },
+    ])
+
+    // One that installs it: fixed, and the re-check asks wrangler who is logged in.
+    pm('pnpm', 'if [ "$1" = install ]; then mkdir -p node_modules/.bin; : > node_modules/.bin/wrangler; fi')
+    const r = await w.kit(['doctor', '--fix', '--yes'])
+    expect(r.stderr).toContain('✔ fixed wrangler login')
+    expect(r.stderr).toMatch(/\n✔ wrangler login /)
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual([
+      'api pnpm install',
+      'api pnpm install',
+      'api pnpm exec wrangler whoami',
+    ])
+    expect(readFileSync(log, 'utf8')).not.toContain(' bun ')
+  } finally {
+    w.cleanup()
+  }
 })
 
 test('nothing to fix: --fix is the plain report', async () => {

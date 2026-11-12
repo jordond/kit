@@ -50,3 +50,22 @@ export function packageScripts(dir: string): Record<string, string> | undefined 
     return undefined
   }
 }
+
+// doctor --fix
+/**
+ * Where `<pm> install` runs for `dir`: the nearest directory with a lockfile walking up to `root`
+ * (the same walk as `detectPackageManager`), else the nearest with a package.json, else `dir`.
+ */
+export function installRoot(dir: string, root: string): string {
+  const stop = resolve(root)
+  const up: string[] = []
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    up.push(d)
+    if (d === stop || dirname(d) === d) break
+  }
+  return (
+    up.find((d) => LOCKFILES.some(([file]) => existsSync(join(d, file)))) ??
+    up.find((d) => existsSync(join(d, 'package.json'))) ??
+    resolve(dir)
+  )
+}
