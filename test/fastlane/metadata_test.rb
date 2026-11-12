@@ -178,8 +178,24 @@ class MetadataTest < Minitest::Test
   end
 
   def test_text_set_to_anything_but_off_keeps_the_text
-    %w[1 true].each do |value|
-      push_env(text: value) { refute kit_deliver_listing_options[:skip_metadata] }
+    ["1", "true", "on", "ON", "enabled", "2", " "].each do |value|
+      push_env(text: value) { refute kit_deliver_listing_options[:skip_metadata], "KIT_METADATA_TEXT=#{value.inspect}" }
+    end
+  end
+
+  def test_only_0_false_and_no_turn_the_text_off_in_any_case
+    ["0", "false", "no", "FALSE", "No", " 0 "].each do |value|
+      push_env(screenshots: "1", text: value) do
+        assert kit_deliver_listing_options[:skip_metadata], "KIT_METADATA_TEXT=#{value.inspect}"
+        assert kit_supply_listing_options[:skip_upload_metadata], "KIT_METADATA_TEXT=#{value.inspect}"
+      end
+    end
+  end
+
+  # The other flags keep kit_flag?'s reading: anything but 1/true/yes is off.
+  def test_screenshots_need_an_explicit_on
+    %w[0 on false].each do |value|
+      push_env(screenshots: value) { assert kit_deliver_listing_options[:skip_screenshots] }
     end
   end
 

@@ -153,8 +153,13 @@ end
 # What a listing push sends. Text goes up unless KIT_METADATA_TEXT=0
 # (`kit release metadata push --only-screenshots`); images only with
 # KIT_METADATA_SCREENSHOTS=1. Text off and no images is nothing to upload.
+#
+# KIT_METADATA_TEXT is not read with kit_flag?: that takes anything but
+# 1/true/yes as off, which is the careful reading for KIT_APPSTORE_SUBMIT and
+# KIT_APPSTORE_PHASED but here would drop the text on "on" or a typo. Only
+# 0/false/no, in any case, turns the text off.
 def kit_listing_parts
-  text = kit_flag?("KIT_METADATA_TEXT", default: true)
+  text = !%w[0 false no].include?(ENV["KIT_METADATA_TEXT"].to_s.strip.downcase)
   images = kit_flag?("KIT_METADATA_SCREENSHOTS")
   UI.user_error!("KIT_METADATA_TEXT=0 needs KIT_METADATA_SCREENSHOTS=1: there is nothing to upload.") unless text || images
   { text: text, images: images }

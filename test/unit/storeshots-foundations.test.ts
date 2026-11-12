@@ -79,6 +79,32 @@ describe('sizes', () => {
     expect(appleClass(3840, 2160, 'screenshots/en-US/vision-01.png')).toBe('APP_APPLE_VISION_PRO')
   })
 
+  test('a file in iMessage/<locale>/ gets an iMessage class, from the smaller messages table', () => {
+    const at = (name: string) => `/repo/fastlane/screenshots/iMessage/en-US/${name}`
+    expect(appleClass(1320, 2868, at('01.png'))).toBe('IMESSAGE_APP_IPHONE_67')
+    expect(appleClass(750, 1334, at('01.png'))).toBe('IMESSAGE_APP_IPHONE_47')
+    expect(appleClass(2064, 2752, 'iMessage/en-US/01.png')).toBe('IMESSAGE_APP_IPAD_PRO_3GEN_129')
+    expect(appleClass(2048, 2732, at('01.png'))).toBe('IMESSAGE_APP_IPAD_PRO_3GEN_129')
+    expect(appleClass(2048, 2732, at('01_APP_IPAD_PRO_129.png'))).toBe('IMESSAGE_APP_IPAD_PRO_129')
+    // sizes the messages table lacks: 3.5", Duo, Mac, Watch, Apple TV, Vision Pro
+    for (const [w, h] of [
+      [640, 960],
+      [1398, 2034],
+      [1280, 800],
+      [416, 496],
+      [1920, 1080],
+      [3840, 2160],
+    ]) {
+      expect(appleClass(w!, h!, at('01.png'))).toBeUndefined()
+      expect(appleClass(w!, h!, '/repo/fastlane/screenshots/en-US/01.png')).toBeDefined()
+    }
+    // deliver compares the third component from the end with "iMessage", exactly
+    expect(appleClass(1320, 2868, '/repo/screenshots/imessage/en-US/01.png')).toBe('APP_IPHONE_67')
+    expect(appleClass(1320, 2868, '/repo/iMessage/screenshots/en-US/01.png')).toBe('APP_IPHONE_67')
+    expect(appleClass(1320, 2868, '/repo/screenshots/en-US/iMessage.png')).toBe('APP_IPHONE_67')
+    expect(appleClass(1320, 2868)).toBe('APP_IPHONE_67')
+  })
+
   test('the table has no size listed twice within a class', () => {
     for (const sizes of Object.values(APPLE_SIZES)) {
       const keys = sizes.map(([w, h]) => `${w}x${h}`)

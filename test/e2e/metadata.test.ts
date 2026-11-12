@@ -142,6 +142,7 @@ describe('kit release metadata push', () => {
       files: IOS_TEXT,
       images: [],
       problems: [],
+      warnings: [],
       dryRun: false,
       ok: true,
     })
@@ -158,8 +159,7 @@ describe('kit release metadata push', () => {
       ASC_ISSUER_ID: 'issuer-uuid',
     })
     expect(c.env.KIT_ASC_KEY_PATH).toMatch(/asc-key\.p8$/)
-    expect(c.env.KIT_METADATA_SCREENSHOTS).toBeUndefined()
-    expect(c.env.KIT_METADATA_TEXT).toBeUndefined()
+    expect(c.env).toMatchObject({ KIT_METADATA_SCREENSHOTS: '0', KIT_METADATA_TEXT: '1' })
     expect(c.env.MATCH_PASSWORD).toBeUndefined()
     // never a binary, a track or a rollout
     for (const k of ['KIT_IOS_IPA', 'KIT_RELEASE_NOTES', 'KIT_TESTFLIGHT_GROUPS', 'KIT_APPSTORE_SUBMIT']) {
@@ -184,8 +184,7 @@ describe('kit release metadata push', () => {
     expect(doc.images).toEqual([IOS_IMAGE])
     expect(doc.problems).toEqual([])
     const env = lanes()[0]!.env
-    expect(env.KIT_METADATA_SCREENSHOTS).toBe('1')
-    expect(env.KIT_METADATA_TEXT).toBeUndefined()
+    expect(env).toMatchObject({ KIT_METADATA_SCREENSHOTS: '1', KIT_METADATA_TEXT: '1' })
   })
 
   test('android --screenshots --yes: metadata_push with the Play key; changelogs are never sent', async () => {
@@ -203,7 +202,11 @@ describe('kit release metadata push', () => {
     expect(calls.map(lane)).toEqual(['android metadata_push'])
     const env = calls[0]!.env
     expect(real(env.KIT_METADATA_PATH!)).toBe(real(join(f.dir, ANDROID_DIR)))
-    expect(env).toMatchObject({ KIT_ANDROID_PACKAGE: 'app.example', KIT_METADATA_SCREENSHOTS: '1' })
+    expect(env).toMatchObject({
+      KIT_ANDROID_PACKAGE: 'app.example',
+      KIT_METADATA_SCREENSHOTS: '1',
+      KIT_METADATA_TEXT: '1',
+    })
     expect(env.KIT_PLAY_JSON_KEY).toMatch(/play\.json$/)
     expect(env.KIT_SCREENSHOTS_PATH).toBeUndefined()
     for (const k of ['KIT_ANDROID_AAB', 'KIT_PLAY_TRACK', 'KIT_PLAY_ROLLOUT', 'KIT_RELEASE_NOTES']) {
@@ -211,11 +214,35 @@ describe('kit release metadata push', () => {
     }
   })
 
-  test('android without --screenshots: text only, no KIT_METADATA_SCREENSHOTS', async () => {
+  test('android without --screenshots: text only, KIT_METADATA_SCREENSHOTS=0', async () => {
     const r = await run(['release', 'metadata', 'push', 'android', '-y', '--json'])
     expect(r.code).toBe(0)
     expect(JSON.parse(r.stdout).files).toEqual(ANDROID_TEXT)
-    expect(lanes()[0]!.env.KIT_METADATA_SCREENSHOTS).toBeUndefined()
+    expect(lanes()[0]!.env).toMatchObject({ KIT_METADATA_SCREENSHOTS: '0', KIT_METADATA_TEXT: '1' })
+  })
+
+  test('the lane switches are kit’s, whatever the shell or a root .env holds', async () => {
+    // inherited values that would flip each switch if kit left it unset
+    const hostile = { KIT_METADATA_SCREENSHOTS: '1', KIT_METADATA_TEXT: '0' }
+    const text = await run(['release', 'metadata', 'push', 'ios', '--yes', '--json'], hostile)
+    expect(text.code).toBe(0)
+    expect(JSON.parse(text.stdout)).toMatchObject({ screenshots: false, files: IOS_TEXT, images: [] })
+    expect(lanes()[0]!.env).toMatchObject({ KIT_METADATA_SCREENSHOTS: '0', KIT_METADATA_TEXT: '1' })
+
+    const both = await run(
+      ['release', 'metadata', 'push', 'android', '--screenshots', '-y', '--json'],
+      hostile,
+    )
+    expect(both.code).toBe(0)
+    expect(JSON.parse(both.stdout).files).toEqual([...ANDROID_TEXT, ...ANDROID_IMAGES])
+    expect(lanes()[1]!.env).toMatchObject({ KIT_METADATA_SCREENSHOTS: '1', KIT_METADATA_TEXT: '1' })
+
+    const only = await run(['release', 'metadata', 'push', 'ios', '--only-screenshots', '-y'], {
+      KIT_METADATA_SCREENSHOTS: '0',
+      KIT_METADATA_TEXT: '1',
+    })
+    expect(only.code).toBe(0)
+    expect(lanes()[2]!.env).toMatchObject({ KIT_METADATA_SCREENSHOTS: '1', KIT_METADATA_TEXT: '0' })
   })
 
   test('without --yes off a terminal: shows the files, refuses to confirm (exit 2), runs nothing', async () => {
@@ -248,6 +275,7 @@ describe('kit release metadata push', () => {
       files: IOS_TEXT,
       images: [],
       problems: [],
+      warnings: [],
       dryRun: true,
     })
     expect(readFileSync(laneLog, 'utf8')).toBe('')
@@ -397,6 +425,83 @@ describe('kit release metadata push', () => {
     expect(r.code).toBe(0)
     expect(r.stderr).toContain('en-US: 1 phone screenshot; Google Play asks for at least 2')
     expect(lanes().map(lane)).toEqual(['android metadata_push'])
+    // the JSON document carries it, pushed or dry
+    const warnings = ['en-US: 1 phone screenshot; Google Play asks for at least 2']
+    const j = await run(['release', 'metadata', 'push', 'android', '--screenshots', '--yes', '--json'])
+    expect(JSON.parse(j.stdout)).toMatchObject({ ok: true, problems: [], warnings })
+    const dry = await run(['release', 'metadata', 'push', 'android', '--screenshots', '-n', '--json'])
+    expect(JSON.parse(dry.stdout)).toMatchObject({ dryRun: true, warnings })
+  })
+
+  test('only what deliver uploads is checked, listed and counted', async () => {
+    // frameit's layout: deliver skips root files and fonts/
+    put(`${IOS_SHOTS}/background.png`, png(100, 100, true))
+    put(`${IOS_SHOTS}/fonts/x.png`, 'x')
+    put(`${IOS_SHOTS}/android/en-US/images/icon.png`, png(512, 512, true))
+    // framed mode: of fr-FR only the framed file goes up
+    put(`${IOS_SHOTS}/fr-FR/01.png`, png(100, 100, true))
+    put(`${IOS_SHOTS}/fr-FR/01_framed.png`, IPHONE())
+    const r = await run(['release', 'metadata', 'push', 'ios', '--only-screenshots', '--dry-run'])
+    expect(r.code).toBe(0)
+    expect(r.stdout).toBe(`${IOS_SHOT}\n${IOS_SHOTS}/fr-FR/01_framed.png\n`)
+    expect(r.stderr).toContain('would push 2 images to the App Store listing')
+    expect(r.stderr).toContain('fr-FR  APP_IPHONE_67  1 × 1320x2868')
+    const j = await run(['release', 'metadata', 'push', 'ios', '--only-screenshots', '--yes', '--json'])
+    expect(j.code).toBe(0)
+    const doc = JSON.parse(j.stdout)
+    expect(doc.files).toEqual([IOS_SHOT, `${IOS_SHOTS}/fr-FR/01_framed.png`])
+    expect(doc.images.map((i: { file: string }) => i.file)).toEqual(doc.files)
+  })
+
+  test('only what supply uploads is checked, listed and counted', async () => {
+    put(`${ANDROID_DIR}/en-US/images/promoGraphic.png`, png(180, 120, true))
+    put(`${ANDROID_DIR}/en-US/images/phoneScreenshots/raw/a.png`, png(100, 100, true))
+    const r = await run(['release', 'metadata', 'push', 'android', '--screenshots', '--yes', '--json'])
+    expect(r.code).toBe(0)
+    const doc = JSON.parse(r.stdout)
+    expect(doc.files).toEqual([...ANDROID_TEXT, ...ANDROID_IMAGES])
+    expect(doc.images).toEqual(ANDROID_IMAGE_INFO)
+  })
+
+  test('10 app screenshots and an iMessage one are two classes', async () => {
+    for (let i = 1; i <= 9; i++) put(`${IOS_SHOTS}/en-US/${i}_APP_IPHONE_67_${i}.png`, IPHONE())
+    put(`${IOS_SHOTS}/iMessage/en-US/0.png`, IPHONE())
+    const r = await run(['release', 'metadata', 'push', 'ios', '--screenshots', '--dry-run'])
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('en-US  APP_IPHONE_67  10 × 1320x2868')
+    expect(r.stderr).toContain('en-US  IMESSAGE_APP_IPHONE_67  1 × 1320x2868')
+  })
+
+  test('a screenshots directory deliver gives no locale, or does not take, stops the push (exit 4)', async () => {
+    put(`${IOS_SHOTS}/default/01.png`, IPHONE())
+    const r = await run(['release', 'metadata', 'push', 'ios', '--screenshots', '--yes'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain(`${IOS_SHOTS}/default: deliver gives this directory no locale`)
+    rmSync(join(f.dir, `${IOS_SHOTS}/default`), { recursive: true })
+
+    put(`${IOS_SHOTS}/en/01.png`, IPHONE())
+    const j = await run(['release', 'metadata', 'push', 'ios', '--screenshots', '--yes', '--json'])
+    expect(j.code).toBe(4)
+    const doc = JSON.parse(j.stdout)
+    expect(doc).toMatchObject({ ok: false, files: [...IOS_TEXT, IOS_SHOT], images: [IOS_IMAGE] })
+    expect(doc.problems).toEqual([
+      expect.stringContaining(`${IOS_SHOTS}/en: deliver does not take this directory name`),
+    ])
+    // alone in the directory it is still the problem named, not "no images"
+    rmSync(join(f.dir, `${IOS_SHOTS}/en-US`), { recursive: true })
+    const alone = await run(['release', 'metadata', 'push', 'ios', '--only-screenshots', '--yes'])
+    expect(alone.code).toBe(4)
+    expect(alone.stderr).toContain(`${IOS_SHOTS}/en: deliver does not take this directory name`)
+    expect(lanes()).toEqual([])
+  })
+
+  test('a Play tvBanner of another size is refused', async () => {
+    const banner = `${ANDROID_DIR}/en-US/images/tvBanner.png`
+    put(banner, png(1024, 500))
+    const r = await run(['release', 'metadata', 'push', 'android', '--screenshots', '--yes'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain(`${banner}: 1024x500; the TV banner must be 1280x720`)
+    expect(lanes()).toEqual([])
   })
 
   test('--only-screenshots: implies --screenshots, sends no text, sets KIT_METADATA_TEXT=0', async () => {
@@ -410,6 +515,7 @@ describe('kit release metadata push', () => {
       files: [IOS_SHOT],
       images: [IOS_IMAGE],
       problems: [],
+      warnings: [],
       dryRun: false,
       ok: true,
     })
@@ -491,7 +597,7 @@ describe('kit release metadata pull', () => {
     expect(real(env.KIT_METADATA_PATH!)).toBe(real(join(f.dir, IOS_DIR)))
     expect(env).toMatchObject({ KIT_IOS_BUNDLE_ID: 'app.example', ASC_KEY_ID: 'KEYID123' })
     expect(env.KIT_ASC_KEY_PATH).toMatch(/asc-key\.p8$/)
-    expect(env.KIT_METADATA_SCREENSHOTS).toBeUndefined()
+    expect(env.KIT_METADATA_SCREENSHOTS).toBe('0')
     expect(read(`${IOS_DIR}/en-US/name.txt`)).toBe('pulled\n')
     // local screenshots are untouched
     expect(same(IOS_SHOT, IPHONE())).toBe(true)
@@ -547,7 +653,7 @@ describe('kit release metadata pull', () => {
     expect(env.KIT_ANDROID_PACKAGE).toBe('app.example')
     expect(env.KIT_PLAY_JSON_KEY).toMatch(/play\.json$/)
     expect(env.KIT_SCREENSHOTS_PATH).toBeUndefined()
-    expect(env.KIT_METADATA_SCREENSHOTS).toBeUndefined()
+    expect(env.KIT_METADATA_SCREENSHOTS).toBe('0')
     expect(read(`${ANDROID_DIR}/en-US/title.txt`)).toBe('pulled\n')
     expect(same(`${ANDROID_DIR}/en-US/images/icon.png`, png(512, 512, true))).toBe(true)
   })
@@ -562,6 +668,19 @@ describe('kit release metadata pull', () => {
     })
     expect(lanes()[0]!.env.KIT_METADATA_SCREENSHOTS).toBe('1')
     expect(read(`${ANDROID_DIR}/en-US/images/icon.png`)).toBe('pulled\n')
+  })
+
+  test('a text pull stays a text pull with KIT_METADATA_SCREENSHOTS=1 inherited', async () => {
+    const hostile = { KIT_METADATA_SCREENSHOTS: '1', KIT_METADATA_TEXT: '0' }
+    for (const platform of ['ios', 'android']) {
+      const r = await run(['release', 'metadata', 'pull', platform, '--json'], hostile)
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout).screenshots).toBe(false)
+    }
+    expect(lanes().map((c) => c.env.KIT_METADATA_SCREENSHOTS)).toEqual(['0', '0'])
+    // the local images are as they were: the fake lanes overwrite them when the switch is on
+    expect(same(IOS_SHOT, IPHONE())).toBe(true)
+    expect(same(`${ANDROID_DIR}/en-US/images/icon.png`, png(512, 512, true))).toBe(true)
   })
 
   test('the dirty check covers only what the pull writes', async () => {

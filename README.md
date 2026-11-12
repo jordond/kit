@@ -727,11 +727,35 @@ release: {
 `--only-screenshots` uploads the images alone: no text is sent, none has to exist in the repo, and the
 store keeps the text it has. Use it after `kit shots export`.
 
+One thing is still added on iOS: deliver creates a version localization for every local screenshot
+locale the version being prepared lacks. `--only-screenshots` with a new `fr-FR/` directory adds a
+fr-FR locale to that version with no text in it; fill it in App Store Connect or with a text push
+before submitting.
+
 ```sh
 kit release metadata push ios --only-screenshots --dry-run   # check the images, upload nothing
 kit release metadata push ios --only-screenshots
 kit release metadata push android --screenshots --yes
 ```
+
+kit finds the images the way fastlane does, so what it checks, lists and counts is what goes up:
+
+| Store | Uploaded | Not uploaded |
+| --- | --- | --- |
+| App Store (deliver) | The `.png`, `.jpg` and `.jpeg` files directly in `screenshots/<locale>/`, and in `screenshots/appleTV/<locale>/` and `screenshots/iMessage/<locale>/` | Files at the root of `screenshots/`, in deeper directories, and in `fonts/`, `android/` and `review_information/`. In a locale directory with a `*_framed` file, every file whose path names neither "framed" nor "watch" |
+| Google Play (supply) | `<locale>/images/featureGraphic.<ext>`, `icon.<ext>` and `tvBanner.<ext>`, and the files directly in `<locale>/images/phoneScreenshots/`, `sevenInchScreenshots/`, `tenInchScreenshots/`, `tvScreenshots/` and `wearScreenshots/` | Any other file or directory under `<locale>/images/` |
+
+Every other directory in `screenshots/` must be named after an App Store locale, in any case. The
+names are deliver's list in the pinned fastlane: `ar-SA`, `bn-BD`, `ca`, `cs`, `da`, `de-DE`, `el`,
+`en-AU`, `en-CA`, `en-GB`, `en-US`, `es-ES`, `es-MX`, `fi`, `fr-CA`, `fr-FR`, `gu-IN`, `he`, `hi`, `hr`,
+`hu`, `id`, `it`, `ja`, `kn-IN`, `ko`, `ml-IN`, `mr-IN`, `ms`, `nl-NL`, `no`, `or-IN`, `pa-IN`, `pl`,
+`pt-BR`, `pt-PT`, `ro`, `ru`, `sk`, `sl-SI`, `sv`, `ta-IN`, `te-IN`, `th`, `tr`, `uk`, `ur-PK`, `vi`,
+`zh-Hans`, `zh-Hant`. Two layouts stop the push with exit 4, because deliver would fail on them, the
+second one after deleting the store's screenshots:
+
+- a directory with another name, such as `screenshots/en/`;
+- `screenshots/default/`, or `default`, `appleTV` or `iMessage` inside `appleTV/` or `iMessage/`:
+  deliver reads its files with no locale.
 
 Before the confirmation (and in `--dry-run`) kit reads every image it is about to upload. If the store
 would refuse any of them, the push stops with exit 4 and lists each file with its reason; nothing is
@@ -740,12 +764,14 @@ uploaded and kit never rewrites the files.
 | Store | Rule |
 | --- | --- |
 | Both | The file is a PNG or JPEG and its content matches its extension; no alpha channel |
-| App Store | The pixel size is one App Store Connect takes; at most 10 screenshots per locale and display type |
+| App Store | The pixel size is one App Store Connect takes; at most 10 screenshots per locale and display type. A file in `iMessage/<locale>/` is an iMessage display type: its own count, and no Mac, Watch, Apple TV or Vision Pro sizes |
 | Google Play screenshots | Each side 320 to 3840 px; the long side at most twice the short side; at most 8 per type and locale. Fewer than 2 phone screenshots is a warning |
-| Google Play images | `featureGraphic` is exactly 1024x500 with no alpha; `icon` is 512x512 and at most 1024 KB (alpha allowed) |
+| Google Play images | `featureGraphic` is exactly 1024x500 and `tvBanner` exactly 1280x720, both with no alpha; `icon` is 512x512 and at most 1024 KB (alpha allowed) |
 
 The confirmation shows, per locale and class, how many images go up and at what size. With `--json`
-the document carries `images` (`file`, `locale`, `class`, `width`, `height`) and `problems`.
+the document carries `files` (what goes up), `images` (`file`, `locale`, `class`, `width`, `height`
+for each image that could be read), `problems` (what stopped the push) and `warnings` (what did not,
+such as a single Play phone screenshot); the last three are empty arrays on a text-only push.
 
 **An iOS screenshot push replaces whole locales.** For each locale that has local screenshots, every
 screenshot set of that locale is deleted from the App Store before the new ones upload, including

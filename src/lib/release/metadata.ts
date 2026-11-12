@@ -11,7 +11,13 @@ import { runPiped } from '../proc'
 import { confirm } from '../prompt'
 import { runSteps, type StepResult, summarize } from '../steps'
 import { appleCreds, onGitHubActions, playCreds } from './creds'
-import { checkListingImages, imageLocales, imageSummary } from './listing-images'
+import {
+  checkListingImages,
+  type ImagePreflight,
+  imageLocales,
+  imageSummary,
+  listingImageFiles,
+} from './listing-images'
 import { laneConfigEnv, laneStep, type Platform } from './mobile'
 
 /**
@@ -26,7 +32,6 @@ export type MetadataAction = 'pull' | 'push'
 
 export const PLATFORMS = ['ios', 'android'] as const
 
-const IMAGE = /\.(png|jpe?g)$/i
 /** supply's AVAILABLE_METADATA_FIELDS; `changelogs/` is left to `kit release android`. */
 const PLAY_FIELDS = ['title', 'short_description', 'full_description', 'video']
 /** supply's dir inside a shared `fastlane/metadata`; deliver skips it too. */
@@ -47,7 +52,7 @@ export interface MetadataDirs {
 export interface ListingFiles {
   /** Listing text files, absolute, sorted. */
   text: string[]
-  /** Screenshots (and, on Play, the feature graphic and icons), absolute, sorted. */
+  /** The images the uploader would take (`listingImageFiles`), absolute, in upload order. */
   images: string[]
 }
 
@@ -97,8 +102,6 @@ function walk(
   return out
 }
 
-const isImage = (f: string) => IMAGE.test(f)
-
 /** The listing files on disk for a platform. */
 export function listingFiles(platform: Platform, dirs: MetadataDirs): ListingFiles {
   if (platform === 'ios') {
@@ -108,11 +111,13 @@ export function listingFiles(platform: Platform, dirs: MetadataDirs): ListingFil
         (f) => f.endsWith('.txt'),
         (e, depth) => depth === 0 && (e === SUPPLY_DIR || e === REVIEW_DIR),
       ),
-      images: dirs.screenshotsDir ? walk(dirs.screenshotsDir, isImage) : [],
+      images: dirs.screenshotsDir
+        ? listingImageFiles('ios', dirs.screenshotsDir).files.map((f) => f.path)
+        : [],
     }
   }
   const text: string[] = []
-  const images: string[] = []
+  const images = listingImageFiles('android', dirs.dir).files.map((f) => f.path)
   if (!existsSync(dirs.dir)) return { text, images }
   for (const locale of readdirSync(dirs.dir).sort()) {
     const base = join(dirs.dir, locale)
@@ -121,7 +126,6 @@ export function listingFiles(platform: Platform, dirs: MetadataDirs): ListingFil
       const file = join(base, `${field}.txt`)
       if (existsSync(file)) text.push(file)
     }
-    images.push(...walk(join(base, 'images'), isImage))
   }
   return { text, images }
 }
@@ -226,6 +230,14 @@ function laneEnv(
 
 type Ctx = Pick<KitContext, 'root' | 'config' | 'flags' | 'log'>
 
+/**
+ * The two switches of the listing lanes, always both and always explicit: a lane inherits kit's
+ * environment, so one left unset would be read from the shell or a root `.env`.
+ */
+function partsEnv(text: boolean, screenshots: boolean): Record<string, string> {
+  return { KIT_METADATA_TEXT: text ? '1' : '0', KIT_METADATA_SCREENSHOTS: screenshots ? '1' : '0' }
+}
+
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /**
@@ -269,10 +281,7 @@ export async function pullMetadata(
   }
   requireBundle()
   const appRoot = appFastlaneDir(root, config)
-  const env = {
-    ...laneEnv(root, config, platform, dirs),
-    ...(screenshots ? { KIT_METADATA_SCREENSHOTS: '1' } : {}),
-  }
+  const env = { ...laneEnv(root, config, platform, dirs), ...partsEnv(true, screenshots) }
   let results: StepResult[]
   try {
     results = await runSteps(
@@ -318,16 +327,22 @@ export async function pushMetadata(
       ExitCode.usage,
     )
   }
-  const plan = pushPlan(root, platform, dirs, screenshots, withText)
-  if (withText && !plan.text.length) {
+  const { text } = pushPlan(root, platform, dirs, false, withText)
+  if (withText && !text.length) {
     throw new KitError(
       `No listing text in ${shown}`,
       `Fill it with \`kit release metadata pull ${platform}\``,
       ExitCode.precondition,
     )
   }
+  // One enumeration, the uploader's: the file list, the card, the JSON and the counts all read it.
+  const preflight: ImagePreflight = screenshots
+    ? checkListingImages(platform, root, dirs.screenshotsDir ?? dirs.dir)
+    : { files: [], images: [], problems: [], warnings: [] }
+  const { images, problems, warnings } = preflight
+  const plan = { text, images: preflight.files, files: [...text, ...preflight.files] }
   // An image push replaces what the store has, so an empty set would clear the listing's screenshots.
-  if (screenshots && !plan.images.length) {
+  if (screenshots && !plan.images.length && !problems.length) {
     const where = dirs.screenshotsDir ? relative(root, dirs.screenshotsDir) : `${shown}/<locale>/images`
     throw new KitError(
       `${withText ? '--screenshots' : '--only-screenshots'}: no images in ${where}`,
@@ -338,12 +353,6 @@ export async function pushMetadata(
     )
   }
   const id = storeId(config, platform)
-  const { images, problems, warnings } = checkListingImages(
-    platform,
-    root,
-    dirs.screenshotsDir ?? dirs.dir,
-    plan.images,
-  )
   const base = {
     platform,
     action: 'push' as const,
@@ -352,6 +361,7 @@ export async function pushMetadata(
     files: plan.files,
     images,
     problems,
+    warnings,
   }
   // The store refuses these, and deliver has deleted the old screenshots by the time it finds out.
   if (problems.length) {
@@ -362,7 +372,7 @@ export async function pushMetadata(
     }
     throw new KitError(
       `${STORE[platform]} would refuse these images:\n${problems.map((p) => `    ${p}`).join('\n')}`,
-      'Fix the files and push again: kit does not rewrite them',
+      'Fix the files and push again: kit does not rewrite or move them',
       ExitCode.precondition,
     )
   }
@@ -389,11 +399,7 @@ export async function pushMetadata(
   }
   requireBundle()
   const appRoot = appFastlaneDir(root, config)
-  const env = {
-    ...laneEnv(root, config, platform, dirs),
-    ...(screenshots ? { KIT_METADATA_SCREENSHOTS: '1' } : {}),
-    ...(withText ? {} : { KIT_METADATA_TEXT: '0' }),
-  }
+  const env = { ...laneEnv(root, config, platform, dirs), ...partsEnv(withText, screenshots) }
   if (!flags.json) {
     process.stderr.write(
       `\n${pc.bold(`${config.name} ${platform} listing → ${STORE[platform]} (${id})`)}\n${pc.dim(plan.files.map((f) => `  ${f}`).join('\n'))}\n${card.map((l) => `  ${l}\n`).join('')}\n`,

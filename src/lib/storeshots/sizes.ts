@@ -173,8 +173,32 @@ export const APPLE_SIZES = {
   APP_APPLE_VISION_PRO: [[3840, 2160]],
 } as const satisfies Record<string, readonly (readonly [number, number])[]>
 
+/** A display type of an app's own screenshots: a key of `APPLE_SIZES`. */
+type AppleAppClass = keyof typeof APPLE_SIZES
+
+/**
+ * Display types of an iMessage app's screenshots, each with the app display type whose sizes it
+ * takes: a copy of `DEVICE_RESOLUTIONS_MESSAGES` in the pinned fastlane gem (2.241.2,
+ * `deliver/lib/deliver/app_screenshot.rb`), in its order. deliver reads this table, not
+ * `APPLE_SIZES`, for a file in `iMessage/<locale>/`. Update it when `fastlane/Gemfile.lock` moves.
+ */
+export const APPLE_MESSAGES_CLASSES = {
+  IMESSAGE_APP_IPHONE_40: 'APP_IPHONE_40',
+  IMESSAGE_APP_IPHONE_47: 'APP_IPHONE_47',
+  IMESSAGE_APP_IPHONE_55: 'APP_IPHONE_55',
+  IMESSAGE_APP_IPHONE_58: 'APP_IPHONE_58',
+  IMESSAGE_APP_IPHONE_61: 'APP_IPHONE_61',
+  IMESSAGE_APP_IPHONE_65: 'APP_IPHONE_65',
+  IMESSAGE_APP_IPHONE_67: 'APP_IPHONE_67',
+  IMESSAGE_APP_IPAD_97: 'APP_IPAD_97',
+  IMESSAGE_APP_IPAD_105: 'APP_IPAD_105',
+  IMESSAGE_APP_IPAD_PRO_3GEN_11: 'APP_IPAD_PRO_3GEN_11',
+  IMESSAGE_APP_IPAD_PRO_129: 'APP_IPAD_PRO_129',
+  IMESSAGE_APP_IPAD_PRO_3GEN_129: 'APP_IPAD_PRO_3GEN_129',
+} as const satisfies Record<string, AppleAppClass>
+
 /** An App Store Connect display type: the screenshot set an image lands in. */
-export type AppleClass = keyof typeof APPLE_SIZES
+export type AppleClass = AppleAppClass | keyof typeof APPLE_MESSAGES_CLASSES
 
 /** The display type each Apple set id is uploaded as. */
 export const APPLE_SET_CLASS: Record<Exclude<SetId, 'phone'>, AppleClass> = {
@@ -188,14 +212,22 @@ export const APPLE_SET_CLASS: Record<Exclude<SetId, 'phone'>, AppleClass> = {
  * The display type deliver gives an image of this pixel size, or undefined when App Store Connect
  * takes no such size. Orientation matters: the table lists each one it accepts.
  *
- * Two sizes are in two classes; deliver decides from the path, so pass it when there is one:
- * 2048x2732 is `APP_IPAD_PRO_3GEN_129` unless the path names `app_ipad_pro_129` or a
- * "12.9 … 2nd generation" dir, and 3840x2160 is `APP_APPLE_TV` unless the path contains "vision".
+ * deliver also reads the path, so pass it when there is one:
+ * - a file in `iMessage/<locale>/` (the third path component from the end is exactly `iMessage`)
+ *   gets an `IMESSAGE_*` type, from the smaller messages table;
+ * - 2048x2732 is in two classes: the 3rd generation one unless the path names `app_ipad_pro_129`
+ *   or a "12.9 … 2nd generation" dir;
+ * - 3840x2160 is `APP_APPLE_TV` unless the path contains "vision".
  */
 export function appleClass(width: number, height: number, path?: string): AppleClass | undefined {
-  const match = (Object.keys(APPLE_SIZES) as AppleClass[]).find((c) =>
-    APPLE_SIZES[c].some(([w, h]) => w === width && h === height),
-  )
+  const has = (c: AppleAppClass) => APPLE_SIZES[c].some(([w, h]) => w === width && h === height)
+  // deliver: Pathname#each_filename, [-3].
+  const messages = path?.split('/').filter(Boolean).at(-3) === 'iMessage'
+  const match = messages
+    ? (Object.keys(APPLE_MESSAGES_CLASSES) as (keyof typeof APPLE_MESSAGES_CLASSES)[]).find((c) =>
+        has(APPLE_MESSAGES_CLASSES[c]),
+      )
+    : (Object.keys(APPLE_SIZES) as AppleAppClass[]).find(has)
   if (!match) return undefined
   const lower = path?.toLowerCase() ?? ''
   const long = Math.max(width, height)
@@ -203,6 +235,7 @@ export function appleClass(width: number, height: number, path?: string): AppleC
   if (long === 2732 && short === 2048) {
     const secondGen =
       lower.includes('app_ipad_pro_129') || (lower.includes('12.9') && lower.includes('2nd generation'))
+    if (messages) return secondGen ? 'IMESSAGE_APP_IPAD_PRO_129' : 'IMESSAGE_APP_IPAD_PRO_3GEN_129'
     return secondGen ? 'APP_IPAD_PRO_129' : 'APP_IPAD_PRO_3GEN_129'
   }
   if (width === 3840 && height === 2160)
@@ -223,6 +256,8 @@ export const PLAY_MAX_PER_TYPE = 8
 export const PLAY_MIN_PHONE = 2
 /** Play's `featureGraphic`: exactly this size, no alpha. */
 export const PLAY_FEATURE_GRAPHIC: Size = { width: 1024, height: 500 }
+/** Play's `tvBanner`: exactly this size. */
+export const PLAY_TV_BANNER: Size = { width: 1280, height: 720 }
 /** Play's `icon`: exactly this size, at most `PLAY_ICON_MAX_BYTES`; alpha is allowed. */
 export const PLAY_ICON: Size = { width: 512, height: 512 }
 export const PLAY_ICON_MAX_BYTES = 1024 * 1024
