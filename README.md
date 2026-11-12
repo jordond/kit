@@ -312,6 +312,78 @@ do not survive a dump.
 `kit lint` also runs `maestro check-syntax` over the flows, and `kit doctor` checks the Maestro version
 against `maestro.version` and that Java 17+ is there.
 
+### Store screenshots
+
+`kit shots export` turns the raw shots into the images the stores take: each slide of a saved project
+(background, headline, device frame around the raw shot) is drawn by headless Chrome at the store's
+exact size and written into the store listing dirs, ready for `kit release metadata push --screenshots`.
+
+```sh
+kit shots ios && kit shots ipad && kit shots android   # capture the raw shots
+kit shots export                                       # compose them, for both stores and every locale
+kit shots export --store apple --locale en-US
+kit shots export --out build/store-shots --dry-run --json
+kit release metadata push ios --screenshots            # upload (see Store listing)
+```
+
+```ts
+shots: {
+  project: 'brand/studio.json',          // the saved project: slides, text, frames
+  raw: 'brand/screenshots',              // optional: default the shots suite's screenshots dir
+  fonts: [{ family: 'Nunito', file: 'brand/fonts/nunito.woff2', weight: '400 800' }],
+  brand: { mark: 'brand/logo.svg', wordmark: 'brewd', color: '#2c1e14', font: 'Nunito' },
+  sets: { ios: 'iphone-6.9' },           // optional: iphone-6.9 | iphone-6.5 | iphone-6.3
+},
+```
+
+**The project file.** A version 1 project as the screenshot editor saves it: `slides[]`, each with a
+`name`, an `order`, the `sourceFile` of its raw shot (`home.png`), its text, device and background. kit
+ignores the editor's `imageSrc` and `dimensionId`. Every slide is exported for every target: the raw shot
+is `<raw>/<target>/<locale>/<sourceFile>` when that exists, else `<raw>/<target>/<sourceFile>`, and a
+slide framed in an iPhone gets the iPad or Pixel frame on the other targets. An optional `locales` block
+replaces the text per locale and slide id; a field left out keeps the slide's own text, and `fr-CA`
+falls back to another `fr` entry before that:
+
+```json
+"locales": { "fr-FR": { "slide-1": { "headline": "…", "subheadline": "…", "badge": "…" } } }
+```
+
+**Fonts and brand.** Every font family a slide names has to be in `shots.fonts` (the CSS generics
+`sans-serif`, `serif`, `monospace` and `system-ui` aside): Chrome would draw an unknown family in a
+fallback font without complaint, so export stops first (exit 3). `brand` is the lockup drawn on slides
+that show it: the mark, and the wordmark beside it.
+
+**Output.** Locales are, per store, the locale dirs already in that store's metadata dir (`en-US` when
+there are none yet); `--locale` narrows them.
+
+| Store | Target | Size | Written to |
+| --- | --- | --- | --- |
+| apple | ios | 1320x2868 (`iphone-6.9`) | `<release.ios.metadata>/../screenshots/<locale>/NN_iphone-6.9_<slug>.png` |
+| apple | ipad | 2064x2752 (`ipad-13`) | same dir, `NN_ipad-13_<slug>.png` |
+| google | android | 1440x2560 (`phone`) | `<release.android.metadata>/<locale>/images/phoneScreenshots/NN_<slug>.png` |
+
+`NN` is the slide's position and `<slug>` its name. Each dir gets a `.kit-shots.json` listing what
+export wrote. The next export replaces those files and removes the ones it no longer writes; an image
+in the same set that it did not write is in the way (exit 4) until it is moved or `--force` replaces it.
+Play's icon, feature graphic and other screenshot types are never touched. The PNGs have no alpha
+channel, which App Store Connect requires.
+
+| Flag | Meaning |
+| --- | --- |
+| `--store apple\|google\|both` | Default `both`. A store with no `release.<platform>.metadata` is a usage error unless `--out` is given |
+| `--locale <a,b>` | Only these locales |
+| `--out <dir>` | Write `<dir>/apple/<locale>/…` and `<dir>/google/<locale>/images/phoneScreenshots/…` instead of the store dirs |
+| `--allow-missing` | Skip a slide whose raw shot is absent, instead of stopping (exit 4) |
+| `--force` | Replace images in an exported set that kit did not write |
+| `--dry-run` | Print what would be written and removed; Chrome is not started and nothing changes |
+| `--json` | `{ dryRun, stores, written: [{ store, target, set, locale, slide, file, width, height }], removed, skipped }` |
+
+Nothing is written unless every image came back at its exact size: a Chrome that exits, a page error or
+a five-minute timeout is exit 1 with the store dirs as they were. Before Chrome starts, export checks
+that the raw shots, font and brand files are there, that Chrome is, and that no set has more slides
+than its store keeps (10 on the App Store, 8 on Play); each of those is exit 4. Chrome is the installed
+Google Chrome or Chromium (112 or newer), or the binary `KIT_CHROME` names.
+
 ## Repo commands
 
 `.kit/commands/<path>.ts` adds `kit <path>`; the file path is the command path. Keep heavy imports
@@ -359,6 +431,8 @@ export default defineCommand({
 `kit doctor` checks the tools the config needs. Two checks only warn, because they are per-machine setup:
 a repo with `mise.toml` warns when mise isn't installed or a pinned version differs, and a repo with
 `lefthook.yml` warns when lefthook isn't installed or `lefthook install` hasn't been run in the clone.
+
+When the config has a `shots` block, `kit doctor` also checks for Chrome, which `kit shots export` uses to render store screenshots. It warns if Chrome or Chromium is missing or older than 112; install Google Chrome or set `KIT_CHROME` to a Chrome or Chromium binary.
 
 ```sh
 kit doctor --fix             # list the fixes, confirm once, apply, check again
