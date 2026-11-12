@@ -191,6 +191,127 @@ D1/KV data) and the configured iOS project's Xcode DerivedData. It lists every p
 first (`--yes` skips the question); `--json` reports `{ removed: [{ path, bytes }], bytes }`. Symlinks
 and anything that resolves outside the repo root are refused.
 
+## Devices and the debug app
+
+```sh
+kit device list                 # simulators, emulators and phones; booted first
+kit device boot ios             # newest, largest iPhone; created when it does not exist
+kit device boot ipad
+kit device boot android         # newest, largest Pixel AVD; created on a Play image
+kit device statusbar ios        # 9:41, full battery and signal; --clear restores it
+
+kit app build android           # debug build; prints the .apk path
+kit app install ios             # build, then install on the simulator
+kit app run android --device emulator-5554
+kit app install android --file app.aab
+kit app uninstall ios
+kit app clear android           # wipe the app's data, keep it installed
+```
+
+`kit app` and `kit device` take a platform: `ios`, `android`, and for devices `ipad` (the iOS app on an
+iPad simulator). kit owns the device lifecycle with `simctl`, `adb`, `emulator` and `avdmanager`.
+
+**Which device.** `--device <id>` is used as given (a simulator UDID or an adb serial). Without it: the
+one running device; with several up, a picker (`--yes` takes the newest, largest iPhone or iPad, and an
+emulator over a cabled phone); with none, kit offers to boot one, creating it first when needed. Without
+a terminal that question needs `--yes`. `uninstall`, `clear` and `statusbar` never boot a device.
+
+**Which emulator image.** A new AVD gets a Play system image when one is installed, newest API first
+(otherwise `google_apis`, then AOSP). In CI the emulator starts headless.
+`KIT_DEVICE_TIMEOUT_MS` changes the four minutes an emulator boot may take.
+
+**What gets built.** `kit app build <ios|android>` builds the debug variant (`--release` for release)
+and prints the artifact path on stdout:
+
+| | Android | iOS simulator |
+| --- | --- | --- |
+| Gradle | `<module>:assembleDebug` | `xcodebuild -scheme <scheme> -configuration Debug` for the simulator |
+| Kotlin toolchain | `./kotlin build -m <module> -p android -v debug` | `./kotlin build -m <module> -p iosSimulatorArm64 -v debug` |
+
+`kit build <target> --release` is still the signed store build; `kit app build` is for a device.
+
+**Installing.** `kit app install` builds first; `--no-build` installs the newest artifact already there,
+and `--file` installs a given `.apk`, `.app` or `.aab` (an AAB goes through `bundletool`). A physical
+iPhone takes `--device <id> --file <path>` and installs with `devicectl`.
+
+The app comes from `release.*` in kit.config.ts. Set `app` only when it differs, or when the repo has no
+release block:
+
+```ts
+app: {
+  ios: { bundleId: 'app.example', project: 'ios/iosApp.xcodeproj', scheme: 'iosApp' },
+  android: { packageName: 'app.example', module: ':android' },
+},
+```
+
+`kit doctor` adds three checks for a repo with a mobile app, all warnings: `adb`, the Android emulator
+(emulator, `avdmanager`, a system image for this machine) and an installed iOS simulator runtime.
+
+## Maestro: QA and screenshots
+
+The repo writes [Maestro](https://maestro.dev) flows; kit does the rest: device, build, install,
+status bar, fixture, the runs, and collecting the screenshots.
+
+```sh
+kit qa ios                      # build, install, load the fixture, run the smoke flows
+kit qa android --device emulator-5554 --junit report.xml
+kit qa ios --no-build --tags smoke,settings
+kit shots ios                   # 9:41 status bar, fixture, flows, PNGs copied out
+kit shots ipad --full           # the shots-full suite
+kit fixture load ios portland   # replay app state onto the device
+kit fixture dump android portland
+kit maestro studio              # the Maestro CLI itself
+```
+
+```ts
+maestro: {
+  dir: 'apps/client/maestro',            // config.yaml and the flows
+  version: '2.9.0',                      // kit doctor compares it; CI installs it
+  devices: { ios: 'iPhone 17 Pro Max' }, // optional: what to boot when nothing is running
+  suites: {
+    qa: { tags: ['smoke'], fixture: 'portland' },
+    shots: { tags: ['appstore'], fixture: 'portland', screenshots: 'brand/screenshots' },
+    'shots-full': { extends: 'shots', stages: [['appstore', 'appstore-full'], ['appstore-onboarding']] },
+  },
+},
+fixtures: {
+  dir: 'apps/client/fixtures',           // one dir per fixture
+  files: [
+    { from: 'app_database.db', ios: 'Documents/databases/', android: 'databases/', sqlite: true },
+    { from: 'entry_photos/', ios: 'Documents/entry_photos/', android: 'files/entry_photos/' },
+  ],
+  clear: { ios: ['Library/Caches'], android: ['cache', 'code_cache'] },
+  prepare: 'apps/client/fixtures/rebase.sh',
+},
+```
+
+**Suites.** `kit qa` runs the `qa` suite (default: tags `smoke`), `kit shots` the `shots` suite (default:
+tags `screenshots`, status bar pinned, PNGs to `<maestro.dir>/screenshots/<target>/`), `kit shots --full`
+the `shots-full` suite, and `--suite <name>` any other. A suite has `tags` (one Maestro run) or `stages`
+(one run per tag set, in order). Stages exist because Maestro's own `executionOrder` breaks under tag
+filters: a flow that wipes app state belongs in a last stage of its own. Flows get `PLATFORM=ios|android`
+plus the suite's `env`.
+
+**The run.** One device is resolved first (see Devices above), then everything lands on it: the debug
+build and install (`--no-build` drives what is installed), the 9:41 status bar when the suite asks, the
+fixture (`--fixture <name>`, `--no-fixture`), then each stage. A failing stage stops the run and exits 1. The status bar stays pinned afterwards
+(`kit device statusbar <target> --clear`).
+Screenshots are the flows' `takeScreenshot` PNGs: a shot replaces the file of the same name and leaves the
+rest. Maestro's logs stay under `<maestro.dir>/output/<target>-<suite>/`. Maestro drives simulators and
+Android devices, not physical iPhones.
+
+**Fixtures.** `<fixtures.dir>/<name>/` holds the files listed in `fixtures.files`; `ios` and `android`
+are destination dirs inside the simulator's data container and the app's data dir. Loading stops the
+app, replaces each destination (a stale file is never left over), and removes the `clear` dirs. `prepare`
+runs on a staged copy first, with `KIT_FIXTURE`, `KIT_FIXTURE_DIR`, `KIT_PLATFORM` and `KIT_ROOT` set: the
+place to rebase dates so an old capture reads as current. Android goes through `run-as`, so the installed
+build must be debuggable (`kit app install android` installs one); a rooted adb is the fallback for load. `kit fixture dump` captures the same
+files back, checkpoints SQLite WALs, and replaces the whole fixture dir only when the capture succeeded: files not listed in `fixtures.files`
+do not survive a dump.
+
+`kit lint` also runs `maestro check-syntax` over the flows, and `kit doctor` checks the Maestro version
+against `maestro.version` and that Java 17+ is there.
+
 ## Repo commands
 
 `.kit/commands/<path>.ts` adds `kit <path>`; the file path is the command path. Keep heavy imports

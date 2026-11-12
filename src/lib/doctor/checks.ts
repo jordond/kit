@@ -1,5 +1,6 @@
 import type { KitConfig } from '../../config/schema'
 import { dotenvAmbiguities } from '../dotenv'
+import { maestroInstallHint } from '../maestro/bin'
 import { wrapperVersion } from '../toolchain'
 import type { Fix } from './fixes'
 
@@ -108,6 +109,112 @@ export function checkAndroidSdk(
     }
   }
   return { id: 'android-sdk', label: 'Android SDK', status: 'ok', detail: dir }
+}
+
+/** What Maestro itself needs; MIN_JAVA is kit's own (Gradle) floor. */
+export const MAESTRO_MIN_JAVA = 17
+
+/** `maestro --version` prints the bare version; tolerate warnings or banners around it. */
+export function parseMaestroVersion(output: string): string | undefined {
+  return output.match(/^\s*v?(\d+\.\d+\.\d+\S*)\s*$/m)?.[1] ?? output.match(/\b(\d+\.\d+\.\d+)\b/)?.[1]
+}
+
+/** Maestro for `kit qa`, `kit shots` and the flow lint: a warning, since a release never needs it. */
+export function checkMaestro(probe: Probe, pinned: string | undefined): Check {
+  const base = { id: 'maestro', label: 'maestro' }
+  if (probe?.code !== 0) {
+    return { ...base, status: 'warn', detail: 'not found', hint: maestroInstallHint(pinned) }
+  }
+  const version = parseMaestroVersion(probe.output)
+  if (version === undefined) return { ...base, status: 'warn', detail: 'unknown version' }
+  if (pinned !== undefined && pinned !== version) {
+    return {
+      ...base,
+      status: 'warn',
+      detail: `${version} (config pins ${pinned})`,
+      hint: maestroInstallHint(pinned),
+    }
+  }
+  return { ...base, status: 'ok', detail: version }
+}
+
+/**
+ * Maestro runs on the JVM and needs 17+. `java` is the existing java check's result: when that
+ * already fails (a Gradle repo with no usable JDK) the problem is reported once, there.
+ */
+export function checkMaestroJava(probe: Probe, java: Check): Check | undefined {
+  const base = { id: 'maestro-java', label: 'java for maestro' }
+  const hint = `Install JDK ${MAESTRO_MIN_JAVA}+ (e.g. \`mise use java@${MIN_JAVA}\`)`
+  const version = probe?.code === 0 ? parseJavaVersion(probe.output) : undefined
+  const major = Number(version?.split(/[.+-]/)[0])
+  if (version !== undefined && major >= MAESTRO_MIN_JAVA) return { ...base, status: 'ok', detail: version }
+  if (java.status === 'fail') return undefined
+  const detail = version === undefined ? 'not found' : `${version} (need ${MAESTRO_MIN_JAVA}+)`
+  return { ...base, status: 'warn', detail, hint }
+}
+
+/** adb for `kit app install` and `kit device`: only a warning, a release never needs it. */
+export function checkAdb(path: string | undefined): Check {
+  if (path) return { id: 'adb', label: 'adb', status: 'ok', detail: path }
+  return missing(
+    'adb',
+    'adb',
+    false,
+    'Install Android SDK platform-tools (`sdkmanager platform-tools`, or `brew install android-platform-tools`)',
+  )
+}
+
+/** What `kit device boot android` needs to create and boot an emulator. */
+export function checkEmulator(found: {
+  emulator: boolean
+  avdmanager: boolean
+  /** A phone system image for the host ABI, as an sdkmanager package; undefined when none is installed. */
+  image: string | undefined
+  abi: string
+}): Check {
+  const base = { id: 'emulator', label: 'Android emulator' }
+  const lacking = [
+    ...(found.emulator ? [] : ['emulator']),
+    ...(found.avdmanager ? [] : ['cmdline-tools (avdmanager)']),
+    ...(found.image ? [] : [`a ${found.abi} system image`]),
+  ]
+  if (!lacking.length) return { ...base, status: 'ok', detail: found.image }
+  const packages = [
+    ...(found.emulator ? [] : ['emulator']),
+    ...(found.avdmanager ? [] : ['"cmdline-tools;latest"']),
+    ...(found.image ? [] : [`"system-images;android-36;google_apis_playstore;${found.abi}"`]),
+  ]
+  return {
+    ...base,
+    status: 'warn',
+    detail: `missing ${lacking.join(', ')}`,
+    hint: `sdkmanager ${packages.join(' ')} (a connected phone works without it)`,
+  }
+}
+
+/** `xcrun simctl list runtimes -j`: the newest installed iOS simulator runtime. */
+export function checkSimulator(probe: Probe, platform: string): Check {
+  const base = { id: 'simulator', label: 'iOS simulator' }
+  if (platform !== 'darwin') return { ...base, status: 'skip', detail: 'macOS only' }
+  const hint = 'Xcode ▸ Settings ▸ Components, or `xcodebuild -downloadPlatform iOS`'
+  if (probe?.code !== 0) return { ...base, status: 'warn', detail: 'simctl not available', hint }
+  let versions: string[] = []
+  try {
+    // runQuiet joins stderr after stdout: parse the JSON object only.
+    const json = probe.output.slice(probe.output.indexOf('{'), probe.output.lastIndexOf('}') + 1)
+    const { runtimes = [] } = JSON.parse(json) as {
+      runtimes?: { identifier?: string; version?: string; isAvailable?: boolean }[]
+    }
+    versions = runtimes
+      .filter((r) => r.isAvailable !== false && /SimRuntime\.iOS-/.test(r.identifier ?? ''))
+      .map((r) => r.version ?? '')
+      .filter(Boolean)
+  } catch {
+    return { ...base, status: 'warn', detail: 'unreadable simctl output', hint }
+  }
+  if (!versions.length) return { ...base, status: 'warn', detail: 'no iOS runtime installed', hint }
+  const newest = versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1)
+  return { ...base, status: 'ok', detail: `iOS ${newest}` }
 }
 
 /** `wrangler whoami`; undefined when the repo has no worker target. */

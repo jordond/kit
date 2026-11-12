@@ -2,6 +2,9 @@ import { accessSync, constants, existsSync, readdirSync, readFileSync } from 'no
 import { dirname, join, relative, resolve } from 'node:path'
 import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
+import { androidSdkDir, findSdkTool, hostAbi, installedSystemImages, SDK_TOOLS } from '../devices'
+import { preferredSystemImage, systemImagePackage } from '../devices/pick'
+import { findMaestro } from '../maestro/bin'
 import { detectPackageManager, installRoot, pmExec } from '../pm'
 import { runQuiet } from '../proc'
 import { onGitHubActions, releaseSecrets, renameHints } from '../release/creds'
@@ -10,19 +13,24 @@ import { parseToml, readToml } from '../toml'
 import {
   type Check,
   catalogPath,
+  checkAdb,
   checkAndroidSdk,
   checkAndroidVersion,
   checkBun,
   checkCatalogKeys,
   checkCiPin,
+  checkEmulator,
   checkEnvFile,
   checkIosVersion,
   checkJava,
   checkKtlint,
   checkLefthook,
+  checkMaestro,
+  checkMaestroJava,
   checkMise,
   checkReleaseSecrets,
   checkRuby,
+  checkSimulator,
   checkToolchain,
   checkUnreadable,
   checkWranglerLogin,
@@ -95,6 +103,9 @@ export function doctorEntries(
   const wrapperPath = toolchainRoot === undefined ? undefined : join(root, toolchainRoot, 'kotlin')
   const ios = !!config?.release?.ios
   const fastlane = ios || !!config?.release?.android
+  // `kit app` and `kit device` drive these apps; adb, an emulator and a simulator are theirs alone.
+  const iosDevice = ios || !!config?.app?.ios
+  const androidDevice = !!config?.release?.android || !!config?.app?.android
   const worker = targets.find((t) => t.kind === 'worker')
   // kotlin targets lint and format with ktlint unless both verbs are overridden or off.
   const ktlintUsed = targets.some(
@@ -216,6 +227,56 @@ export function doctorEntries(
           existsSync,
           gradle,
         ),
+    },
+    {
+      id: 'adb',
+      run: () =>
+        config && androidDevice
+          ? checkAdb(findSdkTool({ root, config }, 'adb', ...SDK_TOOLS.adb))
+          : undefined,
+    },
+    {
+      id: 'emulator',
+      run: () => {
+        if (!config || !androidDevice) return undefined
+        const env = { root, config }
+        const image = preferredSystemImage(installedSystemImages(androidSdkDir(root, config)), hostAbi())
+        return checkEmulator({
+          emulator: !!findSdkTool(env, 'emulator', ...SDK_TOOLS.emulator),
+          avdmanager: !!findSdkTool(env, 'avdmanager', ...SDK_TOOLS.avdmanager),
+          image: image && systemImagePackage(image),
+          abi: hostAbi(),
+        })
+      },
+    },
+    {
+      id: 'simulator',
+      run: async () =>
+        iosDevice
+          ? checkSimulator(
+              process.platform === 'darwin'
+                ? await probe(['xcrun', 'simctl', 'list', 'runtimes', '-j'])
+                : undefined,
+              process.platform,
+            )
+          : undefined,
+    },
+    {
+      id: 'maestro',
+      run: async () => {
+        if (!config?.maestro) return undefined
+        const bin = findMaestro()
+        // The installer puts maestro in ~/.maestro/bin, which a non-interactive shell may not have on PATH.
+        return checkMaestro(
+          bin ? await runQuiet([bin, '--version'], { cwd: root }).catch(() => undefined) : undefined,
+          config.maestro.version,
+        )
+      },
+    },
+    {
+      id: 'maestro-java',
+      run: async () =>
+        config?.maestro ? checkMaestroJava(await java(), checkJava(await java(), gradle)) : undefined,
     },
     { id: 'toolchain', run: () => (toolchainRoot !== undefined ? toolchain() : undefined) },
     {

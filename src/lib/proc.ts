@@ -63,6 +63,29 @@ export async function runToStderr(cmd: readonly string[], opts: RunOptions = {})
   return await proc.exited
 }
 
+/**
+ * Start a child that outlives kit (an Android emulator): its own process group, no terminal, output
+ * appended to `logFile`, not tracked for cleanup. The caller watches `exitCode` for an early death.
+ */
+export function spawnDetached(
+  cmd: readonly string[],
+  logFile: string,
+  opts: RunOptions = {},
+): Bun.Subprocess {
+  if (!cmd.length) throw new Error('proc: empty command')
+  const out = Bun.file(logFile)
+  const proc = Bun.spawn([...cmd], {
+    cwd: opts.cwd ?? '.',
+    env: childEnv(opts.env),
+    stdin: 'ignore',
+    stdout: out,
+    stderr: out,
+    detached: true,
+  })
+  proc.unref()
+  return proc
+}
+
 /** Like `run`, but throws on a non-zero exit. */
 export async function runOrThrow(cmd: readonly string[], opts: RunOptions = {}): Promise<void> {
   const code = await run(cmd, opts)

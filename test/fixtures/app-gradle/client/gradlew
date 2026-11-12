@@ -1,0 +1,9 @@
+#!/bin/sh
+# Fake Gradle wrapper: records the call and writes the APK `assembleDebug` / `assembleRelease` leave.
+echo "gradlew $*" >> "${KIT_TEST_LOG:-/dev/null}"
+case "$*" in
+  *assembleRelease*) variant=release ;;
+  *) variant=debug ;;
+esac
+mkdir -p "android/build/outputs/apk/$variant"
+echo apk > "android/build/outputs/apk/$variant/app-$variant.apk"

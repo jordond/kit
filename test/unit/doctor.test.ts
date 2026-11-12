@@ -2,13 +2,18 @@ import { describe, expect, test } from 'bun:test'
 import {
   CATALOG_KEYS,
   catalogPath,
+  checkAdb,
   checkAndroidSdk,
   checkCatalogKeys,
   checkCiPin,
+  checkEmulator,
   checkEnvFile,
   checkJava,
+  checkMaestro,
+  checkMaestroJava,
   checkMise,
   checkRuby,
+  checkSimulator,
   checkUnreadable,
   checkWranglerLogin,
   checkXcode,
@@ -208,5 +213,95 @@ describe('catalog keys (§13.5)', () => {
 
   test('a missing catalog fails', () => {
     expect(checkCatalogKeys('c.toml', undefined)).toMatchObject({ status: 'fail', detail: 'c.toml missing' })
+  })
+})
+
+describe('devices', () => {
+  test('adb: found is ok; missing only warns', () => {
+    expect(checkAdb('/sdk/platform-tools/adb')).toMatchObject({
+      status: 'ok',
+      detail: '/sdk/platform-tools/adb',
+    })
+    expect(checkAdb(undefined)).toMatchObject({ id: 'adb', status: 'warn' })
+  })
+
+  test('emulator: names each missing piece and the sdkmanager packages', () => {
+    const image = 'system-images;android-36;google_apis;arm64-v8a'
+    expect(checkEmulator({ emulator: true, avdmanager: true, image, abi: 'arm64-v8a' })).toMatchObject({
+      status: 'ok',
+      detail: image,
+    })
+    const c = checkEmulator({ emulator: true, avdmanager: false, image: undefined, abi: 'x86_64' })
+    expect(c.status).toBe('warn')
+    expect(c.detail).toBe('missing cmdline-tools (avdmanager), a x86_64 system image')
+    expect(c.hint).toContain('"cmdline-tools;latest" "system-images;android-36;google_apis_playstore;x86_64"')
+    expect(c.hint).not.toContain('sdkmanager emulator')
+  })
+
+  test('simulator: newest available iOS runtime; none warns; skipped off macOS', () => {
+    const runtimes = (list: object[]) => ({ code: 0, output: JSON.stringify({ runtimes: list }) })
+    const ios = (version: string, isAvailable = true) => ({
+      identifier: `com.apple.CoreSimulator.SimRuntime.iOS-${version.replace('.', '-')}`,
+      version,
+      isAvailable,
+    })
+    expect(checkSimulator(runtimes([ios('18.6'), ios('26.1'), ios('27.0', false)]), 'darwin')).toMatchObject({
+      status: 'ok',
+      detail: 'iOS 26.1',
+    })
+    const watch = { identifier: 'com.apple.CoreSimulator.SimRuntime.watchOS-26-0', version: '26.0' }
+    expect(checkSimulator(runtimes([watch]), 'darwin')).toMatchObject({
+      status: 'warn',
+      detail: 'no iOS runtime installed',
+    })
+    expect(checkSimulator({ code: 0, output: 'not json' }, 'darwin').status).toBe('warn')
+    expect(checkSimulator(undefined, 'darwin').status).toBe('warn')
+    expect(checkSimulator(undefined, 'linux').status).toBe('skip')
+  })
+})
+
+describe('maestro', () => {
+  test('not installed warns with the install hint, pinned version included', () => {
+    expect(checkMaestro(undefined, undefined)).toMatchObject({
+      id: 'maestro',
+      status: 'warn',
+      detail: 'not found',
+      hint: 'curl -Ls https://get.maestro.mobile.dev | bash',
+    })
+    expect(checkMaestro(undefined, '2.9.0').hint).toBe(
+      'MAESTRO_VERSION=2.9.0 curl -Ls https://get.maestro.mobile.dev | bash',
+    )
+  })
+
+  test('a version that differs from the pin warns; a match or no pin is ok', () => {
+    expect(checkMaestro(out('2.9.0\n'), '2.12.1')).toMatchObject({
+      status: 'warn',
+      detail: '2.9.0 (config pins 2.12.1)',
+    })
+    expect(checkMaestro(out('2.9.0\n'), '2.9.0')).toMatchObject({ status: 'ok', detail: '2.9.0' })
+    expect(checkMaestro(out('2.9.0\n'), undefined)).toMatchObject({ status: 'ok', detail: '2.9.0' })
+  })
+
+  test('extra output lines around the version are tolerated', () => {
+    expect(checkMaestro(out('Picked up JAVA_TOOL_OPTIONS: -Xmx1g\n2.9.0\n'), undefined).detail).toBe('2.9.0')
+  })
+
+  test('maestro needs java 17+: warns when missing or older, unless the java check already fails', () => {
+    const javaOk = checkJava(out('openjdk version "21.0.2"'), false)
+    expect(
+      checkMaestroJava(out('openjdk version "17.0.1"'), checkJava(out('openjdk version "17.0.1"'), false)),
+    ).toMatchObject({
+      id: 'maestro-java',
+      status: 'ok',
+    })
+    expect(checkMaestroJava(out('openjdk version "11.0.2"'), javaOk)).toMatchObject({
+      status: 'warn',
+      detail: '11.0.2 (need 17+)',
+    })
+    expect(checkMaestroJava(undefined, checkJava(undefined, false))).toMatchObject({
+      status: 'warn',
+      detail: 'not found',
+    })
+    expect(checkMaestroJava(undefined, checkJava(undefined, true))).toBeUndefined()
   })
 })

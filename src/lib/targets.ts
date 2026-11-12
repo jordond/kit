@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import type { CommandValue, Kind, KitConfig, TargetConfig, Verb } from '../config/schema'
 import { ExitCode, KitError } from './errors'
+import { MAESTRO_GROUP, maestroLintGroup } from './maestro/lint'
 import { detectPackageManager, type PackageManager, packageScripts, pmExec, runScript } from './pm'
 import { shell } from './proc'
 import { moduleName } from './toolchain'
@@ -59,10 +60,15 @@ export interface Selection {
 }
 
 /** Validate target names against config. Unknown names are a usage error with a suggestion. */
-export function selectTargets(config: KitConfig, names: string[] = []): Selection {
+export function selectTargets(config: KitConfig, names: string[] = [], lint = false): Selection {
   const all = Object.entries(config.targets)
   if (!names.length) return { targets: all, workspace: true }
-  const known = new Set([WORKSPACE, ...all.map(([n]) => n)])
+  // `kit lint maestro` checks the flow files: a name only lint has, and only with a maestro block.
+  const known = new Set([
+    WORKSPACE,
+    ...all.map(([n]) => n),
+    ...(lint && config.maestro ? [MAESTRO_GROUP] : []),
+  ])
   for (const n of names) {
     if (!known.has(n)) {
       const guess = suggest(n, [...known])
@@ -344,7 +350,7 @@ export function planVerbs(
   verbs: Verb[],
   opts: PlanOptions = {},
 ): PlannedGroup[] {
-  const sel = selectTargets(config, opts.targets)
+  const sel = selectTargets(config, opts.targets, verbs.includes('lint'))
   const c: Ctx = { root, config, opts }
   const groups: PlannedGroup[] = []
   const affected = opts.affected && new Set(affectedTargets(root, config, opts.affected))
@@ -361,6 +367,16 @@ export function planVerbs(
     if (affected && !affected.has(name)) continue
     const commands = verbs.flatMap((v) => targetCommands(root, config, name, v, opts) ?? [])
     if (commands.length) groups.push({ title: name, commands })
+  }
+  // The flow check runs with an unrestricted lint or when named; staged and affected narrow it to flow files.
+  if (
+    verbs.includes('lint') &&
+    config.maestro &&
+    (!opts.targets?.length || opts.targets.includes(MAESTRO_GROUP))
+  ) {
+    const changed = opts.staged ?? opts.affected
+    const group = maestroLintGroup(root, config, { staged: changed })
+    if (group) groups.push(group)
   }
   return groups
 }

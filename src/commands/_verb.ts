@@ -39,6 +39,7 @@ async function resolveAffected(
   ctx: KitContext,
   root: string,
   config: KitConfig,
+  verbs: Verb[],
 ): Promise<Affected | undefined> {
   const args = ctx.args as { affected?: boolean; base?: string; staged?: boolean }
   if (!args.affected) {
@@ -52,7 +53,7 @@ async function resolveAffected(
       ExitCode.usage,
     )
   }
-  const selected = selectTargets(config, ctx.positionals).targets.map(([n]) => n)
+  const selected = selectTargets(config, ctx.positionals, verbs.includes('lint')).targets.map(([n]) => n)
   const { changedFiles } = await import('../lib/git')
   const changed = await changedFiles(root, args.base).catch(() => undefined)
   if (!changed) {
@@ -87,7 +88,7 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
     }
   }
   const started = performance.now()
-  const affected = await resolveAffected(ctx, root, config)
+  const affected = await resolveAffected(ctx, root, config, v.verbs)
   /** `affected` and `base` in every `--json` document of an `--affected` run. */
   const selection = affected
     ? {

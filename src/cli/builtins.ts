@@ -126,6 +126,88 @@ export const builtins: BuiltinEntry[] = [
     group: 'Release',
     load: () => import('../commands/changelog'),
   },
+  // devices: app build/install/run, device list/boot/statusbar
+  {
+    path: ['app', 'build'],
+    description: 'Build the debug app for a platform and print the artifact path',
+    group: 'Develop',
+    load: () => import('../commands/app/build'),
+  },
+  {
+    path: ['app', 'install'],
+    description: 'Build and install the app on a device, simulator or emulator',
+    group: 'Develop',
+    load: () => import('../commands/app/install'),
+  },
+  {
+    path: ['app', 'run'],
+    description: 'Build, install and launch the app',
+    group: 'Develop',
+    load: () => import('../commands/app/run'),
+  },
+  {
+    path: ['app', 'uninstall'],
+    description: 'Remove the app from a device',
+    group: 'Develop',
+    load: () => import('../commands/app/uninstall'),
+  },
+  {
+    path: ['app', 'clear'],
+    description: "Wipe the app's data on a device",
+    group: 'Develop',
+    load: () => import('../commands/app/clear'),
+  },
+  {
+    path: ['device', 'list'],
+    description: 'List simulators, emulators and connected devices',
+    group: 'Develop',
+    load: () => import('../commands/device/list'),
+  },
+  {
+    path: ['device', 'boot'],
+    description: 'Boot a simulator or emulator, creating one when none exists',
+    group: 'Develop',
+    load: () => import('../commands/device/boot'),
+  },
+  {
+    path: ['device', 'statusbar'],
+    description: 'Pin the status bar to 9:41 with full signal and battery; --clear restores it',
+    group: 'Develop',
+    load: () => import('../commands/device/statusbar'),
+  },
+  // end devices
+  // maestro: qa, shots, maestro passthrough, fixture load/dump
+  {
+    path: ['qa'],
+    description: 'Run the Maestro flows on a device: build, install, fixture, flows',
+    group: 'Quality',
+    load: () => import('../commands/qa'),
+  },
+  {
+    path: ['shots'],
+    description: 'Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs',
+    group: 'Quality',
+    load: () => import('../commands/shots'),
+  },
+  {
+    path: ['maestro'],
+    description: 'Run the Maestro CLI (arguments pass through)',
+    group: 'Develop',
+    load: () => import('../commands/maestro'),
+  },
+  {
+    path: ['fixture', 'load'],
+    description: 'Replay a fixture (app state) onto a device',
+    group: 'Develop',
+    load: () => import('../commands/fixture/load'),
+  },
+  {
+    path: ['fixture', 'dump'],
+    description: "Capture the app's state from a device into a fixture",
+    group: 'Develop',
+    load: () => import('../commands/fixture/dump'),
+  },
+  // end maestro
   // infra: env + db
   {
     path: ['env', 'sync'],
@@ -315,4 +397,7 @@ export const groupDescriptions: Record<string, string> = {
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
   add: 'Scaffold a module or a target into this repo',
+  app: 'Build, install and launch the debug app on a device',
+  device: 'Simulators, emulators and connected devices',
+  fixture: 'Replay or capture app state on a device',
 }

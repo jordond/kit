@@ -1,0 +1,6 @@
+appId: app.example
+tags:
+  - smoke
+---
+- launchApp
+- assertVisible: Home

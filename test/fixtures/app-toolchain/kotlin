@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fake Kotlin toolchain wrapper: records the call and writes the artifact `build -p <platform>` leaves.
+echo "kotlin $*" >> "${KIT_TEST_LOG:-/dev/null}"
+case "$*" in
+  *"-p android"*)
+    mkdir -p build/tasks/_androidApp_buildAndroidDebug
+    echo apk > build/tasks/_androidApp_buildAndroidDebug/gradle-project-debug.apk ;;
+  *"-p iosSimulatorArm64"*)
+    mkdir -p build/tasks/_iosApp_buildIosAppIosSimulatorArm64Debug/bin/Debug-iphonesimulator/app.app ;;
+esac

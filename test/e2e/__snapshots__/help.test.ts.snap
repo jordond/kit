@@ -10,6 +10,10 @@ Develop
   dev         Run a dev server
   build       Build every target
   deploy      Deploy a target
+  app         Build, install and launch the debug app on a device …
+  device      Simulators, emulators and connected devices …
+  maestro     Run the Maestro CLI (arguments pass through)
+  fixture     Replay or capture app state on a device …
   open        Open a worker target's Cloudflare dashboard page
   gradle      Run ./gradlew in the Gradle root
   kotlin      Run the Kotlin toolchain wrapper in toolchain.root
@@ -23,6 +27,8 @@ Quality
   typecheck   Typecheck every target
   check       Lint and typecheck every target
   test        Run the test suites
+  qa          Run the Maestro flows on a device: build, install, fixture, flows
+  shots       Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs
 
 Release
   release     Ship to the stores …
@@ -64,6 +70,26 @@ Options
 "
 `;
 
+exports[`help kit app --help 1`] = `
+"Build, install and launch the debug app on a device
+
+Usage
+  kit app <command> [options]
+
+Commands
+  build      Build the debug app for a platform and print the artifact path
+  install    Build and install the app on a device, simulator or emulator
+  run        Build, install and launch the app
+  uninstall  Remove the app from a device
+  clear      Wipe the app's data on a device
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
 exports[`help kit db --help 1`] = `
 "Cloudflare D1 migrations, queries, backup, restore, seed and reset
 
@@ -87,6 +113,24 @@ Options
 "
 `;
 
+exports[`help kit device --help 1`] = `
+"Simulators, emulators and connected devices
+
+Usage
+  kit device <command> [options]
+
+Commands
+  list       List simulators, emulators and connected devices
+  boot       Boot a simulator or emulator, creating one when none exists
+  statusbar  Pin the status bar to 9:41 with full signal and battery; --clear restores it
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
 exports[`help kit env --help 1`] = `
 "Render, check and push env from .env
 
@@ -99,6 +143,23 @@ Commands
   push    Push secrets with wrangler and gh
   init    Create .env and ask for missing keys
   rotate  Generate a new value for a key and sync
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit fixture --help 1`] = `
+"Replay or capture app state on a device
+
+Usage
+  kit fixture <command> [options]
+
+Commands
+  load  Replay a fixture (app state) onto a device
+  dump  Capture the app's state from a device into a fixture
 
 Options
   -h, --help     Show help
@@ -198,6 +259,140 @@ Options
       --bail           Stop at the first failure
       --kind <string>  worker | vite | astro | docker | custom
       --dir <string>   Target directory, relative to the repo root
+
+"
+`;
+
+exports[`help kit app build --help 1`] = `
+"Build the debug app for a platform and print the artifact path
+
+Usage
+  kit app build [options]
+
+Examples
+  kit app build android
+  APK=$(kit app build android)
+  kit app build ios --device <udid>
+  kit app build android --release
+  kit app build android --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --release          Build the release variant instead of debug
+      --device <string>  Simulator UDID the iOS build targets
+
+"
+`;
+
+exports[`help kit app clear --help 1`] = `
+"Wipe the app's data on a device
+
+Usage
+  kit app clear [options]
+
+Examples
+  kit app clear android
+  kit app clear ios --device <udid>
+  kit app clear android --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID, adb serial or physical device id
+
+"
+`;
+
+exports[`help kit app install --help 1`] = `
+"Build and install the app on a device, simulator or emulator
+
+Usage
+  kit app install [options]
+
+Examples
+  kit app install android
+  kit app install ios --device <udid>
+  kit app install android --file app.apk
+  kit app install android --no-build
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID, adb serial or physical device id
+      --file <string>    Install this apk, aab, app or ipa instead of building
+      --no-build         Install the newest existing build
+
+"
+`;
+
+exports[`help kit app run --help 1`] = `
+"Build, install and launch the app
+
+Usage
+  kit app run [options]
+
+Examples
+  kit app run android
+  kit app run ipad
+  kit app run android --no-build
+  kit app run android --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID, adb serial or physical device id
+      --file <string>    Install this apk, aab, app or ipa instead of building
+      --no-build         Install the newest existing build
+
+"
+`;
+
+exports[`help kit app uninstall --help 1`] = `
+"Remove the app from a device
+
+Usage
+  kit app uninstall [options]
+
+Examples
+  kit app uninstall android
+  kit app uninstall ios --device <udid>
+  kit app uninstall android --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID, adb serial or physical device id
 
 "
 `;
@@ -649,6 +844,82 @@ Options
 "
 `;
 
+exports[`help kit device boot --help 1`] = `
+"Boot a simulator or emulator, creating one when none exists
+
+Usage
+  kit device boot [options]
+
+Examples
+  kit device boot ios
+  kit device boot android --device pixel_10_pro_xl --yes
+  kit device boot ipad --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator name or UDID, or AVD name
+
+"
+`;
+
+exports[`help kit device list --help 1`] = `
+"List simulators, emulators and connected devices
+
+Usage
+  kit device list [options]
+
+Examples
+  kit device list
+  kit device list android --booted
+  kit device list ios --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --booted   Only devices that are running
+
+"
+`;
+
+exports[`help kit device statusbar --help 1`] = `
+"Pin the status bar to 9:41 with full signal and battery; --clear restores it
+
+Usage
+  kit device statusbar [options]
+
+Examples
+  kit device statusbar ios
+  kit device statusbar android --clear
+  kit device statusbar ipad --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID or adb serial (default: the running one)
+      --clear            Restore the real status bar
+
+"
+`;
+
 exports[`help kit doctor --help 1`] = `
 "Check tools, versions and .env
 
@@ -824,6 +1095,57 @@ Examples
 "
 `;
 
+exports[`help kit fixture dump --help 1`] = `
+"Capture the app's state from a device into a fixture
+
+Usage
+  kit fixture dump [options]
+
+Examples
+  kit fixture dump android sample
+  kit fixture dump ios sample --device <udid>
+  kit fixture dump android sample --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID or adb serial (default: the running one)
+
+"
+`;
+
+exports[`help kit fixture load --help 1`] = `
+"Replay a fixture (app state) onto a device
+
+Usage
+  kit fixture load [options]
+
+Examples
+  kit fixture load android
+  kit fixture load ios sample
+  kit fixture load ipad sample --device <udid>
+  kit fixture load android --dry-run --json
+
+Options
+  -h, --help             Show help
+  -V, --version          Show kit version
+      --json             Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run          Plan and run read-only steps; skip mutations
+  -y, --yes              Accept confirmations (never skips prod)
+  -v, --verbose          Stream all child output
+  -q, --quiet            Errors and summary only
+      --bail             Stop at the first failure
+      --device <string>  Simulator UDID or adb serial (default: the running one)
+
+"
+`;
+
 exports[`help kit format --help 1`] = `
 "Format every target
 
@@ -969,6 +1291,23 @@ Options
 "
 `;
 
+exports[`help kit maestro --help 1`] = `
+"Run the Maestro CLI (arguments pass through)
+
+Usage
+  kit maestro [args…]
+
+Every argument passes through untouched; kit parses no flags here (no --json).
+Only a leading -h/--help shows this; \`kit maestro <args> --help\` reaches the tool.
+
+Examples
+  kit maestro studio
+  kit maestro hierarchy
+  kit maestro --version
+
+"
+`;
+
 exports[`help kit open --help 1`] = `
 "Open a worker target's Cloudflare dashboard page
 
@@ -992,6 +1331,38 @@ Options
       --bail          Stop at the first failure
   -e, --env <string>  Environment, for targets that declare envs
   -p, --print         Write the URL to stdout instead of opening it
+
+"
+`;
+
+exports[`help kit qa --help 1`] = `
+"Run the Maestro flows on a device: build, install, fixture, flows
+
+Usage
+  kit qa [options]
+
+Examples
+  kit qa android
+  kit qa ios --suite smoke --no-build
+  kit qa android --tags auth,smoke --junit reports/qa.xml
+  kit qa ios --dry-run --json
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --suite <string>    Run this maestro.suites entry
+      --device <string>   Simulator UDID or adb serial (default: the running one)
+      --no-build          Install the newest existing build
+      --fixture <string>  Load this fixture instead of the suite's
+      --no-fixture        Load no fixture
+      --tags <string>     Run these tags as one stage, replacing the suite's stages
+      --junit <string>    Write a JUnit report here (several stages: <name>-2.xml, …)
 
 "
 `;
@@ -1241,6 +1612,38 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit shots --help 1`] = `
+"Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs
+
+Usage
+  kit shots [options]
+
+Examples
+  kit shots android
+  kit shots ios --full
+  kit shots ipad --no-build --out brand/screenshots/ipad
+  kit shots android --dry-run --json
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --suite <string>    Run this maestro.suites entry
+      --device <string>   Simulator UDID or adb serial (default: the running one)
+      --no-build          Install the newest existing build
+      --fixture <string>  Load this fixture instead of the suite's
+      --no-fixture        Load no fixture
+      --full              Run the shots-full suite (define it under maestro.suites)
+      --out <string>      Copy the screenshots here instead of the suite dir (used as is)
 
 "
 `;

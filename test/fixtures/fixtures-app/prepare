@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for an app that rebases dates: records what kit passed and edits the staged copy.
+printf "%s %s %s %s\n" "$KIT_FIXTURE" "$KIT_PLATFORM" "$(basename "$KIT_FIXTURE_DIR" | cut -c1-12)" "$(test "$(pwd -P)" = "$(cd "$KIT_FIXTURE_DIR" && pwd -P)" && echo cwd-ok)" >> "$KIT_ROOT/.prepare.log"
+echo patched >> settings.json

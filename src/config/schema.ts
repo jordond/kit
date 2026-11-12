@@ -15,6 +15,12 @@ export const RESERVED_SERVICE_NAMES = [
   'rollback',
 ] as const
 
+/** Suites that exist without config; `maestro.suites` entries of the same name start from them. */
+export const DEFAULT_SUITES: Record<string, { tags: string[]; statusBar?: boolean }> = {
+  qa: { tags: ['smoke'] },
+  shots: { tags: ['screenshots'], statusBar: true },
+}
+
 export const kinds = ['gradle', 'kotlin', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
 
@@ -134,6 +140,111 @@ export const configSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * The app `kit app …` builds, installs and launches. Every field falls back to `release.*`
+     * (bundleIds[0], project, scheme, packageName, module), so a repo with a release block needs none.
+     */
+    app: z
+      .object({
+        ios: z
+          .object({
+            bundleId: z.string().optional(),
+            project: z.string().optional(),
+            scheme: z.string().optional(),
+            /** Kotlin toolchain only: the iOS app module; default the dir holding `project`. */
+            module: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+        android: z
+          .object({
+            packageName: z.string().optional(),
+            /** Gradle project path (`:android`), or the toolchain module name (`androidApp`). */
+            module: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    /** Maestro flows: `kit qa`, `kit shots`, `kit maestro`. */
+    maestro: z
+      .object({
+        /** Dir holding `config.yaml` and the flows, relative to the repo root. */
+        dir: z.string(),
+        /** Maestro CLI version: `kit doctor` compares it, CI installs it. */
+        version: z.string().optional(),
+        /** Where Maestro writes its run dirs; default `<dir>/output`. */
+        output: z.string().optional(),
+        /** Device to boot when none is running: a simulator name or an AVD name. Default: newest, largest. */
+        devices: z
+          .object({ ios: z.string(), ipad: z.string(), android: z.string() })
+          .partial()
+          .strict()
+          .optional(),
+        /**
+         * Named runs. `kit qa` runs `qa` (default: tags ['smoke']); `kit shots` runs `shots`
+         * (default: tags ['screenshots'], statusBar, screenshots `<dir>/screenshots`) and with
+         * `--full` `shots-full`.
+         */
+        suites: z
+          .record(
+            z.string(),
+            z
+              .object({
+                /** Another suite whose fields this one starts from. */
+                extends: z.string().optional(),
+                /** Flow tags run in one Maestro invocation. */
+                tags: z.array(z.string()).min(1).optional(),
+                /** Tag sets run as separate invocations, in order; replaces `tags`. */
+                stages: z.array(z.array(z.string()).min(1)).min(1).optional(),
+                /** Fixture loaded before the flows; `false` loads none. */
+                fixture: z.union([z.string(), z.literal(false)]).optional(),
+                /** Pin the status bar to 9:41 first. */
+                statusBar: z.boolean().optional(),
+                /** Dir the `takeScreenshot` PNGs are copied to, under `<target>/`. */
+                screenshots: z.string().optional(),
+                /** Extra `-e KEY=VALUE` for the flows; PLATFORM is always set. */
+                env: z.record(z.string(), z.string()).optional(),
+              })
+              .strict(),
+          )
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    /** App state replayed onto a device (`kit fixture load`) or captured from it (`kit fixture dump`). */
+    fixtures: z
+      .object({
+        /** Dir holding one sub-dir per fixture, relative to the repo root. */
+        dir: z.string(),
+        /** What travels. `from` is a file or a dir (trailing `/`) inside the fixture. */
+        files: z
+          .array(
+            z
+              .object({
+                from: z.string(),
+                /** Destination dir inside the simulator's data container (`Documents/databases/`). */
+                ios: z.string().optional(),
+                /** Destination dir inside the app's data dir (`databases/`). */
+                android: z.string().optional(),
+                /** A SQLite database: its WAL is checkpointed on dump. */
+                sqlite: z.boolean().optional(),
+              })
+              .strict(),
+          )
+          .min(1),
+        /** Dirs removed after a load, relative to the container / data dir (caches keyed on paths). */
+        clear: z
+          .object({ ios: z.array(z.string()), android: z.array(z.string()) })
+          .partial()
+          .strict()
+          .optional(),
+        /** Script run on the staged copy before it is pushed (date rebase); cwd is the staged fixture. */
+        prepare: z.string().optional(),
+      })
+      .strict()
+      .optional(),
     release: z
       .object({
         branches: z.array(z.string()).optional(),
@@ -212,6 +323,19 @@ export const configSchema = z
         path: ['cloudflare', 'd1'],
         message: `Only one database can be the default (${defaults.map(([k]) => k).join(', ')})`,
       })
+    }
+    for (const [name, suite] of Object.entries(c.maestro?.suites ?? {})) {
+      if (
+        suite.extends !== undefined &&
+        !c.maestro?.suites?.[suite.extends] &&
+        !(suite.extends in DEFAULT_SUITES)
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['maestro', 'suites', name, 'extends'],
+          message: `Unknown suite "${suite.extends}"`,
+        })
+      }
     }
     if (c.targets.workspace) {
       ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })
