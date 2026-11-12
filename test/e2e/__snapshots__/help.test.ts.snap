@@ -1521,19 +1521,21 @@ Usage
 Examples
   kit release metadata push ios
   kit release metadata push android --screenshots
+  kit release metadata push ios --only-screenshots
   kit release metadata push ios --dry-run
   kit release metadata push android --yes
 
 Options
-  -h, --help         Show help
-  -V, --version      Show kit version
-      --json         Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run      Plan and run read-only steps; skip mutations
-  -y, --yes          Accept confirmations (never skips prod)
-  -v, --verbose      Stream all child output
-  -q, --quiet        Errors and summary only
-      --bail         Stop at the first failure
-      --screenshots  Also replace the screenshots (Play: and the feature graphic and icon)
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --screenshots       Also replace the screenshots (Play: and the feature graphic and icon)
+      --only-screenshots  Replace the screenshots and leave the listing text as the store has it
 
 "
 `;

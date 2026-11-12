@@ -131,4 +131,68 @@ class MetadataTest < Minitest::Test
     root = images("icon.png" => PNG)
     assert_equal ["en-US/icon (0 of 1)"], missing(root, { "icon" => 1 }, Time.now + 60)
   end
+
+  include KitFastfileTest
+
+  # What `kit release metadata push` sets: KIT_METADATA_SCREENSHOTS=1 for --screenshots,
+  # KIT_METADATA_TEXT=0 on top of it for --only-screenshots.
+  def push_env(screenshots: nil, text: nil, &block)
+    with_env("KIT_METADATA_SCREENSHOTS" => screenshots, "KIT_METADATA_TEXT" => text, &block)
+  end
+
+  SUPPLY_NEVER = { skip_upload_apk: true, skip_upload_aab: true, skip_upload_changelogs: true }.freeze
+
+  def test_a_push_sends_text_only_by_default
+    push_env do
+      assert_equal({ skip_metadata: false, skip_screenshots: true, overwrite_screenshots: false },
+                   kit_deliver_listing_options)
+      assert_equal SUPPLY_NEVER.merge(skip_upload_metadata: false, skip_upload_images: true,
+                                      skip_upload_screenshots: true),
+                   kit_supply_listing_options
+    end
+  end
+
+  def test_screenshots_go_with_the_text
+    push_env(screenshots: "1") do
+      assert_equal({ skip_metadata: false, skip_screenshots: false, overwrite_screenshots: true },
+                   kit_deliver_listing_options)
+      assert_equal SUPPLY_NEVER.merge(skip_upload_metadata: false, skip_upload_images: false,
+                                      skip_upload_screenshots: false),
+                   kit_supply_listing_options
+    end
+  end
+
+  def test_text_off_maps_to_skip_metadata_on_ios
+    push_env(screenshots: "1", text: "0") do
+      assert_equal({ skip_metadata: true, skip_screenshots: false, overwrite_screenshots: true },
+                   kit_deliver_listing_options)
+    end
+  end
+
+  def test_text_off_maps_to_skip_upload_metadata_on_android_and_still_no_binary_or_changelog
+    push_env(screenshots: "1", text: "0") do
+      assert_equal SUPPLY_NEVER.merge(skip_upload_metadata: true, skip_upload_images: false,
+                                      skip_upload_screenshots: false),
+                   kit_supply_listing_options
+    end
+  end
+
+  def test_text_set_to_anything_but_off_keeps_the_text
+    %w[1 true].each do |value|
+      push_env(text: value) { refute kit_deliver_listing_options[:skip_metadata] }
+    end
+  end
+
+  def test_text_off_without_screenshots_is_nothing_to_upload
+    push_env(text: "0") do
+      error = assert_raises(KitUserError) { kit_listing_parts }
+      assert_includes error.message, "KIT_METADATA_TEXT=0 needs KIT_METADATA_SCREENSHOTS=1"
+    end
+  end
+
+  def test_the_success_line_names_what_went_up
+    assert_equal "listing", kit_listing_summary({ text: true, images: false }, "screenshots")
+    assert_equal "listing and screenshots", kit_listing_summary({ text: true, images: true }, "screenshots")
+    assert_equal "screenshots", kit_listing_summary({ text: false, images: true }, "screenshots")
+  end
 end

@@ -11,6 +11,7 @@ import { runPiped } from '../proc'
 import { confirm } from '../prompt'
 import { runSteps, type StepResult, summarize } from '../steps'
 import { appleCreds, onGitHubActions, playCreds } from './creds'
+import { checkListingImages, imageLocales, imageSummary } from './listing-images'
 import { laneConfigEnv, laneStep, type Platform } from './mobile'
 
 /**
@@ -125,16 +126,20 @@ export function listingFiles(platform: Platform, dirs: MetadataDirs): ListingFil
   return { text, images }
 }
 
-/** What `push` sends: text always, images only with `--screenshots`. Paths relative to `root`. */
+/**
+ * What `push` sends: text unless `withText` is off (`--only-screenshots`), images only with
+ * `--screenshots`. Paths relative to `root`.
+ */
 export function pushPlan(
   root: string,
   platform: Platform,
   dirs: MetadataDirs,
   screenshots: boolean,
+  withText = true,
 ): { text: string[]; images: string[]; files: string[] } {
   const found = listingFiles(platform, dirs)
   const rel = (p: string) => relative(root, p)
-  const text = found.text.map(rel)
+  const text = withText ? found.text.map(rel) : []
   const images = screenshots ? found.images.map(rel) : []
   return { text, images, files: [...text, ...images] }
 }
@@ -286,27 +291,35 @@ export async function pullMetadata(
   if (ok && !flags.json) ctx.log.dim(`  ${plural(files.length, 'file')} in ${shown.join(' and ')}`)
 }
 
-/** Upload listing text (and images with `screenshots`). Confirms: it changes the public listing. */
+/**
+ * Upload listing text (and images with `screenshots`); `onlyScreenshots` sends the images and
+ * leaves the store's text alone. Checks every image first, then confirms: it changes the public
+ * listing. Never rewrites a repo file.
+ */
 export async function pushMetadata(
   ctx: Ctx,
-  opts: { platform: Platform; screenshots: boolean },
+  opts: { platform: Platform; screenshots: boolean; onlyScreenshots?: boolean },
 ): Promise<void> {
   const started = performance.now()
   const { root, config } = ctx as { root: string; config: KitConfig }
-  const { platform, screenshots } = opts
+  const { platform } = opts
+  const withText = opts.onlyScreenshots !== true
+  const screenshots = opts.screenshots || !withText
   const flags = ctx.flags
   const dirs = metadataDirs(root, config, platform)
   const key = `release.${platform}.metadata`
   const shown = relative(root, dirs.dir)
-  if (!existsSync(dirs.dir) || !statSync(dirs.dir).isDirectory()) {
+  // iOS screenshots sit beside the metadata dir, so an image-only push can do without it.
+  const needsDir = withText || platform === 'android'
+  if (needsDir && (!existsSync(dirs.dir) || !statSync(dirs.dir).isDirectory())) {
     throw new KitError(
       `${key} points at ${shown}, which is not a directory`,
       `Fix ${key} in kit.config.ts, or fill it with \`kit release metadata pull ${platform}\``,
       ExitCode.usage,
     )
   }
-  const plan = pushPlan(root, platform, dirs, screenshots)
-  if (!plan.text.length) {
+  const plan = pushPlan(root, platform, dirs, screenshots, withText)
+  if (withText && !plan.text.length) {
     throw new KitError(
       `No listing text in ${shown}`,
       `Fill it with \`kit release metadata pull ${platform}\``,
@@ -317,19 +330,59 @@ export async function pushMetadata(
   if (screenshots && !plan.images.length) {
     const where = dirs.screenshotsDir ? relative(root, dirs.screenshotsDir) : `${shown}/<locale>/images`
     throw new KitError(
-      `--screenshots: no images in ${where}`,
-      `Fill it with \`kit release metadata pull ${platform}\`, or drop --screenshots`,
+      `${withText ? '--screenshots' : '--only-screenshots'}: no images in ${where}`,
+      withText
+        ? `Fill it with \`kit release metadata pull ${platform}\`, or drop --screenshots`
+        : `Fill it with \`kit shots export\` or \`kit release metadata pull ${platform} --screenshots\``,
       ExitCode.precondition,
     )
   }
   const id = storeId(config, platform)
-  const base = { platform, action: 'push' as const, dir: shown, screenshots, files: plan.files }
-  const what = `${plural(plan.text.length, 'text file')}${screenshots ? ` and ${plural(plan.images.length, 'image')}` : ''}`
+  const { images, problems, warnings } = checkListingImages(
+    platform,
+    root,
+    dirs.screenshotsDir ?? dirs.dir,
+    plan.images,
+  )
+  const base = {
+    platform,
+    action: 'push' as const,
+    dir: shown,
+    screenshots,
+    files: plan.files,
+    images,
+    problems,
+  }
+  // The store refuses these, and deliver has deleted the old screenshots by the time it finds out.
+  if (problems.length) {
+    if (flags.json) {
+      emitJson({ ...base, dryRun: flags.dryRun === true, ok: false })
+      process.exitCode = ExitCode.precondition
+      return
+    }
+    throw new KitError(
+      `${STORE[platform]} would refuse these images:\n${problems.map((p) => `    ${p}`).join('\n')}`,
+      'Fix the files and push again: kit does not rewrite them',
+      ExitCode.precondition,
+    )
+  }
+  const what = [
+    ...(withText ? [plural(plan.text.length, 'text file')] : []),
+    ...(screenshots ? [plural(plan.images.length, 'image')] : []),
+  ].join(' and ')
+  // deliver deletes every screenshot set of a locale that has local files, whatever sets they fill.
+  const replaced = platform === 'ios' ? imageLocales(images) : []
+  const card = [
+    ...imageSummary(images),
+    ...(replaced.length ? [`replaces every screenshot set of: ${replaced.join(', ')}`] : []),
+  ]
 
   if (flags.dryRun) {
     if (flags.json) emitJson({ ...base, dryRun: true })
     else {
       ctx.log.step(`would push ${what} to the ${STORE[platform]} listing of ${id}:`)
+      for (const line of card) ctx.log.dim(`  ${line}`)
+      for (const w of warnings) ctx.log.warn(w)
       process.stdout.write(`${plan.files.join('\n')}\n`)
     }
     return
@@ -339,11 +392,13 @@ export async function pushMetadata(
   const env = {
     ...laneEnv(root, config, platform, dirs),
     ...(screenshots ? { KIT_METADATA_SCREENSHOTS: '1' } : {}),
+    ...(withText ? {} : { KIT_METADATA_TEXT: '0' }),
   }
   if (!flags.json) {
     process.stderr.write(
-      `\n${pc.bold(`${config.name} ${platform} listing → ${STORE[platform]} (${id})`)}\n${pc.dim(plan.files.map((f) => `  ${f}`).join('\n'))}\n\n`,
+      `\n${pc.bold(`${config.name} ${platform} listing → ${STORE[platform]} (${id})`)}\n${pc.dim(plan.files.map((f) => `  ${f}`).join('\n'))}\n${card.map((l) => `  ${l}\n`).join('')}\n`,
     )
+    for (const w of warnings) ctx.log.warn(w)
   }
   const ok = await confirm(flags, `Push ${what} to the public ${STORE[platform]} listing of ${id}?`)
   if (!ok) throw new KitError('Cancelled', undefined, ExitCode.interrupted)
