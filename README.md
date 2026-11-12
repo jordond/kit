@@ -460,8 +460,12 @@ release: {
   runs nothing.
 - `pull` stops when what it would write has uncommitted changes (the text; with `--screenshots` the
   screenshots too); `--force` overwrites them. Without `--screenshots` local screenshots are left alone.
+- iOS `review_information/` (the App Review contact and the demo account's user and password, which
+  deliver writes as plaintext) never stays in the repo: `pull` removes it, and `push` neither lists nor
+  uploads it. Edit those fields in App Store Connect.
 - Only the store key is needed: `ASC_*` for iOS, `PLAY_SERVICE_ACCOUNT_BASE64` for Android.
-- iOS edits the version being prepared in App Store Connect, so one must exist. Android needs a
+- iOS edits the version being prepared in App Store Connect; with none, `push` fails at once: create
+  the next version there, or push after `kit release ios --track prod`. Android needs a
   release on some Play track, and `changelogs/` is never sent: `kit release android` writes those.
 - A missing key or directory is a usage error (exit 2) naming `release.<platform>.metadata`.
 

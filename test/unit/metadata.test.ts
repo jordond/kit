@@ -84,12 +84,13 @@ describe('release.<platform>.metadata', () => {
 })
 
 describe('pushPlan', () => {
-  test('iOS: every .txt under the metadata dir except supply’s android/, screenshots only when asked', () => {
+  test('iOS: every .txt under the metadata dir except android/ and review_information/, screenshots only when asked', () => {
     put('fastlane/metadata/en-US/name.txt')
     put('fastlane/metadata/en-US/description.txt')
     put('fastlane/metadata/fr-FR/name.txt')
     put('fastlane/metadata/copyright.txt')
     put('fastlane/metadata/review_information/notes.txt')
+    put('fastlane/metadata/review_information/demo_password.txt')
     put('fastlane/metadata/android/en-US/title.txt')
     put('fastlane/metadata/.DS_Store')
     put('fastlane/metadata/en-US/notes.md')
@@ -102,7 +103,6 @@ describe('pushPlan', () => {
       'fastlane/metadata/en-US/description.txt',
       'fastlane/metadata/en-US/name.txt',
       'fastlane/metadata/fr-FR/name.txt',
-      'fastlane/metadata/review_information/notes.txt',
     ]
     expect(pushPlan(root, 'ios', dirs, false)).toEqual({ text, images: [], files: text })
     const images = [
@@ -170,11 +170,11 @@ describe('pullScope', () => {
     android: { ...android, metadata: 'fastlane/metadata/android' },
   })
 
-  test('iOS: the metadata dir minus supply’s android/; the screenshots dir only with --screenshots', () => {
+  test('iOS: the metadata dir minus android/ and review_information/; the screenshots dir only with --screenshots', () => {
     const dirs = metadataDirs('/repo', c, 'ios')
     expect(pullScope('/repo', 'ios', dirs, false)).toEqual({
       targets: ['/repo/fastlane/metadata'],
-      excludes: ['fastlane/metadata/android/**'],
+      excludes: ['fastlane/metadata/android/**', 'fastlane/metadata/review_information/**'],
     })
     expect(pullScope('/repo', 'ios', dirs, true).targets).toEqual([
       '/repo/fastlane/metadata',
