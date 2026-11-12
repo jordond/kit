@@ -176,6 +176,32 @@ describe('env push', () => {
     expect((await fx.kit(['env', 'push', '--all', '--target', 'edge'])).code).toBe(2)
   })
 
+  test('--workers pushes every worker and skips GitHub', async () => {
+    const r = await fx.kit(['env', 'push', '--workers', '--yes', '--json'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual([
+      './apps/edge wrangler secret list --format json',
+      './apps/admin wrangler secret list --format json',
+      './apps/edge wrangler secret put API_SECRET',
+      './apps/admin wrangler secret put API_SECRET',
+    ])
+    expect(stdinLog()).toBe(`${SECRET}\n\n${SECRET}\n\n`)
+    expect(JSON.parse(r.stdout).outcomes.map((o: { destination: string }) => o.destination)).toEqual([
+      'edge',
+      'edge',
+      'admin',
+    ])
+  })
+
+  test('--workers is exclusive with --all, --target and --github (exit 2, nothing runs)', async () => {
+    for (const other of [['--all'], ['--target', 'edge'], ['--github']]) {
+      const r = await fx.kit(['env', 'push', '--workers', ...other, '--yes'])
+      expect(r.code).toBe(2)
+      expect(r.stderr).toContain(`--workers and ${other[0]} are exclusive`)
+    }
+    expect(fx.calls()).toEqual([])
+  })
+
   test('--dry-run lists but pushes nothing', async () => {
     const r = await fx.kit(['env', 'push', '--dry-run'])
     expect(r.code).toBe(0)

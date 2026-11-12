@@ -225,6 +225,35 @@ it comes from kit's Gradle plugin.
 Give the Release configuration manual signing with the match profiles, a `DEVELOPMENT_TEAM`, and
 `MARKETING_VERSION` in `release.ios.xcconfig`.
 
+## Env
+
+One `.env` per repo; `env.schema` (a zod object, usually `.kit/env.ts`) declares each key, and
+`env.workerSecrets` / `env.githubSecrets` say which remotes hold it. Keys are secret unless marked
+`.meta({ secret: false })`. Values never reach output: only names and statuses are printed.
+
+| Command | Does |
+| --- | --- |
+| `kit env push` | Every worker in `env.workerSecrets` (`wrangler secret put`) and `env.githubSecrets` (`gh secret set`); lists names, confirms (`--yes` skips), `--dry-run` only lists |
+| `kit env push --workers` | Every worker, GitHub skipped. Exclusive with `--all`, `--target` and `--github` |
+| `kit env push --target <t>` / `--github` | One worker / GitHub only; both flags together push that worker and GitHub |
+| `kit env rotate <KEY...> [--push]` | New generated value in `.env`, outputs re-rendered as `kit env sync` does, then prints where the key lives and the `kit env push …` to run; `--push` runs it |
+
+`kit env rotate` only takes keys whose schema says how to make them:
+
+```ts
+INTERNAL_API_SECRET: z.string().min(32).meta({ generate: 'hex' }),             // 32 random bytes, hex
+SESSION_KEY: z.string().meta({ generate: 'base64url', length: 48 }),           // length is in bytes
+INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
+```
+
+- The new value is checked against the key's own rule before anything is written; only that line of
+  `.env` changes (comments, order, quotes and line endings stay), and a key `.env` lacks is added.
+- It confirms first, since the old value stops working once the new one is pushed (`--yes` skips).
+  `--dry-run` writes nothing and lists what would rotate and where it would be pushed.
+- `--push` pushes every secret of the remotes that hold the key, with the same listing and confirm
+  as `kit env push`. `--json` reports `{ rotated: [{ key, destinations }], pushed }`, never a value.
+- A key without `generate` belongs to a provider: rotate it there, update `.env`, then `kit env push`.
+
 ## Releases
 
 kit owns the release flow; one shared `fastlane/Fastfile` (shipped in this package) runs the lanes.
