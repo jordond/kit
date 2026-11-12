@@ -43,7 +43,7 @@ export default defineCommand({
       ...appleCreds({ match: true, ci: onGitHubActions() }).env,
       KIT_IOS_BUNDLE_IDS: ios.bundleIds.join(','),
       KIT_IOS_BUNDLE_ID: ios.bundleIds[0]!,
-      ...(ios.teamId ? { KIT_IOS_TEAM_ID: ios.teamId } : {}),
+      KIT_IOS_TEAM_ID: ios.teamId ?? '', // explicit: empty is "no team", an inherited one is not
       KIT_CERTS_MODE: mode,
     }
     const quiet = ctx.flags.json || ctx.flags.quiet
