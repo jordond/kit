@@ -351,10 +351,15 @@ falls back to another `fr` entry before that:
 **Fonts and brand.** Every font family a slide names has to be in `shots.fonts` (the CSS generics
 `sans-serif`, `serif`, `monospace` and `system-ui` aside): Chrome would draw an unknown family in a
 fallback font without complaint, so export stops first (exit 3). `brand` is the lockup drawn on slides
-that show it: the mark, and the wordmark beside it.
+that show it: the mark, and the wordmark beside it. The wordmark and a slide's badge are drawn in
+`brand.font`, or in the slide's headline family when there is none, so that family has to be declared
+even on a slide whose headline is empty.
 
 **Output.** Locales are, per store, the locale dirs already in that store's metadata dir (`en-US` when
-there are none yet); `--locale` narrows them.
+there are none yet); `--locale` narrows them. In the iOS metadata dir, the dirs deliver does not read
+as a locale are left out (`default`, `review_information`, `trade_representative_contact_information`,
+`app_clip_review_information`, `android`, `fonts`, `appleTV`, `iMessage`), and in either store so is a
+dir whose name cannot be a locale (`Old Backup`).
 
 | Store | Target | Size | Written to |
 | --- | --- | --- | --- |
@@ -378,8 +383,13 @@ channel, which App Store Connect requires.
 | `--dry-run` | Print what would be written and removed; Chrome is not started and nothing changes |
 | `--json` | `{ dryRun, stores, written: [{ store, target, set, locale, slide, file, width, height }], removed, skipped }` |
 
+`--store`, `--locale` and `--out` given an empty value (`--out "$OUT"` with `OUT` unset) are a usage
+error (exit 2), not the default.
+
 Nothing is written unless every image came back at its exact size: a Chrome that exits, a page error or
-a five-minute timeout is exit 1 with the store dirs as they were. Before Chrome starts, export checks
+five minutes without a new image is exit 1 with the store dirs as they were. Every rendered PNG is held
+in memory until all of them are back, so memory grows with slides x locales (a few MB each); `--store`
+and `--locale` split a large export into smaller runs. Before Chrome starts, export checks
 that the raw shots, font and brand files are there, that Chrome is, and that no set has more slides
 than its store keeps (10 on the App Store, 8 on Play); each of those is exit 4. Chrome is the installed
 Google Chrome or Chromium (112 or newer), or the binary `KIT_CHROME` names.

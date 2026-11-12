@@ -61,6 +61,9 @@ const nn = (index: number): string => String(index).padStart(2, '0')
 /** A locale is one dir name and one piece of a job id, so it has to be safe as both. */
 const LOCALE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
+/** Whether `name` can be a locale: what a `--locale` has to be, and what a metadata dir has to be named to count as one. */
+export const isLocale = (name: string): boolean => LOCALE.test(name)
+
 /** `/`-separated path of `file` relative to `root`; absolute when it is outside `root`. */
 export function repoPath(root: string, file: string): string {
   const rel = relative(root, file)
@@ -130,7 +133,7 @@ export const planExport: PlanExport = (input) => {
       const set = sets[target]
       const { width, height } = SET_SIZES[set]
       for (const locale of destination.locales) {
-        if (!LOCALE.test(locale)) {
+        if (!isLocale(locale)) {
           throw new KitError(
             `"${locale}" is not a locale kit can export`,
             'A locale is a store locale code such as en-US: letters, digits, ".", "_" and "-"',

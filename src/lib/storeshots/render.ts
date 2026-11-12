@@ -1,26 +1,55 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { CHROME_HINT } from '../chrome'
 import { interrupted, onCleanup, trackChild } from '../cleanup'
 import { ExitCode, KitError } from '../errors'
 import { flattenPng, imageInfo } from '../image/png'
 import { spawnDetached } from '../proc'
+import { repoPath } from './plan'
 import { serveShots } from './server'
-import type { Job, RenderJobs } from './types'
+import type { Job, PageDone, RenderJobs } from './types'
 
 /**
  * The render host: serves the plan, runs headless Chrome on it, and hands back one checked PNG
  * per job. The page protocol is documented at `PagePlan` in `types.ts`.
  */
 
+/** How long the page may go without posting an image before the run is given up. */
 export const RENDER_TIMEOUT_MS = 5 * 60_000
+
+/** The file in the work dir that Chrome is started on: it sends Chrome on to the server URL. */
+export const OPENER_FILE = 'open.html'
 
 /** What an exported PNG with alpha is flattened onto. */
 const FLATTEN_BACKGROUND = '#ffffff'
 
 const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const
 
-/** The Chrome command line for one render: a throwaway profile, then the page URL last. */
+/**
+ * The document Chrome is started on. The server URL carries the path token, and a command line is
+ * readable by every local user through `ps`; so the URL goes into this file in the 0700 work dir,
+ * and Chrome's argv names only the file.
+ */
+export function openerHtml(url: string): string {
+  // `<` cannot end the script early: JSON leaves it as is, so it is escaped here.
+  const target = JSON.stringify(url).replace(/</g, '\\u003c')
+  return `<!doctype html>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<title>kit shots export</title>
+<script>location.replace(${target})</script>
+`
+}
+
+/** The server URL an opener file sends Chrome to; undefined when `html` is not one. */
+export function openerTarget(html: string): string | undefined {
+  const target = /location\.replace\((".*")\)<\/script>/.exec(html)?.[1]
+  return target === undefined ? undefined : (JSON.parse(target) as string)
+}
+
+/** The Chrome command line for one render: a throwaway profile, then the URL to open last. */
 export function chromeArgv(chrome: string, profile: string, url: string): string[] {
   return [
     chrome,
@@ -72,15 +101,38 @@ function checked(job: Job, bytes: Uint8Array | undefined): Uint8Array {
   }
 }
 
+/** A page failure, naming the raw shot of the job it happened on: the job id alone says little. */
+function pageFailure(jobs: readonly Job[], result: PageDone, root: string | undefined): KitError {
+  const error = result.error ?? 'no error given'
+  const job = jobs.find((j) => j.id === result.job)
+  if (!job) return new KitError(`The shots page failed: ${error}`)
+  const shot = root === undefined ? job.shot : repoPath(root, job.shot)
+  return new KitError(
+    `The shots page failed on ${job.id}: ${error}`,
+    `Its raw shot is ${shot}, for slide "${job.slide.name}" (${job.slide.id})`,
+  )
+}
+
 export const renderJobs: RenderJobs = async (plan, opts) => {
   if (plan.jobs.length === 0) return new Map()
   const timeoutMs = opts.timeoutMs ?? RENDER_TIMEOUT_MS
 
-  // The profile gets its own dir so Chrome's log can sit beside it, not in it.
+  // The profile gets its own dir so Chrome's log and the opener can sit beside it, not in it.
+  // mkdtemp makes the dir 0700: nobody else reads the opener, which holds the server URL.
   const work = mkdtempSync(join(tmpdir(), 'kit-shots-'))
   const profile = join(work, 'profile')
   const chromeLog = join(work, 'chrome.log')
-  const server = serveShots(plan, { page: opts.page })
+  const opener = join(work, OPENER_FILE)
+
+  // An idle timeout: the clock restarts with every image, so a long plan on a slow machine is fine
+  // as long as it keeps moving.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const { promise: idle, resolve: timeUp } = Promise.withResolvers<'timeout'>()
+  const restartClock = (): void => {
+    clearTimeout(timer)
+    timer = setTimeout(() => timeUp('timeout'), timeoutMs)
+  }
+  const server = serveShots(plan, { page: opts.page, onImage: restartClock })
 
   let chrome: Bun.Subprocess | undefined
   let disposed: Promise<void> | undefined
@@ -96,7 +148,12 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
         await chrome.exited
       }
       await server.stop()
-      rmSync(work, { recursive: true, force: true, maxRetries: 3 })
+      try {
+        rmSync(work, { recursive: true, force: true, maxRetries: 3 })
+      } catch (e) {
+        // A temp dir left behind is not worth the render: the images are already in memory.
+        opts.verbose?.(`Could not remove ${work}: ${reason(e)}`)
+      }
     })()
     return disposed
   }
@@ -108,11 +165,21 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
   const onSignal = (): void => stop('stopped')
   for (const signal of STOP_SIGNALS) process.on(signal, onSignal)
 
-  let timer: ReturnType<typeof setTimeout> | undefined
   try {
     mkdirSync(profile)
-    chrome = spawnDetached(chromeArgv(opts.chrome, profile, server.url), chromeLog)
+    writeFileSync(opener, openerHtml(server.url), { mode: 0o600 })
+    try {
+      chrome = spawnDetached(chromeArgv(opts.chrome, profile, pathToFileURL(opener).href), chromeLog)
+    } catch (e) {
+      // Only the spawn itself: any other failure of the run is not a Chrome that cannot start.
+      throw new KitError(
+        `Cannot start Chrome at ${opts.chrome}: ${reason(e)}`,
+        CHROME_HINT,
+        ExitCode.precondition,
+      )
+    }
     trackChild(chrome, true)
+    restartClock()
 
     let finished = false
     const done = server.done.then((result) => {
@@ -123,9 +190,7 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
       done,
       chrome.exited.then((code) => ({ exited: code })),
       stopped,
-      new Promise<'timeout'>((resolve) => {
-        timer = setTimeout(() => resolve('timeout'), timeoutMs)
-      }),
+      idle,
     ])
 
     // A page that posts `done` and a Chrome that exits right after are one outcome: the page's.
@@ -135,8 +200,8 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
     }
     if (result === 'timeout') {
       throw new KitError(
-        `Chrome did not finish rendering within ${duration(timeoutMs)}`,
-        `${server.images.size} of ${plan.jobs.length} images came back`,
+        `Chrome did not finish rendering: no image came back for ${duration(timeoutMs)}`,
+        `${server.images.size} of ${plan.jobs.length} images came back before that`,
       )
     }
     if ('exited' in result) {
@@ -145,7 +210,7 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
         logTail(chromeLog) ?? `Ran ${opts.chrome}`,
       )
     }
-    if (!result.ok) throw new KitError(`The shots page failed: ${result.error ?? 'no error given'}`)
+    if (!result.ok) throw pageFailure(plan.jobs, result, opts.root)
 
     const images = new Map<string, Uint8Array>()
     for (const job of plan.jobs) images.set(job.id, checked(job, server.images.get(job.id)))

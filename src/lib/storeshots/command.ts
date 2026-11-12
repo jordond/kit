@@ -6,9 +6,10 @@ import { CHROME_HINT, chromeBin } from '../chrome'
 import { ExitCode, KitError } from '../errors'
 import { emitJson, type Logger } from '../log'
 import { resolveSuite } from '../maestro/suites'
-import { metadataDirs, REVIEW_DIR } from '../release/metadata'
+import { metadataDirs } from '../release/metadata'
+import { isGenericFamily } from './fonts'
 import { pageBundle } from './page-bundle'
-import { planExport, repoPath } from './plan'
+import { isLocale, planExport, repoPath } from './plan'
 import { loadProject } from './project'
 import { renderJobs } from './render'
 import { APPLE_MAX_PER_CLASS, PLAY_MAX_PER_TYPE, type Store } from './sizes'
@@ -20,7 +21,7 @@ import type {
   StoreDestination,
   StudioProject,
 } from './types'
-import { writeExport } from './write'
+import { statOrSkip, writeExport } from './write'
 
 type Shots = NonNullable<KitConfig['shots']>
 
@@ -33,13 +34,23 @@ const STORE_NAME: Record<Store, string> = { apple: 'the App Store', google: 'Pla
 const STORE_MAX: Record<Store, number> = { apple: APPLE_MAX_PER_CLASS, google: PLAY_MAX_PER_TYPE }
 
 /**
- * Dirs of an iOS metadata dir that are not locales: supply's dir in a shared `fastlane/metadata`,
- * deliver's review contact, and deliver's `default` (text for every locale; it takes no screenshots).
+ * Dirs of an iOS metadata dir that deliver does not read as a locale, lower-cased (deliver compares
+ * without case). From fastlane 2.241.2, `deliver/lib/deliver/loader.rb` and `upload_metadata.rb`:
+ * the dirs it skips (`EXCEPTION_DIRECTORIES`: its three contact dirs, supply's `android` in a shared
+ * `fastlane/metadata`, frameit's `fonts`) and its special dirs (`SPECIAL_DIR_NAMES`: `default`, text
+ * for every locale, and `appleTV` and `iMessage`, which hold locale dirs of their own that export
+ * does not write).
  */
-const IOS_NOT_LOCALES = new Set(['android', REVIEW_DIR, 'default'])
-
-/** Families the browser resolves itself; every other family a slide names has to be in `shots.fonts`. */
-const GENERIC_FAMILIES = new Set(['sans-serif', 'serif', 'monospace', 'system-ui'])
+const IOS_NOT_LOCALES = new Set([
+  'trade_representative_contact_information',
+  'review_information',
+  'app_clip_review_information',
+  'android',
+  'fonts',
+  'default',
+  'appletv',
+  'imessage',
+])
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
 const lines = (items: readonly string[]): string => items.map((item) => `  ${item}`).join('\n')
@@ -55,15 +66,20 @@ function requireShots(config: KitConfig): Shots {
   return config.shots
 }
 
-/** The locale dirs of a store's metadata dir, sorted; none when the dir is absent. */
+/**
+ * The locale dirs of a store's metadata dir, sorted; none when the dir is absent. An entry that
+ * fails to stat (a dangling symlink) is not one.
+ */
 function listingLocales(store: Store, dir: string): string[] {
   if (!existsSync(dir)) return []
+  // A dir that cannot be a locale (`Old Backup`) is somebody's own, not a reason to stop.
   return readdirSync(dir)
     .filter(
       (entry) =>
         !entry.startsWith('.') &&
-        !(store === 'apple' && IOS_NOT_LOCALES.has(entry)) &&
-        statSync(join(dir, entry)).isDirectory(),
+        isLocale(entry) &&
+        !(store === 'apple' && IOS_NOT_LOCALES.has(entry.toLowerCase())) &&
+        statOrSkip(join(dir, entry))?.isDirectory() === true,
     )
     .sort()
 }
@@ -74,9 +90,6 @@ function listingLocales(store: Store, dir: string): string[] {
  * the `--locale` ones as given, or `en-US`.
  */
 function resolveDestinations(root: string, config: KitConfig, opts: ExportOptions): StoreDestination[] {
-  if (opts.out !== undefined && opts.out.trim() === '') {
-    throw new KitError('--out names no directory', 'e.g. --out build/store-shots', ExitCode.usage)
-  }
   if (opts.stores.length === 0) {
     throw new KitError('No store to export', '--store takes apple, google or both', ExitCode.usage)
   }
@@ -131,18 +144,22 @@ function resolveRawDir(root: string, config: KitConfig, shots: Shots): string {
   return resolve(root, raw)
 }
 
-/** Every file under `dir` as a `/`-separated path relative to it; empty when the dir is absent. */
+/**
+ * Every file under `dir` as a `/`-separated path relative to it; empty when the dir is absent. An
+ * entry that fails to stat (a dangling symlink) is left out, so a slide that needs it is missing.
+ */
 function listRaw(dir: string): Set<string> {
   const files = new Set<string>()
   const visit = (at: string, prefix: string): void => {
     for (const entry of readdirSync(at)) {
       if (entry.startsWith('.')) continue
       const rel = prefix ? `${prefix}/${entry}` : entry
-      if (statSync(join(at, entry)).isDirectory()) visit(join(at, entry), rel)
-      else files.add(rel)
+      const stat = statOrSkip(join(at, entry))
+      if (stat?.isDirectory()) visit(join(at, entry), rel)
+      else if (stat) files.add(rel)
     }
   }
-  if (existsSync(dir) && statSync(dir).isDirectory()) visit(dir, '')
+  if (statOrSkip(dir)?.isDirectory()) visit(dir, '')
   return files
 }
 
@@ -153,7 +170,7 @@ function listRaw(dir: string): Set<string> {
 function checkFonts(shots: Shots, plan: ExportPlan): void {
   const declared = new Set((shots.fonts ?? []).map((font) => font.family))
   const known = (family: string): boolean =>
-    declared.has(family) || GENERIC_FAMILIES.has(family.trim().toLowerCase())
+    declared.has(family) || isGenericFamily(family)
   const problems = new Set<string>()
   const families = new Set<string>()
   const undeclared = (what: string, family: string): void => {
@@ -164,10 +181,20 @@ function checkFonts(shots: Shots, plan: ExportPlan): void {
   for (const { slide } of plan.jobs) {
     const name = `slide "${slide.name}" (${slide.id})`
     if (slide.headline.text.trim()) undeclared(`${name} headline`, slide.headline.fontFamily)
+    // The badge and the brand wordmark have no family of their own: the page draws them in
+    // `shots.brand.font`, else in the headline family, whether or not the headline has text.
+    if (!shots.brand?.font) {
+      if (slide.badge.enabled && slide.badge.text.trim()) {
+        undeclared(`${name} badge (drawn in the headline family)`, slide.headline.fontFamily)
+      }
+      const lockup = slide.showMascot && slide.mascotPosition === 'top-center'
+      if (lockup && shots.brand?.wordmark?.trim()) {
+        undeclared(`${name} brand wordmark (drawn in the headline family)`, slide.headline.fontFamily)
+      }
+    }
     if (slide.subheadline.text.trim()) undeclared(`${name} subheadline`, slide.subheadline.fontFamily)
   }
-  if (shots.brand?.font !== undefined && plan.jobs.length > 0)
-    undeclared('shots.brand.font', shots.brand.font)
+  if (shots.brand?.font && plan.jobs.length > 0) undeclared('shots.brand.font', shots.brand.font)
   if (problems.size === 0) return
   const example = [...families][0]
   throw new KitError(
@@ -218,17 +245,6 @@ function requireChrome(): string {
   return chrome
 }
 
-/** Render the plan; a Chrome that cannot be started is a precondition failure, not a raw spawn error. */
-async function render(plan: ExportPlan, chrome: string): Promise<Map<string, Uint8Array>> {
-  const page = await pageBundle()
-  try {
-    return await renderJobs(plan, { chrome, page })
-  } catch (e) {
-    const code = (e as { code?: unknown } | null)?.code
-    if (e instanceof KitError || (code !== 'ENOENT' && code !== 'EACCES')) throw e
-    throw new KitError(`Cannot start Chrome at ${chrome}`, CHROME_HINT, ExitCode.precondition)
-  }
-}
 
 /** Per store and locale: how many screenshots of each set and their size; then what was removed and skipped. */
 function report(log: Logger, result: ExportResult): void {
@@ -291,7 +307,12 @@ export const exportShots: ExportShots = async (ctx, opts) => {
     const chrome = requireChrome()
     if (!ctx.flags.json)
       ctx.log.step(`Rendering ${plural(plan.jobs.length, 'screenshot')} in headless Chrome`)
-    const images = await render(plan, chrome)
+    const images = await renderJobs(plan, {
+      chrome,
+      page: await pageBundle(),
+      root,
+      verbose: ctx.flags.verbose ? (message) => ctx.log.dim(message) : undefined,
+    })
     outcome = await writeExport(plan, { root, images, force: opts.force, dryRun: false })
   }
 
