@@ -140,7 +140,7 @@ export function laneConfigEnv(root: string, config: KitConfig): Record<string, s
           KIT_IOS_BUNDLE_ID: ios.bundleIds[0]!,
           KIT_IOS_PROJECT: abs(root, ios.project),
           KIT_IOS_SCHEME: ios.scheme,
-          ...(ios.teamId ? { KIT_IOS_TEAM_ID: ios.teamId } : {}),
+          KIT_IOS_TEAM_ID: ios.teamId ?? '', // explicit: empty is "no team", an inherited one is not
         }
       : {}),
     ...(android ? { KIT_ANDROID_PACKAGE: android.packageName, KIT_ANDROID_MODULE: android.module } : {}),

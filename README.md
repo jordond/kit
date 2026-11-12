@@ -370,6 +370,7 @@ dir whose name cannot be a locale (`Old Backup`).
 `NN` is the slide's position and `<slug>` its name. Each dir gets a `.kit-shots.json` listing what
 export wrote. The next export replaces those files and removes the ones it no longer writes; an image
 in the same set that it did not write is in the way (exit 4) until it is moved or `--force` replaces it.
+So is a directory or a dangling link with an image name there: the uploader would take it and fail.
 Play's icon, feature graphic and other screenshot types are never touched. The PNGs have no alpha
 channel, which App Store Connect requires.
 
@@ -383,8 +384,8 @@ channel, which App Store Connect requires.
 | `--dry-run` | Print what would be written and removed; Chrome is not started and nothing changes |
 | `--json` | `{ dryRun, stores, written: [{ store, target, set, locale, slide, file, width, height }], removed, skipped }` |
 
-`--store`, `--locale` and `--out` given an empty value (`--out "$OUT"` with `OUT` unset) are a usage
-error (exit 2), not the default.
+`--store`, `--locale` and `--out` given an empty or whitespace-only value (`--out "$OUT"` with `OUT`
+unset) are a usage error (exit 2), not the default.
 
 Nothing is written unless every image came back at its exact size: a Chrome that exits, a page error or
 five minutes without a new image is exit 1 with the store dirs as they were. Every rendered PNG is held
@@ -764,12 +765,19 @@ names are deliver's list in the pinned fastlane: `ar-SA`, `bn-BD`, `ca`, `cs`, `
 second one after deleting the store's screenshots:
 
 - a directory with another name, such as `screenshots/en/`;
-- `screenshots/default/`, or `default`, `appleTV` or `iMessage` inside `appleTV/` or `iMessage/`:
-  deliver reads its files with no locale.
+- `screenshots/default/`, or `default`, `appleTV` or `iMessage` inside `appleTV/` or `iMessage/`,
+  when it holds an image: deliver reads its files with no locale. Without one it is left alone.
+
+An image push also stops with exit 4 when the absolute path of the screenshots directory (iOS) or
+the metadata directory (Android) contains one of `[ ] { } * ? \`: fastlane cannot read such a path.
+deliver and supply find the images with a glob, read these characters as a pattern, upload nothing
+and report success. Of several files for one Play image type (`icon.png` beside `icon.jpg`) supply
+uploads the last of `png`, `jpg`, `jpeg`, and that one is the file kit checks.
 
 Before the confirmation (and in `--dry-run`) kit reads every image it is about to upload. If the store
 would refuse any of them, the push stops with exit 4 and lists each file with its reason; nothing is
-uploaded and kit never rewrites the files.
+uploaded and kit never rewrites the files. A directory or a dangling link with an image name is listed
+too: fastlane would still try to upload it.
 
 | Store | Rule |
 | --- | --- |

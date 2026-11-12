@@ -178,7 +178,14 @@ export async function releaseStatus(
   const appRoot = appFastlaneDir(root, config)
   const outputs: Partial<Record<Platform, Record<string, string>>> = {}
   const steps: Step[] = platforms.map((platform) => {
-    const env = { ...storeCreds(platform), ...laneConfigEnv(root, config) }
+    // The lanes' two filters, explicitly empty: status reads every version and every track, and a
+    // lane inherits kit's environment, where the shell or the root `.env` may hold either.
+    const env = {
+      ...storeCreds(platform),
+      ...laneConfigEnv(root, config),
+      KIT_IOS_VERSION: '',
+      KIT_STATUS_TRACKS: '',
+    }
     return laneStep(
       `${platform} status`,
       appRoot,

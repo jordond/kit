@@ -270,7 +270,8 @@ export async function promoteMobile(
     ...common,
     KIT_IOS_VERSION: version,
     KIT_TESTFLIGHT_FROM_GROUP: fromGroup,
-    ...(build !== undefined ? { KIT_IOS_BUILD: String(build) } : {}),
+    // Explicit when there is none: empty is "the highest build in the group", an inherited one is not.
+    KIT_IOS_BUILD: build !== undefined ? String(build) : '',
   })
   if (platform === 'ios') {
     const steps = [
@@ -316,12 +317,13 @@ export async function promoteMobile(
           ...(to === 'prod' && !opts.draft ? { KIT_PLAY_ROLLOUT: String(rollout) } : {}),
           // Explicit either way, so an inherited value never decides it.
           KIT_PLAY_DRAFT: opts.draft ? '1' : '0',
-          ...(notes ? { KIT_RELEASE_NOTES: notes } : {}),
+          // Empty is "no notes" to every lane; unset, the lane would read the shell's or the root `.env`'s.
+          KIT_RELEASE_NOTES: notes ?? '',
         }
       : {
           ...iosEnv(),
           ...(to === 'beta' ? { KIT_TESTFLIGHT_GROUPS: groups } : {}),
-          ...(notes ? { KIT_RELEASE_NOTES: notes } : {}),
+          KIT_RELEASE_NOTES: notes ?? '',
         }
   const steps = [laneStep(`promote ${from} → ${to}`, appRoot, platform, lane, env)]
   const results = await runSteps([{ title: `${platform} promote`, steps }], flags, { bail: true })

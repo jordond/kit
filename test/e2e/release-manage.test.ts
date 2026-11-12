@@ -258,7 +258,7 @@ describe('kit release promote', () => {
     expect(promote!.env.KIT_PLAY_JSON_KEY).toEndWith('play.json')
     expect(promote!.env.KIT_PLAY_ROLLOUT).toBeUndefined()
     expect(promote!.env.KIT_PLAY_DRAFT).toBe('0')
-    expect(promote!.env.KIT_RELEASE_NOTES).toBeUndefined()
+    expect(promote!.env.KIT_RELEASE_NOTES).toBe('')
     expect(promote!.env.KIT_INTERNAL).toBeUndefined()
     expect(promote!.env.KIT_ANDROID_KEYSTORE_FILE).toBeUndefined()
     expect(promote!.cwd.replace(/^\/private/, '')).toBe(join(f.dir, 'client').replace(/^\/private/, ''))
@@ -478,7 +478,7 @@ describe('kit release promote', () => {
     expect(names()).toEqual(['ios promote_build', 'ios promote_testflight'])
     const [lookup, promote] = lanes()
     expect(lookup!.env).toMatchObject({ KIT_IOS_VERSION: '1.4.0', KIT_TESTFLIGHT_FROM_GROUP: 'alpha' })
-    expect(lookup!.env.KIT_IOS_BUILD).toBeUndefined()
+    expect(lookup!.env.KIT_IOS_BUILD).toBe('')
     expect(promote!.env).toMatchObject({
       KIT_IOS_VERSION: '1.4.0',
       KIT_IOS_BUILD: '7',
@@ -488,7 +488,7 @@ describe('kit release promote', () => {
       ASC_KEY_ID: 'KEYID123',
     })
     expect(promote!.env.KIT_ASC_KEY_PATH).toEndWith('asc-key.p8')
-    expect(promote!.env.KIT_RELEASE_NOTES).toBeUndefined()
+    expect(promote!.env.KIT_RELEASE_NOTES).toBe('')
     expect(promote!.env.KIT_IOS_IPA).toBeUndefined()
     expect(JSON.parse(r.stdout)).toMatchObject({
       build: 7,
@@ -615,6 +615,52 @@ describe('kit release promote', () => {
       KIT_RELEASE_NOTES: 'Bug fixes',
     })
     expect(lanes()[1]!.env.KIT_TESTFLIGHT_GROUPS).toBeUndefined()
+  })
+})
+
+describe('lane inputs are kit’s, whatever the shell or a root .env holds', () => {
+  // A lane inherits kit's environment: an input kit leaves unset would be read from there.
+  const STRAY = {
+    KIT_RELEASE_NOTES: 'notes of another release',
+    KIT_IOS_BUILD: '3',
+    KIT_IOS_VERSION: '0.9.0',
+    KIT_IOS_TEAM_ID: 'STRAYTEAM1',
+    KIT_STATUS_TRACKS: 'alpha',
+    KIT_ANDROID_CODE: '99',
+  }
+
+  test('promote android without --notes: no changelog, not the inherited one', async () => {
+    const r = await run(['release', 'promote', 'android', '--from', 'alpha', '--to', 'beta', '--yes'], STRAY)
+    expect(r.code).toBe(0)
+    const [status, promote] = lanes()
+    expect(status!.env.KIT_STATUS_TRACKS).toBe('alpha')
+    expect(promote!.env).toMatchObject({ KIT_RELEASE_NOTES: '', KIT_ANDROID_CODE: '40' })
+  })
+
+  test('promote ios without --notes or --build: What to Test is left alone, the build is the group’s latest', async () => {
+    // No release.ios.teamId: match signs with the API key's team, not an inherited one.
+    const config = join(f.dir, 'kit.config.ts')
+    writeFileSync(config, readFileSync(config, 'utf8').replace(/\s*teamId: 'TEAM123',/, ''))
+    sh(['git', 'commit', '-qam', 'chore: no team id'])
+    const r = await run(['release', 'promote', 'ios', '--from', 'alpha', '--to', 'beta', '--yes'], STRAY)
+    expect(r.code).toBe(0)
+    const [lookup, promote] = lanes()
+    expect(lookup!.env).toMatchObject({ KIT_IOS_BUILD: '', KIT_IOS_VERSION: '1.4.0', KIT_IOS_TEAM_ID: '' })
+    expect(promote!.env).toMatchObject({ KIT_IOS_BUILD: '7', KIT_RELEASE_NOTES: '', KIT_IOS_TEAM_ID: '' })
+  })
+
+  test('status reads every track and every version', async () => {
+    const r = await run(['release', 'status', '--json'], STRAY)
+    expect(r.code).toBe(0)
+    expect(names()).toEqual(['ios status', 'android status'])
+    for (const call of lanes()) expect(call.env).toMatchObject({ KIT_IOS_VERSION: '', KIT_STATUS_TRACKS: '' })
+  })
+
+  test('rollout without --build: the lane picks the release, not an inherited version code', async () => {
+    const r = await run(['release', 'rollout', 'android', '--halt', '--yes', '--json'], STRAY)
+    expect(r.code).toBe(0)
+    expect(lanes()[0]!.env).toMatchObject({ KIT_ROLLOUT_ACTION: 'halt', KIT_ANDROID_CODE: '' })
+    expect(JSON.parse(r.stdout)).toMatchObject({ build: 40 })
   })
 })
 

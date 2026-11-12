@@ -148,7 +148,8 @@ export async function rolloutMobile(
     ...laneConfigEnv(root, config),
     KIT_ROLLOUT_ACTION: plan.action,
     ...(plan.fraction !== undefined ? { KIT_PLAY_ROLLOUT: String(plan.fraction) } : {}),
-    ...(plan.build !== undefined ? { KIT_ANDROID_CODE: String(plan.build) } : {}),
+    // Explicit when there is none: empty is "the release in rollout", an inherited code is not.
+    KIT_ANDROID_CODE: plan.build !== undefined ? String(plan.build) : '',
   }
 
   if (!flags.json) process.stderr.write(`\n${pc.bold(summary)}\n\n`)
