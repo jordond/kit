@@ -177,6 +177,37 @@ describe('renderJobs', () => {
     expect(Date.now() - started).toBeGreaterThan(1500)
   })
 
+  test('the idle clock restarts only for a new image: one job posted again and again still times out', async () => {
+    const chrome = fakeChrome(mkdtempSync(join(dir, 'chrome-')))
+    process.env.FAKE_CHROME = 'hang'
+    const started = Date.now()
+    const pending = renderJobs(plan, { chrome: chrome.bin, page: PAGE, timeoutMs: 1000 }).then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    // The fake makes no request; this plays a page that re-posts its first job every 100ms for 3s.
+    let url: string | undefined
+    while (url === undefined && Date.now() - started < 3000) {
+      url = chrome.runs()[0]?.url
+      if (url === undefined) await Bun.sleep(20)
+    }
+    expect(url).toBeDefined()
+    const body = encodePng(6, 8, new Uint8Array(6 * 8 * 3))
+    const reposts = (async () => {
+      while (Date.now() - started < 3000) {
+        await fetch(new URL('out/ios-en-US-01', url), { method: 'POST', body }).catch(() => {})
+        await Bun.sleep(100)
+      }
+    })()
+    const e = failure(await pending)
+    const elapsed = Date.now() - started
+    await reposts
+    expect(e.message).toBe('Chrome did not finish rendering: no new image came back for 1s')
+    expect(e.hint).toBe('1 of 2 images came back before that')
+    // 1000ms after the first post, not 1000ms after the last repeat.
+    expect(elapsed).toBeLessThan(2500)
+  })
+
   test('a page failure on one job names the raw shot of that job', async () => {
     const { error } = await render('job-error', undefined, { root: dir })
     const e = failure(error)
@@ -223,7 +254,7 @@ describe('renderJobs', () => {
   test('a Chrome that never finishes is killed at the timeout, exit 1', async () => {
     const { error, profile } = await render('hang', 500)
     const e = failure(error)
-    expect(e.message).toBe('Chrome did not finish rendering: no image came back for 500ms')
+    expect(e.message).toBe('Chrome did not finish rendering: no new image came back for 500ms')
     expect(e.hint).toBe('0 of 2 images came back before that')
     expect(existsSync(profile!)).toBe(false)
   })

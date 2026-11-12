@@ -228,6 +228,11 @@ describe('kit shots export', () => {
       [['--locale='], '--locale'],
       [['--store', ''], '--store'],
       [['--store=', '--out', 'build/store-shots'], '--store'],
+      // whitespace is no value either: `--out " "` must not write under a directory named " "
+      [['--out', ' '], '--out'],
+      [['--out=\t '], '--out'],
+      [['--locale', '  '], '--locale'],
+      [['--store', ' ', '--out', 'build/store-shots'], '--store'],
     ] as const) {
       const r = await run([...args])
       expect(r.stderr).toContain(`${flag} has an empty value`)
@@ -235,6 +240,7 @@ describe('kit shots export', () => {
     }
     expect(chrome.calls()).toEqual([])
     expect(pngs()).toEqual([])
+    expect(ls('.')).not.toContain(' ')
     // An empty argument after `--` is not a flag value.
     expect((await run(['--dry-run', '--', '--out', ''])).stderr).not.toContain('has an empty value')
   })
@@ -266,21 +272,41 @@ describe('kit shots export', () => {
     expect(bad.code).toBe(2)
   })
 
-  test('a dangling symlink in the raw dir, a locale dir or a set dir is skipped', async () => {
+  test('a dangling symlink in the raw dir or a locale dir is skipped', async () => {
     setup()
     symlinkSync(path('gone.png'), path('maestro/screenshots/ios/gone.png'))
     symlinkSync(path('gone'), path('maestro/screenshots/gone-dir'))
     symlinkSync(path('gone'), path('fastlane/metadata/de-DE'))
-    mkdirSync(path(`${GOOGLE}/en-US/${PHONE}`), { recursive: true })
-    symlinkSync(path('gone.png'), path(`${GOOGLE}/en-US/${PHONE}/gone.png`))
-    mkdirSync(path(`${APPLE}/en-US`), { recursive: true })
-    symlinkSync(path('gone.png'), path(`${APPLE}/en-US/gone.png`))
 
     const r = await run(['--json'])
     expect(r.stderr).not.toContain('ENOENT')
     expect(r.code).toBe(0)
     expect(json(r.stdout).written).toHaveLength(12)
     expect(ls(APPLE)).toEqual(['en-US', 'fr-FR'])
+  })
+
+  test('a dangling symlink with an image name in an exported set is in the way (exit 4); --force removes it', async () => {
+    setup()
+    mkdirSync(path(`${GOOGLE}/en-US/${PHONE}`), { recursive: true })
+    symlinkSync(path('gone.png'), path(`${GOOGLE}/en-US/${PHONE}/gone.png`))
+    mkdirSync(path(`${APPLE}/en-US`), { recursive: true })
+    symlinkSync(path('gone.png'), path(`${APPLE}/en-US/gone.png`))
+
+    const r = await run()
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('2 images kit shots export did not write are in the way')
+    expect(r.stderr).toContain(`${APPLE}/en-US/gone.png`)
+    expect(r.stderr).toContain(`${GOOGLE}/en-US/${PHONE}/gone.png`)
+    expect(chrome.calls()).toEqual([])
+
+    const forced = await run(['--force', '--json'])
+    expect(forced.code).toBe(0)
+    expect(json(forced.stdout).removed).toEqual([
+      `${GOOGLE}/en-US/${PHONE}/gone.png`,
+      `${APPLE}/en-US/gone.png`,
+    ])
+    expect(ls(`${APPLE}/en-US`)).toEqual(APPLE_FILES)
+    expect(ls(`${GOOGLE}/en-US/${PHONE}`)).toEqual(GOOGLE_FILES)
   })
 
   test('--out writes <dir>/apple and <dir>/google and leaves the store dirs alone', async () => {

@@ -349,15 +349,38 @@ describe('writeExport', () => {
     expect(manifest(appleDir).files).toHaveLength(4)
   })
 
-  test('a dangling symlink in an exported set is skipped, not a stat error', async () => {
-    const link = join(googleDir, 'en-US', 'images', 'phoneScreenshots', 'gone.png')
-    mkdirSync(dirname(link), { recursive: true })
-    symlinkSync(join(root, 'nowhere.png'), link)
-    const result = await write(plan([google()]))
-    expect(result.written.map((w) => w.file)).toEqual(GOOGLE_EN)
-    expect(result.removed).toEqual([])
-    // Not an image kit can read, so not in the way and not kit's to remove.
-    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+  test('a dangling symlink or a directory with an image name in an exported set is in the way; --force removes it', async () => {
+    // deliver and supply would still take them from the set, and fail on them.
+    const link = 'fastlane/metadata/android/en-US/images/phoneScreenshots/gone.png'
+    mkdirSync(dirname(join(root, link)), { recursive: true })
+    symlinkSync(join(root, 'nowhere.png'), join(root, link))
+    const dir = 'fastlane/screenshots/en-US/folder.jpg'
+    put(`${dir}/inside.txt`, 'x')
+    // a directory at a path the export writes
+    mkdirSync(join(root, APPLE_EN[0]!))
+    put('nowhere-else.png', IPHONE_69)
+
+    const e = await rejected(write(plan([apple(), google()])))
+    expect(e.exitCode).toBe(ExitCode.precondition)
+    expect(e.message).toBe(
+      [
+        '3 images kit shots export did not write are in the way:',
+        `  ${APPLE_EN[0]}`,
+        `  ${dir}`,
+        `  ${link}`,
+      ].join('\n'),
+    )
+    expect(lstatSync(join(root, link)).isSymbolicLink()).toBe(true)
+
+    const result = await write(plan([apple(), google()]), { force: true })
+    expect(result.removed).toEqual([link, dir])
+    expect(result.written.map((w) => w.file)).toEqual([...APPLE_EN, ...GOOGLE_EN])
+    expect(tree().filter((f) => /\.(png|jpg)$/.test(f) || f.includes('folder.jpg'))).toEqual(
+      [...APPLE_EN, ...GOOGLE_EN, 'nowhere-else.png'].sort(),
+    )
+    expect(existsSync(join(root, dir))).toBe(false)
+    expect(lstatSync(join(root, link), { throwIfNoEntry: false })).toBeUndefined()
+    expect(lstatSync(join(root, APPLE_EN[0]!)).isFile()).toBe(true)
   })
 
   test('a job without a rendered image fails before anything is written', async () => {

@@ -90,6 +90,15 @@ function listingLocales(store: Store, dir: string): string[] {
  * the `--locale` ones as given, or `en-US`.
  */
 function resolveDestinations(root: string, config: KitConfig, opts: ExportOptions): StoreDestination[] {
+  // A blank value is a mistake (an unset variable), never the default: a blank `out` would resolve
+  // to the repo root, or to a directory named " ". The command also scans its argv, because the
+  // parser drops an empty value; this covers every other caller.
+  if (opts.out !== undefined && opts.out.trim() === '') {
+    throw new KitError('--out has an empty value', 'e.g. --out build/store-shots', ExitCode.usage)
+  }
+  if (opts.locales?.some((locale) => locale.trim() === '')) {
+    throw new KitError('--locale has an empty value', 'e.g. --locale en-US,fr-FR', ExitCode.usage)
+  }
   if (opts.stores.length === 0) {
     throw new KitError('No store to export', '--store takes apple, google or both', ExitCode.usage)
   }

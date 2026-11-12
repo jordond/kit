@@ -16,7 +16,7 @@ import type { Job, PageDone, RenderJobs } from './types'
  * per job. The page protocol is documented at `PagePlan` in `types.ts`.
  */
 
-/** How long the page may go without posting an image before the run is given up. */
+/** How long the page may go without posting a new image before the run is given up. */
 export const RENDER_TIMEOUT_MS = 5 * 60_000
 
 /** The file in the work dir that Chrome is started on: it sends Chrome on to the server URL. */
@@ -124,8 +124,9 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
   const chromeLog = join(work, 'chrome.log')
   const opener = join(work, OPENER_FILE)
 
-  // An idle timeout: the clock restarts with every image, so a long plan on a slow machine is fine
-  // as long as it keeps moving.
+  // An idle timeout: the clock restarts with every new image, so a long plan on a slow machine is
+  // fine as long as it keeps moving. A job posted again is not progress: a page that re-posts one
+  // job forever must still run out of time.
   let timer: ReturnType<typeof setTimeout> | undefined
   const { promise: idle, resolve: timeUp } = Promise.withResolvers<'timeout'>()
   let settled = false
@@ -134,7 +135,13 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
     // An image posted while the run is being torn down must not leave a timer holding kit open.
     if (!settled) timer = setTimeout(() => timeUp('timeout'), timeoutMs)
   }
-  const server = serveShots(plan, { page: opts.page, onImage: restartClock })
+  const received = new Set<string>()
+  const onImage = (jobId: string): void => {
+    if (received.has(jobId)) return
+    received.add(jobId)
+    restartClock()
+  }
+  const server = serveShots(plan, { page: opts.page, onImage })
 
   let chrome: Bun.Subprocess | undefined
   let disposed: Promise<void> | undefined
@@ -202,7 +209,7 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
     }
     if (result === 'timeout') {
       throw new KitError(
-        `Chrome did not finish rendering: no image came back for ${duration(timeoutMs)}`,
+        `Chrome did not finish rendering: no new image came back for ${duration(timeoutMs)}`,
         `${server.images.size} of ${plan.jobs.length} images came back before that`,
       )
     }

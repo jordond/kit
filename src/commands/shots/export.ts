@@ -1,6 +1,6 @@
 import { defineCommand } from '../../cli/command'
 
-/** The flags that take a value: an empty one is a mistake (an unset variable), never the default. */
+/** The flags that take a value: an empty or blank one is a mistake (an unset variable), never the default. */
 const VALUE_FLAGS = {
   store: 'e.g. --store apple',
   locale: 'e.g. --locale en-US,fr-FR',
@@ -8,14 +8,19 @@ const VALUE_FLAGS = {
 } as const
 
 /**
- * The value flags passed with an empty value (`--out ""`, `--out=`), read from the command line:
- * the parser drops an empty value, so `ctx.args` cannot tell `--out ""` from no `--out` at all.
+ * The value flags passed with an empty or whitespace-only value (`--out ""`, `--out=`, `--out " "`),
+ * read from the command line: the parser drops an empty value, so `ctx.args` cannot tell `--out ""`
+ * from no `--out` at all.
  */
 export function emptyValueFlags(argv: readonly string[]): string[] {
   const end = argv.indexOf('--')
   const tokens = end < 0 ? argv : argv.slice(0, end)
   return Object.keys(VALUE_FLAGS).filter((name) =>
-    tokens.some((token, i) => token === `--${name}=` || (token === `--${name}` && tokens[i + 1] === '')),
+    tokens.some((token, i) =>
+      token.startsWith(`--${name}=`)
+        ? token.slice(name.length + 3).trim() === ''
+        : token === `--${name}` && tokens[i + 1]?.trim() === '',
+    ),
   )
 }
 

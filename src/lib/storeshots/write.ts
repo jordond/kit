@@ -51,8 +51,10 @@ interface DestinationChange {
   jobs: Job[]
   /** Images removed: stale files of the manifest, and under `--force` the unlisted ones in the way. */
   remove: string[]
-  /** Unlisted images in a set being written. */
+  /** Images in a set being written that are in the way: the unlisted ones, and every entry of `irregular`. */
   unowned: string[]
+  /** Entries with an image name in a set being written that are not regular files: never kit's. */
+  irregular: string[]
   /** The manifest after the export; undefined when the dir has none and nothing is written. */
   manifest?: ShotsManifest
   /** The manifest while the export runs: everything listed before and everything about to be written. */
@@ -104,14 +106,17 @@ export function statOrSkip(path: string): Stats | undefined {
   }
 }
 
-/** The image files directly in `dir` (no dot files, no sub-dirs, nothing that fails to stat), sorted. */
-function imagesIn(dir: string): string[] {
+/**
+ * The entries with an image name directly in `dir` (no dot files), sorted. `regular` is false for
+ * a dir or a dangling symlink: deliver's and supply's globs return those too and the upload fails
+ * on them, so in an exported set they are in the way.
+ */
+function imagesIn(dir: string): { name: string; regular: boolean }[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir)
-    .filter(
-      (name) => !name.startsWith('.') && IMAGE.test(name) && statOrSkip(join(dir, name))?.isFile() === true,
-    )
+    .filter((name) => !name.startsWith('.') && IMAGE.test(name))
     .sort()
+    .map((name) => ({ name, regular: statOrSkip(join(dir, name))?.isFile() === true }))
 }
 
 /** The App Store display type of an image on disk, as deliver would file it; undefined when it has none. */
@@ -151,6 +156,7 @@ function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): 
       jobs,
       remove: [],
       unowned: [],
+      irregular: [],
       manifest: hasManifest ? manifestOf(listed) : undefined,
     }
   }
@@ -172,11 +178,14 @@ function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): 
   })
 
   const unowned: string[] = []
+  // Never a file kit wrote, listed or not: kit writes regular files only.
+  const irregular: string[] = []
   for (const [locale, targets] of sets) {
     if (store === 'google') {
-      for (const name of imagesIn(join(dir, locale, ...PLAY_SET_DIR))) {
+      for (const { name, regular } of imagesIn(join(dir, locale, ...PLAY_SET_DIR))) {
         const entry = [locale, ...PLAY_SET_DIR, name].join('/')
-        if (!owned.has(entry)) unowned.push(entry)
+        if (!regular) irregular.push(entry)
+        if (!regular || !owned.has(entry)) unowned.push(entry)
       }
       continue
     }
@@ -185,8 +194,14 @@ function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): 
         .filter((job) => job.locale === locale && targets.has(job.target))
         .map((job) => APPLE_SET_CLASS[job.set as Exclude<SetId, 'phone'>]),
     )
-    for (const name of imagesIn(join(dir, locale))) {
+    for (const { name, regular } of imagesIn(join(dir, locale))) {
       const entry = `${locale}/${name}`
+      // It has no display type to tell its set by; deliver loads it with the locale's images.
+      if (!regular) {
+        irregular.push(entry)
+        unowned.push(entry)
+        continue
+      }
       if (owned.has(entry)) continue
       // In the way: an image of a display type being written (deliver files it in the same set),
       // or one sitting at a path this export writes.
@@ -205,6 +220,7 @@ function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): 
     jobs,
     remove: [...new Set(remove)].sort(),
     unowned: unowned.sort(),
+    irregular,
     manifest: manifestOf([...listed.filter((entry) => !gone.has(entry)), ...writing]),
     interim: manifestOf([...listed, ...writing]),
   }
@@ -277,6 +293,8 @@ export const writeExport: WriteExport = async (plan, opts) => {
     if (change.jobs.length === 0 || !change.manifest || !change.interim) continue
     mkdirSync(dir, { recursive: true })
     writeManifest(dir, change.interim)
+    // Only under --force. Before the PNGs: a dir at a path the export writes cannot be renamed over.
+    for (const entry of change.irregular) rmSync(join(dir, entry), { recursive: true, force: true })
     for (const job of change.jobs) writeAtomic(job.file, images!.get(job.id)!)
     for (const entry of change.remove) rmSync(join(dir, entry), { force: true })
     writeManifest(dir, change.manifest)
