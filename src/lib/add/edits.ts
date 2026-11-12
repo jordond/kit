@@ -1,53 +1,163 @@
 /**
  * Surgical text edits for `kit add`: one more `include` in settings.gradle.kts, one more module in
- * project.yaml, one more target in kit.config.ts. Each keeps the file's ordering, comments and
- * formatting, is a no-op when the entry is already there, and gives up (`manual`) on a shape it
- * does not recognise instead of guessing. Pure: text in, text out.
+ * project.yaml, one more target in kit.config.ts. Each keeps the file's ordering, comments,
+ * formatting and line endings, is a no-op when the entry is already there, and gives up (`manual`)
+ * on a shape it does not recognise instead of guessing. Every edit is read back: it stands only
+ * when the new text parses to what was there plus the one entry. Pure: text in, text out.
  */
 
-// ---- settings.gradle.kts ----------------------------------------------------------------------
+// ---- line endings -----------------------------------------------------------------------------
+
+/**
+ * Edits work on LF text. A file that is CRLF throughout is converted for the edit and back after,
+ * so inserted lines end the way the file's do; mixed endings are left as they are.
+ */
+function lineEndings(text: string): { lf: string; restore: (edited: string) => string } {
+  const crlf = text.includes('\r\n') && !/(^|[^\r])\n/.test(text)
+  if (!crlf) return { lf: text, restore: (edited) => edited }
+  return { lf: text.replace(/\r\n/g, '\n'), restore: (edited) => edited.replace(/\n/g, '\r\n') }
+}
+
+// ---- settings.gradle(.kts) --------------------------------------------------------------------
 
 const projectPath = (s: string) => s.replace(/^:/, '')
 
-/** Project paths named by `include(...)` calls (Kotlin or Groovy), without the leading colon. */
-export function includedProjects(settings: string): string[] {
-  return includeStatements(settings).flatMap((s) => s.paths)
+interface IncludeStatement {
+  /** Just past the statement's last character (the `)` or the last string). */
+  end: number
+  indent: string
+  paths: string[]
 }
 
-function includeStatements(settings: string): { end: number; indent: string; paths: string[] }[] {
-  const out: { end: number; indent: string; paths: string[] }[] = []
-  // `include(":a", ":b")` across lines, or Groovy's `include ':a', ':b'`.
-  const re = /^([ \t]*)include(?:[ \t]*\(([^)]*)\)|[ \t]+(['"][^\n]*))/gm
-  for (const m of settings.matchAll(re)) {
-    const args = m[2] ?? m[3] ?? ''
-    const paths = [...args.matchAll(/(["'])([^"'\n]+)\1/g)].map((a) => projectPath(a[2]!))
-    out.push({ end: m.index + m[0].length, indent: m[1]!, paths })
+/**
+ * Every `include` statement outside comments and strings: the call form `include(":a", ":b")`
+ * (any line layout, comments inside) and Groovy's command form `include ':a', ':b'`, which
+ * continues over lines after a comma. Undefined when the text does not scan (unbalanced
+ * brackets, an unterminated string or comment).
+ */
+function includeStatements(settings: string): IncludeStatement[] | undefined {
+  const out: IncludeStatement[] = []
+  const quoted = (i: number) => settings[i] === '"' || settings[i] === "'"
+  /** Next index at or after `i` that is not a comment or blank; newlines count as blank when `lines`. */
+  const next = (i: number, lines: boolean): number => {
+    while (i < settings.length) {
+      const j = skip(settings, i)
+      if (j < 0) return -1
+      if (j !== i && settings[i] === '/') i = j
+      else if (settings[i] === ' ' || settings[i] === '\t' || (lines && /\s/.test(settings[i]!))) i++
+      else break
+    }
+    return i
+  }
+  for (let i = 0; i < settings.length; ) {
+    const j = skip(settings, i)
+    if (j < 0) return undefined
+    if (j !== i) {
+      i = j
+      continue
+    }
+    const word =
+      settings.startsWith('include', i) &&
+      !/[\w$.]/.test(settings[i - 1] ?? '') &&
+      !/[\w$]/.test(settings[i + 7] ?? '')
+    if (!word) {
+      i++
+      continue
+    }
+    const indent = /^[ \t]*/.exec(settings.slice(lineStart(settings, i)))![0]
+    const paths: string[] = []
+    const args = next(i + 7, false)
+    if (args < 0) return undefined
+    let end: number
+    if (settings[args] === '(') {
+      const close = matchClose(settings, args)
+      if (close < 0) return undefined
+      for (let k = args + 1; k < close; ) {
+        const after = skip(settings, k)
+        if (after < 0) return undefined
+        if (after !== k && quoted(k)) paths.push(projectPath(settings.slice(k + 1, after - 1)))
+        k = after === k ? k + 1 : after
+      }
+      end = close + 1
+    } else if (quoted(args)) {
+      let k = args
+      while (true) {
+        const after = skip(settings, k)
+        if (after < 0) return undefined
+        paths.push(projectPath(settings.slice(k + 1, after - 1)))
+        end = after
+        const comma = next(after, false)
+        if (comma < 0) return undefined
+        if (settings[comma] !== ',') break
+        k = next(comma + 1, true)
+        // A comma with no string after it: not a list this follows.
+        if (k < 0 || !quoted(k)) return undefined
+      }
+    } else {
+      i += 7
+      continue
+    }
+    out.push({ end, indent, paths })
+    i = end
   }
   return out
 }
 
 /**
- * `settings` with `include(":<path>")` after the last include (or at the end of the file); undefined
- * when the project is already included. `dir` (relative to the settings file) adds a `projectDir`
- * line: only needed when the directory is not the path with `:` as `/`.
+ * Project paths named by `include` statements (Kotlin or Groovy), without the leading colon;
+ * undefined when the file does not scan.
  */
-export function withInclude(settings: string, path: string, dir?: string): string | undefined {
+export function includedProjects(settings: string): string[] | undefined {
+  return includeStatements(lineEndings(settings).lf)?.flatMap((s) => s.paths)
+}
+
+/**
+ * The lines `withInclude` adds: Kotlin syntax, or Groovy's for a settings.gradle. `dir` (relative
+ * to the settings file) adds the `projectDir` line.
+ */
+export function includeLines(path: string, dir?: string, groovy = false): string[] {
   const name = projectPath(path)
-  const statements = includeStatements(settings)
-  if (statements.some((s) => s.paths.includes(name))) return undefined
-  const last = statements.at(-1)
-  const lines = (indent: string) => [
-    `${indent}include(":${name}")`,
-    ...(dir ? [`${indent}project(":${name}").projectDir = file(${JSON.stringify(dir)})`] : []),
+  const q = (v: string) => (groovy ? `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : JSON.stringify(v))
+  return [
+    groovy ? `include ${q(`:${name}`)}` : `include(${q(`:${name}`)})`,
+    ...(dir ? [`project(${q(`:${name}`)}).projectDir = file(${q(dir)})`] : []),
   ]
+}
+
+/**
+ * `settings` with the include after the last include statement (or at the end of the file);
+ * undefined when the project is already included. `dir` adds a `projectDir` line: only needed when
+ * the directory is not the path with `:` as `/`. `groovy`: the file is settings.gradle.
+ * `'manual'` when the file does not scan, or when reading the result back does not give exactly
+ * the projects it had plus this one (an include that opens a comment on its line, say).
+ */
+export function withInclude(
+  settings: string,
+  path: string,
+  dir?: string,
+  groovy = false,
+): string | 'manual' | undefined {
+  const { lf, restore } = lineEndings(settings)
+  const name = projectPath(path)
+  const statements = includeStatements(lf)
+  if (!statements) return 'manual'
+  const before = statements.flatMap((s) => s.paths)
+  if (before.includes(name)) return undefined
+  const last = statements.at(-1)
+  const lines = includeLines(name, dir, groovy)
+  let out: string
   if (!last) {
-    const base = settings === '' || settings.endsWith('\n') ? settings : `${settings}\n`
-    return `${base}${base.trim() === '' ? '' : '\n'}${lines('').join('\n')}\n`
+    const base = lf === '' || lf.endsWith('\n') ? lf : `${lf}\n`
+    out = `${base}${base.trim() === '' ? '' : '\n'}${lines.join('\n')}\n`
+  } else {
+    // After the statement's own line, so a trailing comment stays with it.
+    const eol = lf.indexOf('\n', last.end)
+    const at = eol < 0 ? lf.length : eol
+    out = `${lf.slice(0, at)}\n${lines.map((l) => `${last.indent}${l}`).join('\n')}${lf.slice(at)}`
   }
-  // After the statement's own line, so a trailing comment stays with it.
-  const eol = settings.indexOf('\n', last.end)
-  const at = eol < 0 ? settings.length : eol
-  return `${settings.slice(0, at)}\n${lines(last.indent).join('\n')}${settings.slice(at)}`
+  const after = includeStatements(out)?.flatMap((s) => s.paths)
+  if (after?.join('\n') !== [...before, name].join('\n')) return 'manual'
+  return restore(out)
 }
 
 // ---- project.yaml -----------------------------------------------------------------------------
@@ -63,17 +173,16 @@ const cleanEntry = (raw: string) =>
 const covers = (entry: string, dir: string) =>
   entry === dir || (/[*?{]/.test(entry) && new Bun.Glob(entry).match(dir))
 
-/**
- * project.yaml with `dir` added to `modules:` in the list's own style (block or one-line flow,
- * `./` prefix or not); undefined when it is already listed or matched by a glob entry; `'manual'`
- * when `modules` is written another way (a multi-line flow list, a scalar).
- */
-export function withProjectModule(projectYaml: string, dir: string): string | 'manual' | undefined {
+/** The text edit of `withProjectModule`, and the entry as written. */
+function editProjectModule(
+  projectYaml: string,
+  dir: string,
+): { out: string; entry: string } | 'manual' | undefined {
   const lines = projectYaml.split('\n')
   const start = lines.findIndex((l) => /^modules\s*:/.test(l))
   if (start < 0) {
     const base = projectYaml === '' || projectYaml.endsWith('\n') ? projectYaml : `${projectYaml}\n`
-    return `${base}${base.trim() === '' ? '' : '\n'}modules:\n  - ${dir}\n`
+    return { out: `${base}${base.trim() === '' ? '' : '\n'}modules:\n  - ${dir}\n`, entry: dir }
   }
   const head = lines[start]!
   const flow = head.match(/^(modules\s*:\s*\[)(.*?)(\]\s*(?:#.*)?)$/)
@@ -82,8 +191,9 @@ export function withProjectModule(projectYaml: string, dir: string): string | 'm
     if (entries.map(cleanEntry).some((e) => covers(e, dir))) return undefined
     const dot = entries.length > 0 && entries.every((e) => e.trim().replace(/^['"]/, '').startsWith('./'))
     const inner = flow[2]!.trimEnd()
-    lines[start] = `${flow[1]}${inner}${entries.length ? ', ' : ''}${dot ? './' : ''}${dir}${flow[3]}`
-    return lines.join('\n')
+    const entry = `${dot ? './' : ''}${dir}`
+    lines[start] = `${flow[1]}${inner}${entries.length ? ', ' : ''}${entry}${flow[3]}`
+    return { out: lines.join('\n'), entry }
   }
   if (!/^modules\s*:\s*(#.*)?$/.test(head)) return 'manual'
   let last = start
@@ -100,8 +210,36 @@ export function withProjectModule(projectYaml: string, dir: string): string | 'm
   }
   if (entries.map(cleanEntry).some((e) => covers(e, dir))) return undefined
   const dot = entries.length > 0 && entries.every((e) => e.replace(/^['"]/, '').startsWith('./'))
-  lines.splice(last + 1, 0, `${indent}- ${dot ? './' : ''}${dir}`)
-  return lines.join('\n')
+  const entry = `${dot ? './' : ''}${dir}`
+  lines.splice(last + 1, 0, `${indent}- ${entry}`)
+  return { out: lines.join('\n'), entry }
+}
+
+/** `modules` as a YAML parser reads it; undefined when the file does not parse or it is not a list. */
+function yamlModules(projectYaml: string): unknown[] | undefined {
+  try {
+    const doc = Bun.YAML.parse(projectYaml) as { modules?: unknown } | null
+    const modules = doc?.modules ?? []
+    return Array.isArray(modules) ? modules : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * project.yaml with `dir` added to `modules:` in the list's own style (block or one-line flow,
+ * `./` prefix or not); undefined when it is already listed or matched by a glob entry; `'manual'`
+ * when `modules` is written another way (a multi-line flow list, a scalar), or when a YAML parser
+ * does not read the result as the same list plus this entry.
+ */
+export function withProjectModule(projectYaml: string, dir: string): string | 'manual' | undefined {
+  const { lf, restore } = lineEndings(projectYaml)
+  const edit = editProjectModule(lf, dir)
+  if (edit === undefined || edit === 'manual') return edit
+  const before = yamlModules(lf)
+  const after = yamlModules(edit.out)
+  if (!before || JSON.stringify(after) !== JSON.stringify([...before, edit.entry])) return 'manual'
+  return restore(edit.out)
 }
 
 // ---- kit.config.ts ----------------------------------------------------------------------------
@@ -300,7 +438,8 @@ function targetsObject(text: string, config: ObjectShape): ObjectShape | 'none' 
 }
 
 /** Target names in the config's `targets: { … }` literal; undefined when the file is not that shape. */
-export function configTargets(text: string): string[] | undefined {
+export function configTargets(source: string): string[] | undefined {
+  const text = lineEndings(source).lf
   const config = configObject(text)
   const targets = config && targetsObject(text, config)
   if (!targets) return undefined
@@ -331,7 +470,8 @@ export type TargetEdit =
  * last property when there is none). Only a config written as `export default {…}` or
  * `export default defineConfig({…})` with plain `key: value` properties is edited.
  */
-export function withTarget(text: string, name: string, entry: TargetEntry): TargetEdit {
+export function withTarget(source: string, name: string, entry: TargetEntry): TargetEdit {
+  const { lf: text, restore } = lineEndings(source)
   const snippet = targetSnippet(name, entry, text)
   const manual: TargetEdit = { status: 'manual', snippet: `${snippet},` }
   const config = configObject(text)
@@ -351,5 +491,5 @@ export function withTarget(text: string, name: string, entry: TargetEntry): Targ
   const before = targets === 'none' ? [] : targets.properties.map((p) => p.name)
   const after = content === undefined ? undefined : configTargets(content)
   if (content === undefined || after?.join('\n') !== [...before, name].join('\n')) return manual
-  return { status: 'edited', content }
+  return { status: 'edited', content: restore(content) }
 }

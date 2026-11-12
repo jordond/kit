@@ -76,6 +76,9 @@ kit add target api --kind worker --dir apps/api  # worker | vite | astro | docke
   maps to directories. The Kotlin toolchain names a module after its directory, so names do not nest there.
 - A file that already exists is never overwritten: the command lists them and exits 2. `--force` overwrites.
   A module that is already included or listed is left as it is.
+- Every edit keeps the file's line endings and is read back before it is written. A `settings.gradle` gets
+  Groovy syntax (`include ':core'`). A settings file or `project.yaml` kit cannot edit safely is left
+  untouched: the line to add goes to stdout and the exit code is 1.
 - `kit add target` appends to `targets: { … }` in `kit.config.ts` (or `.kit/kit.config.ts`) with a text edit
   that keeps the file as written, then loads the config to prove it. A config it cannot edit safely
   (`targets` from a variable, a spread, a wrapper) is left untouched: the line to paste goes to stdout and
