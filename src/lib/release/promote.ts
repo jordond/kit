@@ -314,7 +314,8 @@ export async function promoteMobile(
           KIT_PLAY_PROMOTE_TO: to,
           KIT_ANDROID_CODE: String(build),
           ...(to === 'prod' && !opts.draft ? { KIT_PLAY_ROLLOUT: String(rollout) } : {}),
-          ...(opts.draft ? { KIT_PLAY_DRAFT: '1' } : {}),
+          // Explicit either way, so an inherited value never decides it.
+          KIT_PLAY_DRAFT: opts.draft ? '1' : '0',
           ...(notes ? { KIT_RELEASE_NOTES: notes } : {}),
         }
       : {

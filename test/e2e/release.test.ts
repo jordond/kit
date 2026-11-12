@@ -136,6 +136,9 @@ describe('kit release android', () => {
       ['release', 'android', '-t', 'prod', '--rollout', '0.25', '--code', '100', '--json'],
       {
         GITHUB_ACTIONS: 'true',
+        // Stray values in the shell or the root .env must not decide either flag.
+        KIT_INTERNAL: '1',
+        KIT_PLAY_DRAFT: '1',
       },
     )
     expect(r.code).toBe(0)
@@ -145,8 +148,9 @@ describe('kit release android', () => {
       KIT_PLAY_TRACK: 'prod',
       KIT_PLAY_ROLLOUT: '0.25',
       KIT_ANDROID_CODE: '100',
+      KIT_PLAY_DRAFT: '0',
     })
-    expect(calls[0]!.env.KIT_INTERNAL).toBeUndefined()
+    expect(calls[0]!.env.KIT_INTERNAL).toBe('0')
     expect(readFileSync(join(f.dir, '.gradle.log'), 'utf8')).toContain(
       'gradlew :android:verifyBaselineProfile',
     )

@@ -257,7 +257,7 @@ describe('kit release promote', () => {
     })
     expect(promote!.env.KIT_PLAY_JSON_KEY).toEndWith('play.json')
     expect(promote!.env.KIT_PLAY_ROLLOUT).toBeUndefined()
-    expect(promote!.env.KIT_PLAY_DRAFT).toBeUndefined()
+    expect(promote!.env.KIT_PLAY_DRAFT).toBe('0')
     expect(promote!.env.KIT_RELEASE_NOTES).toBeUndefined()
     expect(promote!.env.KIT_INTERNAL).toBeUndefined()
     expect(promote!.env.KIT_ANDROID_KEYSTORE_FILE).toBeUndefined()

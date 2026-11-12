@@ -363,8 +363,9 @@ export async function releaseMobile(
   /** After the tag: a failure here warns but doesn't fail a release the store already has. */
   const post: Step[] = []
   // kit.release bakes BuildConstants.IS_INTERNAL from KIT_INTERNAL (Gradle and the Xcode script phase
-  // inherit it). A build promoted from internal to a later track keeps it.
-  const internalFlag: Record<string, string> = track === 'internal' ? { KIT_INTERNAL: '1' } : {}
+  // inherit it). A build promoted from internal to a later track keeps it. Always explicit: the lane
+  // inherits the shell and the root `.env`, and a stray KIT_INTERNAL=1 there must not mark a prod build.
+  const internalFlag: Record<string, string> = { KIT_INTERNAL: track === 'internal' ? '1' : '0' }
   if (platform === 'ios') {
     steps.push(
       laneStep(
@@ -462,7 +463,8 @@ export async function releaseMobile(
           KIT_ANDROID_CODE: String(build),
           KIT_PLAY_TRACK: track,
           ...(track === 'prod' ? { KIT_PLAY_ROLLOUT: String(rollout) } : {}),
-          ...(opts.draft ? { KIT_PLAY_DRAFT: '1' } : {}),
+          // Explicit either way, so an inherited value never decides it.
+          KIT_PLAY_DRAFT: opts.draft ? '1' : '0',
           KIT_RELEASE_NOTES: notes!,
         })),
       )
