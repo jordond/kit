@@ -35,6 +35,14 @@ export default defineCommand({
     const state = await loadEnv(root, config)
     assertValid(state)
 
+    // What is pushed is what kit reads; say so when Bun or dotenv would read a line differently.
+    const { dotenvAmbiguities } = await import('../../lib/dotenv')
+    const dotenv = Bun.file(`${root}/.env`)
+    if (await dotenv.exists()) {
+      for (const w of dotenvAmbiguities(await dotenv.text()))
+        ctx.log.warn(`.env:${w.line} ${w.key} ${w.reason}. ${w.hint}`)
+    }
+
     const report = await runPush(ctx, root, config, state.values, selection)
     if (ctx.flags.json) emitJson({ dryRun: report.dryRun, ok: report.ok, outcomes: report.outcomes })
     if (!report.ok) process.exitCode = ExitCode.failed

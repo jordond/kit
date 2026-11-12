@@ -29,11 +29,16 @@ export default defineCommand({
       ? skippedGithub('--schema-only')
       : await checkGithubSecrets(root, config)
     const ok = !state.issues.length && !drift.length && github.status !== 'missing'
+    // Lines Bun, dotenv and kit read differently: a warning, since the value in use may still be right.
+    const { dotenvAmbiguities } = await import('../../lib/dotenv')
+    const dotenv = Bun.file(`${root}/.env`)
+    const ambiguous = (await dotenv.exists()) ? dotenvAmbiguities(await dotenv.text()) : []
 
     if (ctx.flags.json) {
-      emitJson({ ok, invalid: state.issues, drift, github })
+      emitJson({ ok, invalid: state.issues, drift, github, ambiguous })
     } else {
       for (const i of state.issues) ctx.log.error(`${i.key}: ${i.message}`)
+      for (const w of ambiguous) ctx.log.warn(`.env:${w.line} ${w.key} ${w.reason}. ${w.hint}`)
       for (const d of drift) {
         const keys = [...d.added, ...d.updated, ...d.removed]
         ctx.log.error(

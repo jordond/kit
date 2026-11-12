@@ -374,6 +374,11 @@ INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
   (exit 3, naming the key) a value no reader would get back intact: one that needs quotes and holds
   `'`, `"` and a backtick or ends in a backslash, a multi-line value holding `"` or a literal `\n`,
   and in `.env` one ending in `\$`. Base64-encode such a value.
+- `kit env check`, `kit env push` and `kit doctor` warn about hand-written `.env` lines that Bun, dotenv
+  and kit read differently (names and line numbers only): a `#` inside an unquoted value, an unescaped
+  `$`, a quote that does not close on its line. What runs locally and what `kit env push` sends could
+  differ there; the warning says how to write the line. `kit env check --json` lists them under
+  `ambiguous`.
 - It confirms first, since the old value stops working once the new one is pushed (`--yes` skips).
   `--dry-run` writes nothing and lists what would rotate and where it would be pushed.
 - `--push` pushes every secret of the remotes that hold the key. The remotes are listed first (a

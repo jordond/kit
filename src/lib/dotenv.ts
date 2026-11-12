@@ -104,3 +104,51 @@ export function dotenvEncode(key: string, value: string, format: DotenvFormat, p
 export function dotenvLine(key: string, value: string, format: DotenvFormat, prefer?: string): string {
   return `${key}=${dotenvEncode(key, value, format, prefer)}`
 }
+
+export interface DotenvAmbiguity {
+  key: string
+  /** 1-based line in the file. */
+  line: number
+  reason: string
+  /** How to write the line so every reader agrees. */
+  hint: string
+}
+
+/**
+ * Hand-written `.env` lines that Bun (which loads `.env` before kit starts), dotenv and kit read as
+ * different values, so what runs locally and what `kit env push` sends could differ. Names, line
+ * numbers and reasons only: values never leave this function. kit's own writers never produce these.
+ */
+export function dotenvAmbiguities(text: string): DotenvAmbiguity[] {
+  const out: DotenvAmbiguity[] = []
+  text.split('\n').forEach((full, i) => {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(full)
+    if (!m) return
+    const [, key, raw] = m as unknown as [string, string, string]
+    if (!raw || raw.startsWith('#')) return
+    const add = (reason: string, hint: string) => out.push({ key, line: i + 1, reason, hint })
+    const open = /^(['"`])/.exec(raw)?.[1]
+    const quoted = /^(['"`])(.*?)\1\s*(?:#.*)?$/.exec(raw)
+    if (open && !quoted) {
+      add(
+        'opens a quote that does not close on the line (kit reads one line; Bun and dotenv read on)',
+        'Put the value on one line, with \\n for line breaks inside double quotes',
+      )
+      return
+    }
+    const value = quoted ? quoted[2]! : raw.replace(/\s+#.*$/, '')
+    if (!quoted && /\S#/.test(value)) {
+      add(
+        'has a # in an unquoted value (Bun and dotenv stop there; kit keeps it)',
+        `Quote the value: ${key}='…'`,
+      )
+    }
+    if (/(?<!\\)\$(?=[\s\S])/.test(value)) {
+      add(
+        'has an unescaped $ (Bun expands it as a variable, also inside quotes; kit keeps it)',
+        'Write \\$ for a literal dollar sign',
+      )
+    }
+  })
+  return out
+}

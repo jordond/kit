@@ -448,3 +448,52 @@ describe('rewriteKey and dotenv syntax', () => {
     expect(render({ path: 'p', lines: [{ name: 'K', source: 'K', value: '' }] }, {})).toContain('\nK=\n')
   })
 })
+
+describe('dotenvAmbiguities', () => {
+  test('flags lines Bun, dotenv and kit read differently, by name and line only', async () => {
+    const { dotenvAmbiguities } = await import('../../src/lib/dotenv')
+    const text = [
+      'OK=plain',
+      'COMMENTED=value # note',
+      "QUOTED='a#b $x is fine here? no'",
+      'HASH=abc#def',
+      'DOLLAR=$2b$10$abc',
+      'ESCAPED=a\\$b',
+      'TRAILING=ends$',
+      'OPEN="line one',
+      'EMPTY= # note',
+      '# COMMENT=a#b',
+      'export BOTH=a#b$c',
+    ].join('\n')
+    const found = dotenvAmbiguities(text)
+    expect(found.map((w) => [w.key, w.line])).toEqual([
+      ['QUOTED', 3],
+      ['HASH', 4],
+      ['DOLLAR', 5],
+      ['OPEN', 8],
+      ['BOTH', 11],
+      ['BOTH', 11],
+    ])
+    expect(found.find((w) => w.key === 'HASH')!.reason).toContain('#')
+    expect(found.find((w) => w.key === 'QUOTED')!.reason).toContain('$')
+    expect(JSON.stringify(found)).not.toContain('abc')
+    expect(JSON.stringify(found)).not.toContain('2b')
+  })
+
+  test('nothing kit writes is flagged', async () => {
+    const { dotenvAmbiguities, dotenvLine } = await import('../../src/lib/dotenv')
+    for (const value of [
+      'a#b',
+      ' padded ',
+      '$2b$10$abc',
+      'a$ b',
+      "it's",
+      'x # y',
+      'line\nbreak',
+      'plain',
+      '',
+    ]) {
+      expect(dotenvAmbiguities(dotenvLine('K', value, 'env'))).toEqual([])
+    }
+  })
+})

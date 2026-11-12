@@ -1,4 +1,5 @@
 import type { KitConfig } from '../../config/schema'
+import { dotenvAmbiguities } from '../dotenv'
 import { wrapperVersion } from '../toolchain'
 import type { Fix } from './fixes'
 
@@ -275,6 +276,16 @@ export function checkEnvFile(example: string | undefined, env: string | undefine
       status: 'warn',
       detail: `missing ${absent.join(', ')}`,
       hint: 'Add them to .env',
+    }
+  }
+  const ambiguous = dotenvAmbiguities(env)
+  if (ambiguous.length) {
+    return {
+      id: 'env',
+      label,
+      status: 'warn',
+      detail: `read differently by Bun, dotenv and kit: ${[...new Set(ambiguous.map((w) => w.key))].join(', ')}`,
+      hint: 'Run `kit env check` for the lines and how to write them',
     }
   }
   return { id: 'env', label, status: 'ok', detail: 'complete' }
