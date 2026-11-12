@@ -127,9 +127,83 @@ export function parseVersionUpload(output: string): VersionUpload {
   }
 }
 
-/** `wrangler rollback [version-id]`; `--yes` because kit has already asked. */
-export function rollbackArgs(opts: { to?: string; env?: string; message: string }): string[] {
-  return ['rollback', ...(opts.to ? [opts.to] : []), ...envArgs(opts.env), '--message', opts.message, '--yes']
+/**
+ * `wrangler rollback <version-id>`. wrangler declares `--yes` but never reads it: kit asks, then runs
+ * this with no terminal on stdin, where wrangler takes the default (yes) for each of its prompts.
+ */
+export function rollbackArgs(opts: { to: string; env?: string; message: string }): string[] {
+  return ['rollback', opts.to, ...envArgs(opts.env), '--message', opts.message]
+}
+
+/** `wrangler deployments list --json` / `wrangler versions list --json`: what rollback reads to pick a version. */
+export function listArgs(what: 'deployments' | 'versions', env?: string): string[] {
+  return [what, 'list', ...envArgs(env), '--json']
+}
+
+export interface RollbackTarget {
+  /** Version id to hand to `wrangler rollback`. */
+  version: string
+  /** When that version was deployed (ISO). */
+  deployed: string
+  /** Secret-only deployments made since: their values go back with the rollback. */
+  secretChanges: number
+}
+
+const triggeredBy = (v: unknown): unknown =>
+  isRecord(v) && isRecord(v.annotations) ? v.annotations['workers/triggered_by'] : undefined
+
+/**
+ * The version to roll back to: the newest earlier deployment whose code differs from what is live.
+ * wrangler's own default is "the deployment before the latest", but every `wrangler secret put`
+ * makes a deployment (a new version: the same code, one secret changed), so after a secrets push
+ * that default only undoes the last secret and leaves the bad code live. Here a secret-only
+ * deployment counts as the code of the deployment before it.
+ *
+ * Input: the JSON of `deployments list` (`[{ created_on, versions: [{ version_id, percentage }],
+ * annotations }]`) and of `versions list` (`[{ id, annotations }]`, the recent ones only). Undefined
+ * when there is no earlier code version, or the listing is not that shape.
+ */
+export function pickRollback(deploymentsJson: string, versionsJson = '[]'): RollbackTarget | undefined {
+  let deployments: unknown
+  let versions: unknown
+  try {
+    deployments = JSON.parse(deploymentsJson)
+    versions = JSON.parse(versionsJson)
+  } catch {
+    return undefined
+  }
+  if (!Array.isArray(deployments)) return undefined
+  const secretVersions = new Set<string>()
+  for (const v of Array.isArray(versions) ? versions : []) {
+    if (isRecord(v) && typeof v.id === 'string' && triggeredBy(v) === 'secret') secretVersions.add(v.id)
+  }
+  const stable: { version: string; deployed: string; secret: boolean }[] = []
+  for (const d of deployments) {
+    if (!isRecord(d) || typeof d.created_on !== 'string' || !Array.isArray(d.versions)) continue
+    const full = d.versions.find((v) => isRecord(v) && v.percentage === 100)
+    if (!isRecord(full) || typeof full.version_id !== 'string') continue
+    const secret = triggeredBy(d) === 'secret' || secretVersions.has(full.version_id)
+    stable.push({ version: full.version_id, deployed: d.created_on, secret })
+  }
+  stable.sort((a, b) => a.deployed.localeCompare(b.deployed))
+  // Oldest first: a version's code is its own, or for a secret-only one the code deployed before it.
+  const codeOf = new Map<string, string>()
+  const codes: string[] = []
+  for (const [i, d] of stable.entries()) {
+    const code = codeOf.get(d.version) ?? (d.secret && i > 0 ? codes[i - 1]! : d.version)
+    codeOf.set(d.version, code)
+    codes.push(code)
+  }
+  const live = codes.at(-1)
+  for (let i = stable.length - 2; i >= 0; i--) {
+    if (codes[i] === live) continue
+    return {
+      version: stable[i]!.version,
+      deployed: stable[i]!.deployed,
+      secretChanges: stable.slice(i + 1).filter((d) => d.secret).length,
+    }
+  }
+  return undefined
 }
 
 /** `wrangler tail`, with anything after `--` passed through. */
@@ -181,7 +255,9 @@ export function parsePr(stdout: string, target: string): { number: number; comme
     const marker = previewMarker(target)
     for (const c of comments) {
       if (!isRecord(c) || typeof c.body !== 'string' || typeof c.url !== 'string') continue
-      if (c.body.includes(marker)) {
+      // Only a comment the gh user wrote that opens with the marker: a person quoting the marker in
+      // their own comment must never have it overwritten.
+      if (c.viewerDidAuthor === true && c.body.startsWith(marker)) {
         return { number: pr.number, commentId: /issuecomment-(\d+)/.exec(c.url)?.[1] }
       }
     }
