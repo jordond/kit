@@ -220,6 +220,69 @@ describe('kit shots', () => {
   })
 })
 
+describe('kit shots beside kit shots export', () => {
+  const SIMS = JSON.stringify({
+    devices: {
+      'com.apple.CoreSimulator.SimRuntime.iOS-26-1': [
+        {
+          udid: 'UDID-PHONE',
+          name: 'iPhone 17',
+          state: 'Booted',
+          isAvailable: true,
+          deviceTypeIdentifier: 'x',
+        },
+      ],
+    },
+  })
+
+  test('`kit shots ios --dry-run` still takes the target as a positional', async () => {
+    setup(['xcrun'])
+    f.script('xcrun', `case "$*" in "simctl list devices -j") echo '${SIMS}' ;; esac`)
+    const r = await f.kit(['shots', 'ios', '--no-fixture', '--dry-run', '--json'], {
+      env: env(),
+    })
+    expect(r.stderr).toContain('using iPhone 17')
+    expect(r.code).toBe(0)
+    const doc = JSON.parse(r.stdout)
+    expect(doc).toMatchObject({ suite: 'shots', target: 'ios' })
+    expect(doc.plan.some((c: string[]) => c.join(' ').includes('--include-tags screenshots'))).toBe(true)
+    expect(maestroCalls()).toEqual([])
+  })
+
+  test('`kit shots android --dry-run` plans the suite, and a bad target is still the shots usage error', async () => {
+    setup()
+    const ok = await f.kit(['shots', 'android', '--no-fixture', '--dry-run', '--json'], { env: env() })
+    expect(ok.code).toBe(0)
+    expect(JSON.parse(ok.stdout)).toMatchObject({ suite: 'shots', target: 'android' })
+    const bad = await f.kit(['shots', 'exprot'], { env: env() })
+    expect(bad.code).toBe(2)
+    expect(bad.stderr).toContain('kit shots <ios|ipad|android>')
+  })
+
+  test('`kit shots export --help` shows the export flags; `kit shots --help` lists export', async () => {
+    setup()
+    const help = await f.kit(['shots', 'export', '--help'])
+    expect(help.code).toBe(0)
+    expect(help.stdout).toContain('kit shots export [options]')
+    for (const flag of ['--store', '--locale', '--out', '--allow-missing', '--force']) {
+      expect(help.stdout).toContain(flag)
+    }
+    const group = await f.kit(['shots', '--help'])
+    expect(group.code).toBe(0)
+    expect(group.stdout).toContain('kit shots <command> [options]')
+    expect(group.stdout).toMatch(/export\s+Render the store screenshots/)
+    expect(group.stdout).toContain('--full')
+  })
+
+  test('`kit shots export` resolves to the export command: a bad --store is its usage error', async () => {
+    setup()
+    const r = await f.kit(['shots', 'export', '--store', 'amazon'], { env: env() })
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('--store takes apple, google or both')
+    expect(log()).toEqual([])
+  })
+})
+
 describe('kit maestro', () => {
   test('passes arguments through with the env, in the repo root, and returns the exit code', async () => {
     setup()

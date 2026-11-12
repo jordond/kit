@@ -229,7 +229,16 @@ async function main(argv: string[]): Promise<number> {
     }
   }
 
-  const subCommands = buildTree(leaves, loaded, rt)
+  // A command that also has subcommands (`kit shots <target>` beside `kit shots export`): gunshi
+  // reports the first positional of such a command as "Command not found". Run it from a tree
+  // without its children; its own `--help` (no positional) keeps them so they are listed.
+  const own = target
+  const listsChildren = wantsHelp && own !== undefined && tokens.length === own.path.length
+  const treeLeaves =
+    own && !listsChildren
+      ? leaves.filter((l) => !(l.path.length > own.path.length && startsWith(l.path, own.path)))
+      : leaves
+  const subCommands = buildTree(treeLeaves, loaded, rt)
   const entry: Command = {
     name: 'kit',
     description: config ? `kit · ${config.name}` : 'kit',

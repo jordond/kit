@@ -1,0 +1,183 @@
+import { afterAll, describe, expect, test } from 'bun:test'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { configSchema } from '../../src/config/schema'
+import { findChrome } from '../../src/lib/chrome'
+import { KitError } from '../../src/lib/errors'
+import {
+  APPLE_SET_CLASS,
+  APPLE_SIZES,
+  appleClass,
+  parseStores,
+  playProblems,
+  resolveSets,
+  SET_SIZES,
+} from '../../src/lib/storeshots/sizes'
+import { type ExportPlan, pagePlan, type Slide } from '../../src/lib/storeshots/types'
+
+describe('shots config', () => {
+  const maestro = { dir: 'maestro' }
+
+  test('accepts the full block', () => {
+    const config = configSchema.parse({
+      name: 'app',
+      maestro,
+      shots: {
+        project: 'brand/studio.json',
+        fonts: [{ family: 'Nunito', file: 'brand/fonts/nunito.woff2', weight: '400 800' }],
+        brand: { mark: 'brand/logo.svg', wordmark: 'app', color: '#46291B', font: 'Nunito' },
+        sets: { ios: 'iphone-6.5' },
+        pages: [{ file: 'brand/feature.html', out: 'meta/featureGraphic.png', width: 1024, height: 500 }],
+      },
+    })
+    expect(resolveSets(config)).toEqual({ ios: 'iphone-6.5', ipad: 'ipad-13', android: 'phone' })
+  })
+
+  test('without a maestro block, shots needs raw', () => {
+    const r = configSchema.safeParse({ name: 'app', shots: { project: 'studio.json' } })
+    expect(r.success).toBe(false)
+    expect(r.error?.issues[0]).toMatchObject({ path: ['shots', 'raw'] })
+    expect(
+      configSchema.safeParse({ name: 'app', shots: { project: 'studio.json', raw: 'shots' } }).success,
+    ).toBe(true)
+  })
+
+  test('rejects an unknown set and an unknown key', () => {
+    const base = { name: 'app', maestro }
+    expect(
+      configSchema.safeParse({ ...base, shots: { project: 'p', sets: { ios: 'iphone-5.5' } } }).success,
+    ).toBe(false)
+    expect(configSchema.safeParse({ ...base, shots: { project: 'p', logo: 'x' } }).success).toBe(false)
+  })
+})
+
+describe('sizes', () => {
+  test('every Apple set is a size App Store Connect takes, in the class kit names', () => {
+    for (const [set, cls] of Object.entries(APPLE_SET_CLASS)) {
+      const { width, height } = SET_SIZES[set as keyof typeof APPLE_SET_CLASS]
+      expect(appleClass(width, height)).toBe(cls)
+    }
+    expect(resolveSets({})).toEqual({ ios: 'iphone-6.9', ipad: 'ipad-13', android: 'phone' })
+  })
+
+  test('appleClass reads the size, both orientations, and nothing else', () => {
+    expect(appleClass(1320, 2868)).toBe('APP_IPHONE_67')
+    expect(appleClass(2868, 1320)).toBe('APP_IPHONE_67')
+    expect(appleClass(2064, 2752)).toBe('APP_IPAD_PRO_3GEN_129')
+    expect(appleClass(1344, 2992)).toBeUndefined()
+    expect(appleClass(1440, 2560)).toBeUndefined()
+    // In the table one way round only.
+    expect(appleClass(640, 1096)).toBe('APP_IPHONE_40')
+    expect(appleClass(1096, 640)).toBeUndefined()
+  })
+
+  test('a size in two classes follows the path, as deliver does', () => {
+    expect(appleClass(2048, 2732)).toBe('APP_IPAD_PRO_3GEN_129')
+    expect(appleClass(2048, 2732, 'screenshots/en-US/01_APP_IPAD_PRO_129.png')).toBe('APP_IPAD_PRO_129')
+    expect(appleClass(3840, 2160)).toBe('APP_APPLE_TV')
+    expect(appleClass(3840, 2160, 'screenshots/en-US/vision-01.png')).toBe('APP_APPLE_VISION_PRO')
+  })
+
+  test('the table has no size listed twice within a class', () => {
+    for (const sizes of Object.values(APPLE_SIZES)) {
+      const keys = sizes.map(([w, h]) => `${w}x${h}`)
+      expect(new Set(keys).size).toBe(keys.length)
+    }
+  })
+
+  test('playProblems: sides 320 to 3840, long side at most twice the short', () => {
+    expect(playProblems(1440, 2560)).toEqual([])
+    expect(playProblems(1080, 2160)).toEqual([])
+    expect(playProblems(320, 640)).toEqual([])
+    expect(playProblems(1344, 2992)).toEqual(['1344x2992: the long side must be at most 2x the short side'])
+    expect(playProblems(2992, 1344)).toHaveLength(1)
+    expect(playProblems(300, 500)).toEqual(['300x500: each side must be at least 320 px'])
+    expect(playProblems(2160, 4000)).toEqual(['2160x4000: each side must be at most 3840 px'])
+    expect(playProblems(100, 4000)).toHaveLength(3)
+  })
+
+  test('parseStores', () => {
+    expect(parseStores(undefined)).toEqual(['apple', 'google'])
+    expect(parseStores('both')).toEqual(['apple', 'google'])
+    expect(parseStores('google')).toEqual(['google'])
+    let error: unknown
+    try {
+      parseStores('apple,google')
+    } catch (e) {
+      error = e
+    }
+    expect(error).toBeInstanceOf(KitError)
+    expect((error as KitError).exitCode).toBe(2)
+  })
+})
+
+describe('findChrome', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'kit-chrome-'))
+  afterAll(() => rmSync(dir, { recursive: true, force: true }))
+  const bin = (name: string): string => {
+    mkdirSync(join(dir, 'bin'), { recursive: true })
+    const file = join(dir, 'bin', name)
+    writeFileSync(file, '#!/bin/sh\n')
+    chmodSync(file, 0o755)
+    return file
+  }
+
+  test('KIT_CHROME wins over CHROME_PATH, and both over what is installed', () => {
+    const mine = bin('my-chrome')
+    const other = bin('other-chrome')
+    expect(findChrome({ KIT_CHROME: mine, CHROME_PATH: other, PATH: '' })).toBe(mine)
+    expect(findChrome({ CHROME_PATH: other, PATH: '' })).toBe(other)
+  })
+
+  test('a set variable that names nothing gives undefined: no fallback', () => {
+    bin('chromium')
+    const env = { KIT_CHROME: join(dir, 'nope'), PATH: join(dir, 'bin'), HOME: dir }
+    expect(findChrome(env)).toBeUndefined()
+  })
+
+  test('a bare command name in the variable is looked up on PATH', () => {
+    const file = bin('chrome-beta')
+    expect(findChrome({ KIT_CHROME: 'chrome-beta', PATH: join(dir, 'bin') })).toBe(file)
+  })
+
+  // The macOS app bundles come before PATH, so the PATH names are only observable elsewhere.
+  test.skipIf(process.platform === 'darwin')('falls back to the PATH names in order', () => {
+    const chromium = bin('chromium')
+    expect(findChrome({ PATH: join(dir, 'bin'), HOME: dir })).toBe(chromium)
+    const chrome = bin('google-chrome')
+    expect(findChrome({ PATH: join(dir, 'bin'), HOME: dir })).toBe(chrome)
+    expect(findChrome({ PATH: join(dir, 'empty'), HOME: dir })).toBeUndefined()
+  })
+})
+
+test('pagePlan keeps what the page needs and writes an absent brand as null', () => {
+  const slide = { id: 's1', name: 'Home' } as Slide
+  const plan: ExportPlan = {
+    stores: ['apple'],
+    destinations: [{ store: 'apple', dir: '/repo/meta/screenshots', locales: ['en-US'] }],
+    jobs: [
+      {
+        id: 'ios-en-US-01',
+        store: 'apple',
+        target: 'ios',
+        set: 'iphone-6.9',
+        locale: 'en-US',
+        index: 1,
+        width: 1320,
+        height: 2868,
+        slide,
+        shot: '/repo/raw/ios/home.png',
+        file: '/repo/meta/screenshots/en-US/01_iphone-6.9_home.png',
+      },
+    ],
+    skipped: [],
+    fonts: [{ family: 'Nunito', url: 'asset/0' }],
+    assets: ['/repo/brand/nunito.woff2'],
+  }
+  expect(pagePlan(plan)).toEqual({
+    fonts: [{ family: 'Nunito', url: 'asset/0' }],
+    brand: null,
+    jobs: [{ id: 'ios-en-US-01', width: 1320, height: 2868, slide }],
+  })
+})

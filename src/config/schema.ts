@@ -213,6 +213,70 @@ export const configSchema = z
       })
       .strict()
       .optional(),
+    /** Store screenshots: `kit shots export` renders the raw shots into the store listing dirs. */
+    shots: z
+      .object({
+        /** The saved project JSON (slides, text, frames), relative to the repo root. */
+        project: z.string(),
+        /** Dir holding the raw shots, `<raw>/<target>/…`; default the `shots` suite's screenshots dir. */
+        raw: z.string().optional(),
+        /** Font files the slides name, loaded before the first draw. */
+        fonts: z
+          .array(
+            z
+              .object({
+                family: z.string(),
+                /** woff2 or ttf, relative to the repo root. */
+                file: z.string(),
+                /** A CSS weight or range (`'400 800'`). */
+                weight: z.string().optional(),
+              })
+              .strict(),
+          )
+          .optional(),
+        /** The lockup drawn on a slide that has `showMascot`. */
+        brand: z
+          .object({
+            /** svg or png, relative to the repo root. */
+            mark: z.string(),
+            /** The word drawn beside the mark. */
+            wordmark: z.string().optional(),
+            color: z.string().optional(),
+            /** Font family of the wordmark. */
+            font: z.string().optional(),
+          })
+          .strict()
+          .optional(),
+        /** The size each target is exported at; default iphone-6.9, ipad-13, phone. */
+        sets: z
+          .object({
+            ios: z.enum(['iphone-6.9', 'iphone-6.5', 'iphone-6.3']),
+            ipad: z.enum(['ipad-13']),
+            android: z.enum(['phone']),
+          })
+          .partial()
+          .strict()
+          .optional(),
+        /** HTML artwork (feature graphic, icon) captured at a fixed size. */
+        pages: z
+          .array(
+            z
+              .object({
+                /** The HTML file, relative to the repo root. */
+                file: z.string(),
+                /** The PNG to write, relative to the repo root. */
+                out: z.string(),
+                width: z.number().int(),
+                height: z.number().int(),
+                scale: z.number().optional(),
+                background: z.string().optional(),
+              })
+              .strict(),
+          )
+          .optional(),
+      })
+      .strict()
+      .optional(),
     /** App state replayed onto a device (`kit fixture load`) or captured from it (`kit fixture dump`). */
     fixtures: z
       .object({
@@ -336,6 +400,13 @@ export const configSchema = z
           message: `Unknown suite "${suite.extends}"`,
         })
       }
+    }
+    if (c.shots && c.shots.raw === undefined && !c.maestro) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['shots', 'raw'],
+        message: 'Set shots.raw: without a maestro block there is no shots suite to take the raw dir from',
+      })
     }
     if (c.targets.workspace) {
       ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })
