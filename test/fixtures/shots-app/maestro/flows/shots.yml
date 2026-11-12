@@ -1,0 +1,7 @@
+appId: app.example
+tags:
+  - screenshots
+---
+- launchApp
+- takeScreenshot: home
+- takeScreenshot: journal
