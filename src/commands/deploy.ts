@@ -66,6 +66,11 @@ export default defineCommand({
   group: 'Develop',
   args: {
     env: { type: 'string', short: 'e', description: 'Environment, for targets that declare envs' },
+    preview: {
+      type: 'boolean',
+      description: 'Worker targets: upload a preview version, leave production traffic; prints its URL',
+    },
+    comment: { type: 'boolean', description: "With --preview: post or update the URL on the branch's PR" },
   },
   examples: [
     'kit deploy api',
@@ -73,6 +78,8 @@ export default defineCommand({
     'kit deploy web --env staging',
     'kit deploy api web --env staging  # the env goes to the targets that declare it',
     'kit deploy api --dry-run --json',
+    'kit deploy api --preview          # wrangler versions upload; the preview URL on stdout',
+    'kit deploy api --preview --comment',
   ].join('\n'),
   async run(ctx) {
     const { requireProject } = await import('../cli/command')
@@ -89,7 +96,19 @@ export default defineCommand({
         ExitCode.usage,
       )
     }
+    if (ctx.args.comment && !ctx.args.preview) {
+      throw new KitError(
+        '--comment needs --preview',
+        'kit deploy <target> --preview --comment',
+        ExitCode.usage,
+      )
+    }
     if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+    if (ctx.args.preview) {
+      const { runPreview } = await import('./_preview')
+      await runPreview(ctx, names, { env: ctx.args.env, comment: !!ctx.args.comment })
+      return
+    }
     const envs = envsFor(config, names, ctx.args.env)
     const self = [process.execPath, '--no-env-file', process.argv[1]!]
     const seen = new Set<string>()

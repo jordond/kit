@@ -181,6 +181,50 @@ export const builtins: BuiltinEntry[] = [
     group: 'Infra',
     load: () => import('../commands/db/exec'),
   },
+  // cloudflare workers: db backup/restore/seed/reset, logs, open, release rollback
+  {
+    path: ['db', 'backup'],
+    description: 'Export a D1 database to a .sql file',
+    group: 'Infra',
+    load: () => import('../commands/db/backup'),
+  },
+  {
+    path: ['db', 'restore'],
+    description: 'Run a .sql backup against D1',
+    group: 'Infra',
+    load: () => import('../commands/db/restore'),
+  },
+  {
+    path: ['db', 'seed'],
+    description: "Run a D1 database's seed file",
+    group: 'Infra',
+    load: () => import('../commands/db/seed'),
+  },
+  {
+    path: ['db', 'reset'],
+    description: 'Recreate a local D1 database: migrate, then seed',
+    group: 'Infra',
+    load: () => import('../commands/db/reset'),
+  },
+  {
+    path: ['logs'],
+    description: "Tail a deployed worker's logs",
+    group: 'Infra',
+    load: () => import('../commands/logs'),
+  },
+  {
+    path: ['open'],
+    description: "Open a worker target's Cloudflare dashboard page",
+    group: 'Develop',
+    load: () => import('../commands/open'),
+  },
+  {
+    path: ['release', 'rollback'],
+    description: 'Roll a worker service back to an earlier version',
+    group: 'Release',
+    load: () => import('../commands/release/rollback'),
+  },
+  // end cloudflare workers
   // setup: passthroughs, doctor, init, deps
   {
     path: ['gradle'],
@@ -269,6 +313,6 @@ export const groupDescriptions: Record<string, string> = {
   metadata: 'Sync the store listing (text, screenshots)',
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
-  db: 'Cloudflare D1 migrations and queries',
+  db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
   add: 'Scaffold a module or a target into this repo',
 }

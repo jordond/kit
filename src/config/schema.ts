@@ -113,6 +113,8 @@ export const configSchema = z
                 target: z.string(),
                 /** Used when `kit db` gets no --db and several are configured. */
                 default: z.boolean().optional(),
+                /** SQL file `kit db seed` runs, relative to the repo root. */
+                seed: z.string().optional(),
               })
               .strict(),
           )

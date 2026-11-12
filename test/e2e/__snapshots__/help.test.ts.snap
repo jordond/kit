@@ -10,6 +10,7 @@ Develop
   dev         Run a dev server
   build       Build every target
   deploy      Deploy a target
+  open        Open a worker target's Cloudflare dashboard page
   gradle      Run ./gradlew in the Gradle root
   kotlin      Run the Kotlin toolchain wrapper in toolchain.root
   wrangler    Run wrangler in a worker target's directory
@@ -26,16 +27,15 @@ Release
   release     Ship to the stores …
   version     Version names in the catalog TOML …
   fastlane    Run fastlane with kit's shared Fastfile
-  changelog   List the changes since the last release tag
 
 Infra
   env         Render, check and push env from .env …
-  db          Cloudflare D1 migrations and queries …
+  db          Cloudflare D1 migrations, queries, backup, restore, seed and reset …
+  logs        Tail a deployed worker's logs
 
 Setup
   doctor      Check tools, versions and .env
   init        Set up a fresh clone, or add kit to a new repo
-  add         Scaffold a module or a target into this repo …
   deps        List or update npm dependencies (catalog-aware)
   upgrade     Move the @jordond/kit pin and the workflow SHAs to a kit release
   config      Print the resolved kit.config.ts
@@ -44,25 +44,8 @@ Setup
 "
 `;
 
-exports[`help kit add --help 1`] = `
-"Scaffold a module or a target into this repo
-
-Usage
-  kit add <command> [options]
-
-Commands
-  module  Add a KMP library module (Gradle or Kotlin toolchain)
-  target  Add a target to kit.config.ts
-
-Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-
-"
-`;
-
 exports[`help kit db --help 1`] = `
-"Cloudflare D1 migrations and queries
+"Cloudflare D1 migrations, queries, backup, restore, seed and reset
 
 Usage
   kit db <command> [options]
@@ -72,6 +55,10 @@ Commands
   list     List D1 migrations
   create   Create a D1 migration
   exec     Run SQL against D1
+  backup   Export a D1 database to a .sql file
+  restore  Run a .sql backup against D1
+  seed     Run a D1 database's seed file
+  reset    Recreate a local D1 database: migrate, then seed
 
 Options
   -h, --help     Show help
@@ -87,11 +74,10 @@ Usage
   kit env <command> [options]
 
 Commands
-  sync    Render env outputs (.dev.vars) from .env
-  check   Validate .env and check outputs for drift
-  push    Push secrets with wrangler and gh
-  init    Create .env and ask for missing keys
-  rotate  Generate a new value for a key and sync
+  sync   Render env outputs (.dev.vars) from .env
+  check  Validate .env and check outputs for drift
+  push   Push secrets with wrangler and gh
+  init   Create .env and ask for missing keys
 
 Options
   -h, --help     Show help
@@ -110,7 +96,7 @@ Commands
   ios       Build and upload iOS to a track
   android   Build and upload Android to a track
   certs     Install App Store signing with match; --add creates what is missing
-  metadata  Sync the store listing (text, screenshots) …
+  rollback  Roll a worker service back to an earlier version
 
 Options
   -h, --help     Show help
@@ -132,61 +118,6 @@ Commands
 Options
   -h, --help     Show help
   -V, --version  Show kit version
-
-"
-`;
-
-exports[`help kit add module --help 1`] = `
-"Add a KMP library module to the Gradle build or the Kotlin toolchain project
-
-Usage
-  kit add module [options]
-
-Examples
-  kit add module core
-  kit add module feature:login --compose   # <gradle root>/feature/login
-  kit add module data --targets android,jvm --dry-run
-  kit add module ui --dir libs/ui
-
-Options
-  -h, --help              Show help
-  -V, --version           Show kit version
-      --json              Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run           Plan and run read-only steps; skip mutations
-  -y, --yes               Accept confirmations (never skips prod)
-  -v, --verbose           Stream all child output
-  -q, --quiet             Errors and summary only
-      --bail              Stop at the first failure
-      --compose           Compose Multiplatform module (applies kit.compose)
-      --targets <string>  Comma-separated: android, ios, jvm, js (default android,ios,jvm)
-      --dir <string>      Module directory, relative to the Gradle or toolchain root (default: the name)
-      --force             Overwrite files that already exist
-
-"
-`;
-
-exports[`help kit add target --help 1`] = `
-"Add a target to kit.config.ts; a new worker also gets a minimal scaffold
-
-Usage
-  kit add target [options]
-
-Examples
-  kit add target api --kind worker --dir apps/api
-  kit add target web --kind astro --dir apps/web
-  kit add target api --kind worker --dir apps/api --dry-run
-
-Options
-  -h, --help           Show help
-  -V, --version        Show kit version
-      --json           Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run        Plan and run read-only steps; skip mutations
-  -y, --yes            Accept confirmations (never skips prod)
-  -v, --verbose        Stream all child output
-  -q, --quiet          Errors and summary only
-      --bail           Stop at the first failure
-      --kind <string>  worker | vite | astro | docker | custom
-      --dir <string>   Target directory, relative to the repo root
 
 "
 `;
@@ -213,37 +144,6 @@ Options
       --bail     Stop at the first failure
       --release  Gradle or Kotlin toolchain: the signed release bundle (AAB)
       --apk      Gradle: the signed release APK
-
-"
-`;
-
-exports[`help kit changelog --help 1`] = `
-"List the changes since the last release tag
-
-Usage
-  kit changelog [options]
-
-Examples
-  kit changelog
-  kit changelog --platform ios
-  kit changelog --from v0.5.0 --to v0.6.0 --json
-  kit changelog --write
-  kit changelog --platform api --write docs/api-changes.md
-
-Options
-  -h, --help               Show help
-  -V, --version            Show kit version
-      --json               Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run            Plan and run read-only steps; skip mutations
-  -y, --yes                Accept confirmations (never skips prod)
-  -v, --verbose            Stream all child output
-  -q, --quiet              Errors and summary only
-      --bail               Stop at the first failure
-      --from <string>      Start after this tag or ref (default: the last release tag)
-      --to <string>        End at this ref (default: HEAD)
-      --platform <string>  ios, android or a service: use its <name>/v* tags
-      --all                Include chore, test, ci and style commits
-      --write              Add the section to CHANGELOG.md, or to the file named after it
 
 "
 `;
@@ -316,6 +216,33 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit db backup --help 1`] = `
+"Export a D1 database to a .sql file (local by default)
+
+Usage
+  kit db backup [options]
+
+Examples
+  kit db backup                       # backups/<db>-20260102T030405Z.sql
+  kit db backup --remote --db analytics
+  kit db backup --remote --out prod.sql
+
+Options
+  -h, --help          Show help
+  -V, --version       Show kit version
+      --json          Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run       Plan and run read-only steps; skip mutations
+  -y, --yes           Accept confirmations (never skips prod)
+  -v, --verbose       Stream all child output
+  -q, --quiet         Errors and summary only
+      --bail          Stop at the first failure
+      --db <string>   cloudflare.d1 key or database name (default: the only one, or the default: true one)
+      --remote        Deployed D1 (default: local)
+  -o, --out <string>  File to write (default: backups/<db>-<UTC timestamp>.sql)
 
 "
 `;
@@ -422,6 +349,82 @@ Options
 "
 `;
 
+exports[`help kit db reset --help 1`] = `
+"Local only: delete a local D1 database, re-apply migrations, then seed if configured
+
+Usage
+  kit db reset [options]
+
+Examples
+  kit db reset
+  kit db reset --db analytics --yes
+  kit db reset --dry-run
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --db <string>  cloudflare.d1 key or database name (default: the only one, or the default: true one)
+      --remote       Rejected: a deployed database is never reset
+
+"
+`;
+
+exports[`help kit db restore --help 1`] = `
+"Run a .sql backup against a D1 database (local by default)
+
+Usage
+  kit db restore [options]
+
+Examples
+  kit db restore backups/my-db-20260102T030405Z.sql
+  kit db restore prod.sql --remote     # asks first; --yes skips
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --db <string>  cloudflare.d1 key or database name (default: the only one, or the default: true one)
+      --remote       Deployed D1 (default: local)
+
+"
+`;
+
+exports[`help kit db seed --help 1`] = `
+"Run a D1 database's seed file (cloudflare.d1.<db>.seed; local by default)
+
+Usage
+  kit db seed [options]
+
+Examples
+  kit db seed
+  kit db seed --db analytics --remote
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --db <string>  cloudflare.d1 key or database name (default: the only one, or the default: true one)
+      --remote       Deployed D1 (default: local)
+
+"
+`;
+
 exports[`help kit deploy --help 1`] = `
 "Deploy one or more targets, in order (deploy.before first)
 
@@ -434,6 +437,8 @@ Examples
   kit deploy web --env staging
   kit deploy api web --env staging  # the env goes to the targets that declare it
   kit deploy api --dry-run --json
+  kit deploy api --preview          # wrangler versions upload; the preview URL on stdout
+  kit deploy api --preview --comment
 
 Options
   -h, --help          Show help
@@ -445,6 +450,8 @@ Options
   -q, --quiet         Errors and summary only
       --bail          Stop at the first failure
   -e, --env <string>  Environment, for targets that declare envs
+      --preview       Worker targets: upload a preview version, leave production traffic; prints its URL
+      --comment       With --preview: post or update the URL on the branch's PR
 
 "
 `;
@@ -510,8 +517,6 @@ Examples
   kit doctor
   kit doctor --json
   kit doctor --ci
-  kit doctor --fix
-  kit doctor --fix --dry-run
 
 Options
   -h, --help     Show help
@@ -523,7 +528,6 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --ci       Fail when CI workflow pins drift from the package.json pin
-      --fix      Apply the safe, local fixes, then check again
 
 "
 `;
@@ -584,7 +588,6 @@ Usage
 
 Examples
   kit env push                    # every worker in env.workerSecrets and env.githubSecrets
-  kit env push --workers          # every worker, GitHub skipped
   kit env push --target edge
   kit env push --github           # GitHub Actions secrets only
   kit env push --target edge --github
@@ -603,33 +606,6 @@ Options
   -t, --target <string>  Only this worker target (env.workerSecrets)
       --github           Push env.githubSecrets with gh
       --all              Every worker and GitHub; the default, kept for scripts
-      --workers          Every worker in env.workerSecrets; GitHub skipped
-
-"
-`;
-
-exports[`help kit env rotate --help 1`] = `
-"Generate a new value for keys the env schema marks \`generate\`, then sync
-
-Usage
-  kit env rotate [options]
-
-Examples
-  kit env rotate INTERNAL_API_SECRET           # new value in .env, outputs re-rendered
-  kit env rotate INTERNAL_API_SECRET --push    # and push it to its workers and GitHub
-  kit env rotate KEY_A KEY_B --yes
-  kit env rotate INTERNAL_API_SECRET --dry-run
-
-Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --push     Push to the remotes that hold the key (as \`kit env push\`)
 
 "
 `;
@@ -791,6 +767,58 @@ Options
 "
 `;
 
+exports[`help kit logs --help 1`] = `
+"Tail a deployed worker's logs (wrangler tail; Ctrl-C stops)
+
+Usage
+  kit logs [options]
+
+Examples
+  kit logs api
+  kit logs api --env staging
+  kit logs api -- --status error --format json   # after --: wrangler tail flags
+
+Options
+  -h, --help          Show help
+  -V, --version       Show kit version
+      --json          Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run       Plan and run read-only steps; skip mutations
+  -y, --yes           Accept confirmations (never skips prod)
+  -v, --verbose       Stream all child output
+  -q, --quiet         Errors and summary only
+      --bail          Stop at the first failure
+  -e, --env <string>  Environment, for targets that declare envs
+
+"
+`;
+
+exports[`help kit open --help 1`] = `
+"Open a worker target's Cloudflare dashboard page
+
+Usage
+  kit open [options]
+
+Examples
+  kit open api
+  kit open api --env staging
+  kit open api --print
+  kit open api --json
+
+Options
+  -h, --help          Show help
+  -V, --version       Show kit version
+      --json          Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run       Plan and run read-only steps; skip mutations
+  -y, --yes           Accept confirmations (never skips prod)
+  -v, --verbose       Stream all child output
+  -q, --quiet         Errors and summary only
+      --bail          Stop at the first failure
+  -e, --env <string>  Environment, for targets that declare envs
+  -p, --print         Write the URL to stdout instead of opening it
+
+"
+`;
+
 exports[`help kit release android --help 1`] = `
 "Build and upload Android to a Play track
 
@@ -875,16 +903,16 @@ Options
 "
 `;
 
-exports[`help kit release metadata pull --help 1`] = `
-"Download the store listing text into release.<platform>.metadata; --screenshots adds images
+exports[`help kit release rollback --help 1`] = `
+"Roll a worker service back to an earlier version (wrangler rollback); tags stay put
 
 Usage
-  kit release metadata pull [options]
+  kit release rollback [options]
 
 Examples
-  kit release metadata pull ios
-  kit release metadata pull android --screenshots
-  kit release metadata pull ios --force
+  kit release rollback api
+  kit release rollback api --to 3f1c2d4e-0000-4000-8000-000000000000
+  kit release rollback api --dry-run
 
 Options
   -h, --help         Show help
@@ -895,34 +923,7 @@ Options
   -v, --verbose      Stream all child output
   -q, --quiet        Errors and summary only
       --bail         Stop at the first failure
-      --screenshots  Also download the screenshots (Play: and the feature graphic and icon)
-      --force        Overwrite uncommitted changes in what the pull writes
-
-"
-`;
-
-exports[`help kit release metadata push --help 1`] = `
-"Upload the store listing text; --screenshots adds images. Never a binary or a review
-
-Usage
-  kit release metadata push [options]
-
-Examples
-  kit release metadata push ios
-  kit release metadata push android --screenshots
-  kit release metadata push ios --dry-run
-  kit release metadata push android --yes
-
-Options
-  -h, --help         Show help
-  -V, --version      Show kit version
-      --json         Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run      Plan and run read-only steps; skip mutations
-  -y, --yes          Accept confirmations (never skips prod)
-  -v, --verbose      Stream all child output
-  -q, --quiet        Errors and summary only
-      --bail         Stop at the first failure
-      --screenshots  Also replace the screenshots (Play: and the feature graphic and icon)
+      --to <string>  Version id to roll back to (default: the version before the latest)
 
 "
 `;
