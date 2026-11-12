@@ -89,3 +89,28 @@ export async function tag(
 export async function push(refs: string[], opts: { cwd?: string; remote?: string } = {}): Promise<void> {
   await read(['push', opts.remote ?? 'origin', ...refs], opts.cwd ?? '.')
 }
+
+// changelog
+export interface CommitDetail extends Commit {
+  body: string
+  /** More than one parent. */
+  merge: boolean
+}
+
+/** Like `logSince`, up to `to` instead of HEAD, with each commit's body and whether it is a merge. */
+export async function logRange(
+  from: string | undefined,
+  to = 'HEAD',
+  opts: { cwd?: string } = {},
+): Promise<CommitDetail[]> {
+  const range = from ? `${from}..${to}` : to
+  const out = await read(['log', '--format=%H%x1f%P%x1f%s%x1f%b%x1e', range, '--'], opts.cwd ?? '.')
+  return out
+    .split('\x1e')
+    .map((r) => r.replace(/^\n/, ''))
+    .filter(Boolean)
+    .map((record) => {
+      const [sha = '', parents = '', subject = '', body = ''] = record.split('\x1f')
+      return { sha, subject, body: body.trim(), merge: parents.trim().split(/\s+/).length > 1 }
+    })
+}

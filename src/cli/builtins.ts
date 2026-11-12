@@ -89,6 +89,12 @@ export const builtins: BuiltinEntry[] = [
     group: 'Release',
     load: () => import('../commands/fastlane'),
   },
+  {
+    path: ['changelog'],
+    description: 'List the changes since the last release tag',
+    group: 'Release',
+    load: () => import('../commands/changelog'),
+  },
   // infra: env + db
   {
     path: ['env', 'sync'],
