@@ -241,6 +241,12 @@ describe('kit shots beside kit shots export', () => {
     const r = await f.kit(['shots', 'ios', '--no-fixture', '--dry-run', '--json'], {
       env: env(),
     })
+    // Off macOS the target still routes to `kit shots` (not "Command not found: ios"), then stops at Xcode.
+    if (process.platform !== 'darwin') {
+      expect(r.stderr).toContain('iOS needs macOS')
+      expect(r.code).toBe(4)
+      return
+    }
     expect(r.stderr).toContain('using iPhone 17')
     expect(r.code).toBe(0)
     const doc = JSON.parse(r.stdout)

@@ -585,6 +585,12 @@ describe('kit shots export', () => {
     f.script('xcrun', `case "$*" in "simctl list devices -j") echo '${sims}' ;; esac`)
     f.script('maestro', 'if [ "$1" = --version ]; then echo 2.9.0; fi; exit 0')
     const r = await f.kit(['shots', 'ios', '--no-fixture', '--dry-run', '--json'])
+    // Off macOS the target still routes to `kit shots` (not "Command not found: ios"), then stops at Xcode.
+    if (process.platform !== 'darwin') {
+      expect(r.stderr).toContain('iOS needs macOS')
+      expect(r.code).toBe(4)
+      return
+    }
     expect(r.code).toBe(0)
     const doc = JSON.parse(r.stdout)
     expect(doc).toMatchObject({ suite: 'shots', target: 'ios' })
