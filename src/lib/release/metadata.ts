@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import pc from 'picocolors'
 import type { KitContext } from '../../cli/command'
@@ -9,7 +9,7 @@ import { appFastlaneDir } from '../fastlane'
 import { emitJson } from '../log'
 import { runPiped } from '../proc'
 import { confirm } from '../prompt'
-import { runSteps, summarize } from '../steps'
+import { runSteps, type StepResult, summarize } from '../steps'
 import { appleCreds, onGitHubActions, playCreds } from './creds'
 import { laneConfigEnv, laneStep, type Platform } from './mobile'
 
@@ -30,6 +30,11 @@ const IMAGE = /\.(png|jpe?g)$/i
 const PLAY_FIELDS = ['title', 'short_description', 'full_description', 'video']
 /** supply's dir inside a shared `fastlane/metadata`; deliver skips it too. */
 const SUPPLY_DIR = 'android'
+/**
+ * deliver's dir for the App Review contact and the demo account's user and password, in plaintext.
+ * kit never keeps it in the repo: a pull removes it, a push neither lists nor uploads it.
+ */
+export const REVIEW_DIR = 'review_information'
 
 export interface MetadataDirs {
   /** Absolute metadata directory (`release.<platform>.metadata`). */
@@ -100,7 +105,7 @@ export function listingFiles(platform: Platform, dirs: MetadataDirs): ListingFil
       text: walk(
         dirs.dir,
         (f) => f.endsWith('.txt'),
-        (e, depth) => depth === 0 && e === SUPPLY_DIR,
+        (e, depth) => depth === 0 && (e === SUPPLY_DIR || e === REVIEW_DIR),
       ),
       images: dirs.screenshotsDir ? walk(dirs.screenshotsDir, isImage) : [],
     }
@@ -162,8 +167,9 @@ export async function dirtyUnder(root: string, paths: string[], excludes: string
 
 /**
  * What a pull writes, for the dirty check: the metadata dir, plus deliver's screenshots dir with
- * `--screenshots` (iOS). Left out: supply's `android/` inside an iOS metadata dir, and supply's
- * `<locale>/images/` when an Android pull is text only.
+ * `--screenshots` (iOS). Left out: supply's `android/` and `review_information/` (removed after
+ * every pull) inside an iOS metadata dir, and supply's `<locale>/images/` when an Android pull is
+ * text only.
  */
 export function pullScope(
   root: string,
@@ -175,7 +181,7 @@ export function pullScope(
   if (platform === 'ios') {
     return {
       targets: [dirs.dir, ...(screenshots && dirs.screenshotsDir ? [dirs.screenshotsDir] : [])],
-      excludes: [`${rel}/${SUPPLY_DIR}/**`],
+      excludes: [`${rel}/${SUPPLY_DIR}/**`, `${rel}/${REVIEW_DIR}/**`],
     }
   }
   return { targets: [dirs.dir], excludes: screenshots ? [] : [`${rel}/*/images/**`] }
@@ -262,11 +268,17 @@ export async function pullMetadata(
     ...laneEnv(root, config, platform, dirs),
     ...(screenshots ? { KIT_METADATA_SCREENSHOTS: '1' } : {}),
   }
-  const results = await runSteps(
-    [laneStep(`pull ${STORE[platform]} listing`, appRoot, platform, 'metadata_pull', () => env)],
-    flags,
-    { bail: true },
-  )
+  let results: StepResult[]
+  try {
+    results = await runSteps(
+      [laneStep(`pull ${STORE[platform]} listing`, appRoot, platform, 'metadata_pull', () => env)],
+      flags,
+      { bail: true },
+    )
+  } finally {
+    // The lane removes it too; this also covers a lane that died halfway.
+    if (platform === 'ios') rmSync(join(dirs.dir, REVIEW_DIR), { recursive: true, force: true })
+  }
   const ok = results.length === 1 && results.every((r) => r.ok) && !interrupted()
   const { files } = pushPlan(root, platform, dirs, screenshots)
   if (flags.json) emitJson({ ...base, dryRun: false, ok, files, ...(ok ? {} : { results }) })

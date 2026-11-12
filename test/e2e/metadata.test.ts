@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -69,7 +69,7 @@ beforeEach(() => {
     'bundle',
     `bun -e 'const e=process.env;console.log(JSON.stringify({argv:process.argv.slice(1),cwd:process.cwd(),env:Object.fromEntries(Object.entries(e).filter(([k])=>/^(KIT_|BUNDLE_|FASTLANE_|FL_|ASC_|MATCH_|ANDROID_)/.test(k)))}))' -- "$@" >> "${laneLog}"
 case "$*" in
-  *"ios metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US"; echo pulled > "$KIT_METADATA_PATH/en-US/name.txt"
+  *"ios metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US" "$KIT_METADATA_PATH/review_information"; echo pulled > "$KIT_METADATA_PATH/en-US/name.txt"; echo s3cret > "$KIT_METADATA_PATH/review_information/demo_password.txt"
     if [ "$KIT_METADATA_SCREENSHOTS" = 1 ]; then mkdir -p "$KIT_SCREENSHOTS_PATH/en-US"; echo pulled > "$KIT_SCREENSHOTS_PATH/en-US/0_APP_IPHONE_67_0.png"; fi ;;
   *"android metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US/images"; echo pulled > "$KIT_METADATA_PATH/en-US/title.txt"
     if [ "$KIT_METADATA_SCREENSHOTS" = 1 ]; then echo pulled > "$KIT_METADATA_PATH/en-US/images/icon.png"; fi ;;
@@ -79,7 +79,7 @@ exit 0`,
   configure({ ios: IOS_DIR, android: ANDROID_DIR })
   put(`${IOS_DIR}/en-US/name.txt`, 'App')
   put(`${IOS_DIR}/en-US/description.txt`, 'An app')
-  put(`${IOS_DIR}/review_information/notes.txt`, 'hello reviewer')
+  put(`${IOS_DIR}/review_information/demo_password.txt`, 'hunter2')
   put('client/fastlane/screenshots/en-US/0_APP_IPHONE_67_0.png')
   put(`${ANDROID_DIR}/en-US/title.txt`, 'App')
   put(`${ANDROID_DIR}/en-US/full_description.txt`, 'An app')
@@ -96,11 +96,7 @@ exit 0`,
 
 afterEach(() => f.cleanup())
 
-const IOS_TEXT = [
-  `${IOS_DIR}/en-US/description.txt`,
-  `${IOS_DIR}/en-US/name.txt`,
-  `${IOS_DIR}/review_information/notes.txt`,
-]
+const IOS_TEXT = [`${IOS_DIR}/en-US/description.txt`, `${IOS_DIR}/en-US/name.txt`]
 const ANDROID_TEXT = [`${ANDROID_DIR}/en-US/title.txt`, `${ANDROID_DIR}/en-US/full_description.txt`]
 const ANDROID_IMAGES = [
   `${ANDROID_DIR}/en-US/images/icon.png`,
@@ -140,6 +136,14 @@ describe('kit release metadata push', () => {
       expect(c.env[k]).toBeUndefined()
     }
     expect(await Bun.file(c.env.KIT_ASC_KEY_PATH!).exists()).toBe(false)
+  })
+
+  test('ios: review_information is never in the file plan, dry run or not', async () => {
+    const dry = await run(['release', 'metadata', 'push', 'ios', '--dry-run'])
+    expect(dry.stdout).toBe(`${IOS_TEXT.join('\n')}\n`)
+    const r = await run(['release', 'metadata', 'push', 'ios'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).not.toContain('review_information')
   })
 
   test('ios --screenshots --yes: passes KIT_METADATA_SCREENSHOTS and lists the screenshots', async () => {
@@ -289,6 +293,26 @@ describe('kit release metadata pull', () => {
     expect(read(`${IOS_DIR}/en-US/name.txt`)).toBe('pulled\n')
     // local screenshots are untouched
     expect(read(IOS_SHOT)).toBe('x')
+  })
+
+  test('ios: review_information (App Review contact, demo login) never stays in the repo', async () => {
+    // an uncommitted one does not block the pull; whatever deliver writes is removed
+    put(`${IOS_DIR}/review_information/demo_user.txt`, 'someone')
+    const r = await run(['release', 'metadata', 'pull', 'ios', '--json'])
+    expect(r.code).toBe(0)
+    expect(lanes().map(lane)).toEqual(['ios metadata_pull'])
+    expect(existsSync(join(f.dir, IOS_DIR, 'review_information'))).toBe(false)
+    expect(JSON.stringify(JSON.parse(r.stdout).files)).not.toContain('review_information')
+  })
+
+  test('ios: review_information is removed even when the lane fails', async () => {
+    f.script(
+      'bundle',
+      'case "$*" in *metadata_pull*) mkdir -p "$KIT_METADATA_PATH/review_information"; echo s3cret > "$KIT_METADATA_PATH/review_information/demo_password.txt"; exit 1 ;; esac; exit 0',
+    )
+    const r = await run(['release', 'metadata', 'pull', 'ios'])
+    expect(r.code).toBe(1)
+    expect(existsSync(join(f.dir, IOS_DIR, 'review_information'))).toBe(false)
   })
 
   test('ios --screenshots: KIT_METADATA_SCREENSHOTS=1 and both directories', async () => {
