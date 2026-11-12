@@ -27,6 +27,12 @@ interface IncludeStatement {
   end: number
   indent: string
   paths: string[]
+  /**
+   * A statement of its own at the top level: not inside a block or call, nothing before it on its
+   * line, and nothing after it that carries the expression on (an operator, a `.call`, a `{`).
+   * Only such a statement can have another include put on the line after it.
+   */
+  anchor: boolean
 }
 
 /**
@@ -49,6 +55,7 @@ function includeStatements(settings: string): IncludeStatement[] | undefined {
     }
     return i
   }
+  let depth = 0
   for (let i = 0; i < settings.length; ) {
     const j = skip(settings, i)
     if (j < 0) return undefined
@@ -56,6 +63,8 @@ function includeStatements(settings: string): IncludeStatement[] | undefined {
       i = j
       continue
     }
+    if (CLOSERS[settings[i]!]) depth++
+    else if (settings[i] === '}' || settings[i] === ']' || settings[i] === ')') depth--
     const word =
       settings.startsWith('include', i) &&
       !/[\w$.]/.test(settings[i - 1] ?? '') &&
@@ -97,7 +106,15 @@ function includeStatements(settings: string): IncludeStatement[] | undefined {
       i += 7
       continue
     }
-    out.push({ end, indent, paths })
+    // What follows: the end of the line (or of the file), or more of the same expression.
+    const rest = next(end, false)
+    const ahead = rest < 0 ? -1 : next(rest, true)
+    const ends =
+      rest >= 0 &&
+      (rest >= settings.length || settings[rest] === '\n') &&
+      !/[.+\-*/%?:&|=,<>]/.test(settings[ahead] ?? '')
+    const alone = settings.slice(lineStart(settings, i), i).trim() === ''
+    out.push({ end, indent, paths, anchor: depth === 0 && alone && ends })
     i = end
   }
   return out
@@ -125,10 +142,12 @@ export function includeLines(path: string, dir?: string, groovy = false): string
 }
 
 /**
- * `settings` with the include after the last include statement (or at the end of the file);
+ * `settings` with the include after the last top-level include statement (or at the end of a file
+ * with no includes);
  * undefined when the project is already included. `dir` adds a `projectDir` line: only needed when
  * the directory is not the path with `:` as `/`. `groovy`: the file is settings.gradle.
- * `'manual'` when the file does not scan, or when reading the result back does not give exactly
+ * `'manual'` when the file does not scan, when its includes are all inside blocks or part of a
+ * longer expression (`if (ci) { include(…) }`, `include ':a' +`), or when reading the result back does not give exactly
  * the projects it had plus this one (an include that opens a comment on its line, say).
  */
 export function withInclude(
@@ -143,7 +162,10 @@ export function withInclude(
   if (!statements) return 'manual'
   const before = statements.flatMap((s) => s.paths)
   if (before.includes(name)) return undefined
-  const last = statements.at(-1)
+  // The last include that is a top-level statement; with includes but none of those, there is no
+  // line kit can add after without changing what the file does.
+  const last = statements.findLast((s) => s.anchor)
+  if (statements.length && !last) return 'manual'
   const lines = includeLines(name, dir, groovy)
   let out: string
   if (!last) {
@@ -156,7 +178,11 @@ export function withInclude(
     out = `${lf.slice(0, at)}\n${lines.map((l) => `${last.indent}${l}`).join('\n')}${lf.slice(at)}`
   }
   const after = includeStatements(out)?.flatMap((s) => s.paths)
-  if (after?.join('\n') !== [...before, name].join('\n')) return 'manual'
+  // Read back: the same projects in the same order, with the new one right after the anchor's.
+  const at = last ? statements.indexOf(last) + 1 : 0
+  const paths = (list: IncludeStatement[]) => list.flatMap((st) => st.paths)
+  const expected = [...paths(statements.slice(0, at)), name, ...paths(statements.slice(at))]
+  if (after?.join('\n') !== expected.join('\n')) return 'manual'
   return restore(out)
 }
 
