@@ -1,7 +1,307 @@
-import { KitError } from '../errors'
-import type { ExportShots } from './types'
+import { accessSync, constants, existsSync, readdirSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import { requireProject } from '../../cli/command'
+import type { KitConfig } from '../../config/schema'
+import { CHROME_HINT, chromeBin } from '../chrome'
+import { ExitCode, KitError } from '../errors'
+import { emitJson, type Logger } from '../log'
+import { resolveSuite } from '../maestro/suites'
+import { metadataDirs, REVIEW_DIR } from '../release/metadata'
+import { pageBundle } from './page-bundle'
+import { planExport, repoPath } from './plan'
+import { loadProject } from './project'
+import { renderJobs } from './render'
+import { APPLE_MAX_PER_CLASS, PLAY_MAX_PER_TYPE, type Store } from './sizes'
+import type {
+  ExportOptions,
+  ExportPlan,
+  ExportResult,
+  ExportShots,
+  StoreDestination,
+  StudioProject,
+} from './types'
+import { writeExport } from './write'
+
+type Shots = NonNullable<KitConfig['shots']>
+
+/** The release platform whose listing dir a store's screenshots go to. */
+const STORE_PLATFORM = { apple: 'ios', google: 'android' } as const
+
+const STORE_NAME: Record<Store, string> = { apple: 'the App Store', google: 'Play' }
+
+/** What each store keeps per set and locale; deliver drops the rest without failing, so export refuses first. */
+const STORE_MAX: Record<Store, number> = { apple: APPLE_MAX_PER_CLASS, google: PLAY_MAX_PER_TYPE }
+
+/**
+ * Dirs of an iOS metadata dir that are not locales: supply's dir in a shared `fastlane/metadata`,
+ * deliver's review contact, and deliver's `default` (text for every locale; it takes no screenshots).
+ */
+const IOS_NOT_LOCALES = new Set(['android', REVIEW_DIR, 'default'])
+
+/** Families the browser resolves itself; every other family a slide names has to be in `shots.fonts`. */
+const GENERIC_FAMILIES = new Set(['sans-serif', 'serif', 'monospace', 'system-ui'])
+
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
+const lines = (items: readonly string[]): string => items.map((item) => `  ${item}`).join('\n')
+
+function requireShots(config: KitConfig): Shots {
+  if (!config.shots) {
+    throw new KitError(
+      'No shots block in kit.config.ts',
+      "Add shots: { project: '<saved project>.json' } to kit.config.ts",
+      ExitCode.config,
+    )
+  }
+  return config.shots
+}
+
+/** The locale dirs of a store's metadata dir, sorted; none when the dir is absent. */
+function listingLocales(store: Store, dir: string): string[] {
+  if (!existsSync(dir)) return []
+  return readdirSync(dir)
+    .filter(
+      (entry) =>
+        !entry.startsWith('.') &&
+        !(store === 'apple' && IOS_NOT_LOCALES.has(entry)) &&
+        statSync(join(dir, entry)).isDirectory(),
+    )
+    .sort()
+}
+
+/**
+ * Where each exported store's screenshots go and in which locales. A store's locales are the
+ * locale dirs of its metadata dir narrowed by `--locale`; a store with no locale dir yet exports
+ * the `--locale` ones as given, or `en-US`.
+ */
+function resolveDestinations(root: string, config: KitConfig, opts: ExportOptions): StoreDestination[] {
+  if (opts.out !== undefined && opts.out.trim() === '') {
+    throw new KitError('--out names no directory', 'e.g. --out build/store-shots', ExitCode.usage)
+  }
+  if (opts.stores.length === 0) {
+    throw new KitError('No store to export', '--store takes apple, google or both', ExitCode.usage)
+  }
+  const available: string[] = []
+  const destinations = opts.stores.map((store): StoreDestination => {
+    const platform = STORE_PLATFORM[store]
+    const configured = Boolean(config.release?.[platform]?.metadata)
+    if (!configured && opts.out === undefined) {
+      const others = opts.stores.filter((s) => s !== store)
+      throw new KitError(
+        `No release.${platform}.metadata in kit.config.ts, so ${STORE_NAME[store]} screenshots have no destination`,
+        `Set release.${platform}.metadata to the store metadata directory${others.length ? `, export with --store ${others.join(',')}` : ''}, or pass --out <dir>`,
+        ExitCode.usage,
+      )
+    }
+    const dirs = configured ? metadataDirs(root, config, platform) : undefined
+    const dir =
+      opts.out !== undefined
+        ? join(resolve(root, opts.out), store)
+        : store === 'apple'
+          ? dirs!.screenshotsDir!
+          : dirs!.dir
+    const listed = dirs ? listingLocales(store, dirs.dir) : []
+    available.push(`${store}: ${listed.length ? listed.join(', ') : 'none yet'}`)
+    if (listed.length === 0) return { store, dir, locales: opts.locales ?? ['en-US'] }
+    const locales = opts.locales ? listed.filter((l) => opts.locales!.includes(l)) : listed
+    return { store, dir, locales }
+  })
+
+  const exported = new Set(destinations.flatMap((d) => d.locales))
+  const unknown = (opts.locales ?? []).filter((l) => !exported.has(l))
+  if (unknown.length > 0) {
+    throw new KitError(
+      `No exported store has the ${unknown.length === 1 ? 'locale' : 'locales'} ${unknown.join(', ')}`,
+      `Locale dirs in the store metadata (${available.join('; ')})`,
+      ExitCode.usage,
+    )
+  }
+  return destinations
+}
+
+/** The absolute dir of the raw shots: `shots.raw`, else the `shots` suite's screenshots dir. */
+function resolveRawDir(root: string, config: KitConfig, shots: Shots): string {
+  const raw = shots.raw ?? (config.maestro ? resolveSuite(config, 'shots').screenshots : undefined)
+  if (!raw) {
+    throw new KitError(
+      'kit shots export does not know where the raw shots are',
+      'Set shots.raw in kit.config.ts to the dir holding <target>/<shot>.png',
+      ExitCode.config,
+    )
+  }
+  return resolve(root, raw)
+}
+
+/** Every file under `dir` as a `/`-separated path relative to it; empty when the dir is absent. */
+function listRaw(dir: string): Set<string> {
+  const files = new Set<string>()
+  const visit = (at: string, prefix: string): void => {
+    for (const entry of readdirSync(at)) {
+      if (entry.startsWith('.')) continue
+      const rel = prefix ? `${prefix}/${entry}` : entry
+      if (statSync(join(at, entry)).isDirectory()) visit(join(at, entry), rel)
+      else files.add(rel)
+    }
+  }
+  if (existsSync(dir) && statSync(dir).isDirectory()) visit(dir, '')
+  return files
+}
+
+/**
+ * A family the page draws text in has to be loaded from `shots.fonts`: canvas text in an unknown
+ * family falls back to the browser's sans-serif without an error.
+ */
+function checkFonts(shots: Shots, plan: ExportPlan): void {
+  const declared = new Set((shots.fonts ?? []).map((font) => font.family))
+  const known = (family: string): boolean =>
+    declared.has(family) || GENERIC_FAMILIES.has(family.trim().toLowerCase())
+  const problems = new Set<string>()
+  const families = new Set<string>()
+  const undeclared = (what: string, family: string): void => {
+    if (known(family)) return
+    families.add(family)
+    problems.add(`${what} uses "${family}"`)
+  }
+  for (const { slide } of plan.jobs) {
+    const name = `slide "${slide.name}" (${slide.id})`
+    if (slide.headline.text.trim()) undeclared(`${name} headline`, slide.headline.fontFamily)
+    if (slide.subheadline.text.trim()) undeclared(`${name} subheadline`, slide.subheadline.fontFamily)
+  }
+  if (shots.brand?.font !== undefined && plan.jobs.length > 0)
+    undeclared('shots.brand.font', shots.brand.font)
+  if (problems.size === 0) return
+  const example = [...families][0]
+  throw new KitError(
+    `${plural(families.size, 'font family is', 'font families are')} not declared in shots.fonts:\n${lines([...problems])}`,
+    `Add { family: '${example}', file: '<woff2 or ttf>' } to shots.fonts in kit.config.ts; an undeclared family would render in a fallback font`,
+    ExitCode.config,
+  )
+}
+
+/** A set with more slides than its store keeps would lose the extra ones at push. */
+function checkCounts(plan: ExportPlan, project: string): void {
+  const counts = new Map<string, { store: Store; set: string; count: number }>()
+  for (const job of plan.jobs) {
+    const key = `${job.store} ${job.set}`
+    const at = counts.get(key) ?? { store: job.store, set: job.set, count: 0 }
+    at.count = Math.max(at.count, job.index)
+    counts.set(key, at)
+  }
+  const over = [...counts.values()].filter((c) => c.count > STORE_MAX[c.store])
+  if (over.length === 0) return
+  throw new KitError(
+    `Too many slides:\n${lines(over.map((c) => `${c.set}: ${plural(c.count, 'slide')}, ${STORE_NAME[c.store]} keeps at most ${STORE_MAX[c.store]} per set and locale`))}`,
+    `Remove slides from ${project}, or export one store with --store`,
+    ExitCode.precondition,
+  )
+}
+
+/** The font and brand files the page loads all have to be there before Chrome starts. */
+function checkAssets(root: string, plan: ExportPlan): void {
+  const missing = plan.assets.filter((file) => !existsSync(file)).map((file) => repoPath(root, file))
+  if (missing.length === 0) return
+  throw new KitError(
+    `${plural(missing.length, 'font or brand file is', 'font or brand files are')} missing:\n${lines(missing)}`,
+    'shots.fonts and shots.brand in kit.config.ts name files relative to the repo root',
+    ExitCode.precondition,
+  )
+}
+
+/** The Chrome binary, checked to be a file kit can run: a bad path would otherwise fail inside the spawn. */
+function requireChrome(): string {
+  const chrome = chromeBin()
+  try {
+    if (!statSync(chrome).isFile()) throw new Error('not a file')
+    accessSync(chrome, constants.X_OK)
+  } catch {
+    throw new KitError(`${chrome} is not a Chrome binary kit can run`, CHROME_HINT, ExitCode.precondition)
+  }
+  return chrome
+}
+
+/** Render the plan; a Chrome that cannot be started is a precondition failure, not a raw spawn error. */
+async function render(plan: ExportPlan, chrome: string): Promise<Map<string, Uint8Array>> {
+  const page = await pageBundle()
+  try {
+    return await renderJobs(plan, { chrome, page })
+  } catch (e) {
+    const code = (e as { code?: unknown } | null)?.code
+    if (e instanceof KitError || (code !== 'ENOENT' && code !== 'EACCES')) throw e
+    throw new KitError(`Cannot start Chrome at ${chrome}`, CHROME_HINT, ExitCode.precondition)
+  }
+}
+
+/** Per store and locale: how many screenshots of each set and their size; then what was removed and skipped. */
+function report(log: Logger, result: ExportResult): void {
+  const { dryRun, written, removed, skipped } = result
+  if (dryRun) for (const shot of written) log.step(`${shot.file} (${shot.width}x${shot.height})`)
+  const groups = new Map<string, Map<string, number>>()
+  for (const shot of written) {
+    const sets = groups.get(`${shot.store} ${shot.locale}`) ?? new Map<string, number>()
+    const set = `${shot.set} ${shot.width}x${shot.height}`
+    sets.set(set, (sets.get(set) ?? 0) + 1)
+    groups.set(`${shot.store} ${shot.locale}`, sets)
+  }
+  for (const [group, sets] of groups) {
+    log.info(`${group}: ${[...sets].map(([set, count]) => `${count} x ${set}`).join(', ')}`)
+  }
+  for (const file of removed) log.info(`${dryRun ? 'would remove' : 'removed'} ${file}`)
+  for (const s of skipped) {
+    log.warn(`Skipped slide ${s.slide} (${s.set}, ${s.locale}): no raw shot ${s.shot}`)
+  }
+  if (written.length === 0) {
+    log.warn('Nothing to export: no slide has a raw shot in an exported locale')
+    return
+  }
+  const count = plural(written.length, 'screenshot')
+  if (dryRun) log.info(`Dry run: ${count} would be written; Chrome was not started`)
+  else log.success(`${count} written`)
+}
+
+/** The project file as an error names it. */
+function projectLabel(root: string, file: string, project: StudioProject): string {
+  return `${repoPath(root, file)} (${plural(project.slides.length, 'slide')})`
+}
 
 /** `kit shots export`: plan, render in headless Chrome, write to the store listing dirs. */
-export const exportShots: ExportShots = async (_ctx, _opts) => {
-  throw new KitError('kit shots export is not implemented yet')
+export const exportShots: ExportShots = async (ctx, opts) => {
+  const { root, config } = requireProject(ctx)
+  const shots = requireShots(config)
+  const projectFile = resolve(root, shots.project)
+  const project = await loadProject(projectFile)
+  const destinations = resolveDestinations(root, config, opts)
+  const rawDir = resolveRawDir(root, config, shots)
+
+  const plan = planExport({
+    root,
+    config,
+    project,
+    destinations,
+    rawDir,
+    raw: listRaw(rawDir),
+    allowMissing: opts.allowMissing,
+  })
+  checkCounts(plan, projectLabel(root, projectFile, project))
+  checkFonts(shots, plan)
+  checkAssets(root, plan)
+
+  // The dry pass does every ownership check, so a file in the way stops the run before Chrome starts.
+  const planned = await writeExport(plan, { root, force: opts.force, dryRun: true })
+  let outcome = planned
+  if (!ctx.flags.dryRun && plan.jobs.length > 0) {
+    const chrome = requireChrome()
+    if (!ctx.flags.json)
+      ctx.log.step(`Rendering ${plural(plan.jobs.length, 'screenshot')} in headless Chrome`)
+    const images = await render(plan, chrome)
+    outcome = await writeExport(plan, { root, images, force: opts.force, dryRun: false })
+  }
+
+  const result: ExportResult = {
+    dryRun: ctx.flags.dryRun,
+    stores: plan.stores,
+    written: outcome.written,
+    removed: outcome.removed,
+    skipped: plan.skipped,
+  }
+  if (ctx.flags.json) emitJson(result)
+  else report(ctx.log, result)
 }
