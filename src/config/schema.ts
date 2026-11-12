@@ -35,6 +35,8 @@ const target = z
     kind: z.enum(kinds),
     dir: z.string(),
     envs: z.array(z.string()).optional(),
+    /** `--affected`: repo-relative dirs or globs outside `dir` whose changes also affect this target. */
+    paths: z.array(z.string()).optional(),
     ...verbOverrides,
     deploy: deploy.optional(),
   })
