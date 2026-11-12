@@ -5,14 +5,23 @@ import { join, resolve } from 'node:path'
 import pkg from '../../package.json' with { type: 'json' }
 import { CATALOG_KEYS, checkCatalogKeys, checkCiPin, parseEnvKeys } from '../../src/commands/doctor'
 import { configSchema } from '../../src/config/schema'
+import { usesRef } from '../../src/lib/kitref'
 import { parseToml } from '../../src/lib/toml'
 
-// templates/new: the new-repo scaffold. Each file must parse once its {{placeholders}} are filled.
+// templates/gradle and templates/toolchain: the new-repo scaffolds. Each file must parse once its {{placeholders}} are filled.
 const KIT = resolve(import.meta.dir, '../..')
-const NEW = join(KIT, 'templates/new')
-const VARS: Record<string, string> = { name: 'Demo', kitVersion: pkg.version, bun: Bun.version }
-const render = (file: string) => {
-  const text = readFileSync(join(NEW, file), 'utf8').replace(/\{\{(\w+)\}\}/g, (m, k: string) => VARS[k] ?? m)
+const NEW = join(KIT, 'templates/gradle')
+const TOOLCHAIN = join(KIT, 'templates/toolchain')
+const SHA = 'c'.repeat(40)
+const VARS: Record<string, string> = {
+  name: 'Demo',
+  kitVersion: pkg.version,
+  kitRef: usesRef(pkg.version, SHA),
+  platformArgs: ' -- --platform jvm',
+  bun: Bun.version,
+}
+const render = (file: string, dir = NEW) => {
+  const text = readFileSync(join(dir, file), 'utf8').replace(/\{\{(\w+)\}\}/g, (m, k: string) => VARS[k] ?? m)
   expect(text).not.toMatch(/\{\{\w+\}\}/)
   return text
 }
@@ -20,7 +29,7 @@ const render = (file: string) => {
 const tmp = mkdtempSync(join(tmpdir(), 'kit-templates-'))
 afterAll(() => rmSync(tmp, { recursive: true, force: true }))
 
-describe('templates/new', () => {
+describe('templates/gradle', () => {
   test('libs.versions.toml parses and has every catalog key kit reads', () => {
     const catalog = parseToml(render('apps/client/gradle/libs.versions.toml'))
     expect(checkCatalogKeys('libs.versions.toml', catalog).status).toBe('ok')
@@ -93,5 +102,40 @@ describe('templates/new', () => {
     const parsed = configSchema.safeParse((await import(config)).default)
     expect(parsed.error).toBeUndefined()
     expect(parsed.data?.gradle?.root).toBe('apps/client')
+  })
+})
+
+describe('templates/toolchain', () => {
+  type Workflow = { jobs: Record<string, { uses?: string; steps?: { run?: string; uses?: string }[] }> }
+
+  test('mise.toml pins bun and ktlint, and no java', () => {
+    const tools = parseToml(render('mise.toml', TOOLCHAIN)).tools as Record<string, string>
+    expect(Object.keys(tools)).toEqual(['bun', 'ktlint'])
+  })
+
+  test('ci.yml lints, tests and builds through kit, pinned to the kit SHA', () => {
+    const text = render('.github/workflows/ci.yml', TOOLCHAIN)
+    const wf = Bun.YAML.parse(text) as Workflow
+    const runs = Object.values(wf.jobs).flatMap((j) => (j.steps ?? []).flatMap((s) => (s.run ? [s.run] : [])))
+    expect(runs).toEqual(['kit lint', 'kit test -- --platform jvm', 'kit build -- --platform jvm'])
+    expect(text).toContain(`jordond/kit/.github/actions/setup@${SHA} # v${pkg.version}`)
+    expect(text).not.toContain('java:')
+    expect(checkCiPin([{ file: 'ci.yml', text }], `^${pkg.version}`, true).status).toBe('ok')
+  })
+
+  test('distribute.yml calls the reusable workflow at the same pin', () => {
+    const text = render('.github/workflows/distribute.yml', TOOLCHAIN)
+    const wf = Bun.YAML.parse(text) as Workflow
+    expect(wf.jobs.distribute?.uses).toBe(`jordond/kit/.github/workflows/mobile-distribute.yml@${SHA}`)
+    expect(checkCiPin([{ file: 'distribute.yml', text }], `^${pkg.version}`, true).status).toBe('ok')
+  })
+
+  test('.env.example and the Fastfile match the gradle template', () => {
+    expect(render('.env.example', TOOLCHAIN)).toBe(render('.env.example'))
+    expect(render('fastlane/Fastfile', TOOLCHAIN)).toBe(render('apps/client/fastlane/Fastfile'))
+  })
+
+  test('.editorconfig styles Kotlin for ktlint', () => {
+    expect(render('.editorconfig', TOOLCHAIN)).toContain('[*.{kt,kts}]\nindent_size = 2')
   })
 })

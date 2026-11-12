@@ -107,6 +107,22 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(readdirSync(installed)).not.toContain('node_modules')
   })
 
+  test('the tarball ships every template file, dotfiles included', () => {
+    const shipped = join(app, 'node_modules/@jordond/kit/templates')
+    const list = (dir: string) =>
+      [...new Bun.Glob('**/*').scanSync({ cwd: dir, onlyFiles: true, dot: true })].sort()
+    expect(list(shipped)).toEqual(list(join(KIT, 'templates')))
+    expect(list(shipped)).toEqual(
+      expect.arrayContaining([
+        'toolchain/.editorconfig',
+        'toolchain/.env.example',
+        'toolchain/.github/workflows/ci.yml',
+        'toolchain/.github/workflows/distribute.yml',
+        'gradle/.github/workflows/ci.yml',
+      ]),
+    )
+  })
+
   test('the tarball has no stale build output', () => {
     const dist = readdirSync(join(app, 'node_modules/@jordond/kit/dist'), { recursive: true }).map(String)
     expect(dist).not.toContain(STALE)

@@ -13,7 +13,11 @@ import type { PackageManager } from '../lib/pm'
  * and `bundle install` where a Gemfile is (the Gradle root, else the repo root). A missing tool
  * skips its step with a hint instead of failing, so a JS-only machine still ends up set up.
  * Idempotent: whatever is already there is skipped. Every step runs even after a failure, so one
- * pass surfaces every problem; the exit code is 1 if any failed. New-repo scaffolding is Phase 2.
+ * pass surfaces every problem; the exit code is 1 if any failed.
+ *
+ * New-repo mode (no kit.config.ts yet): `--template toolchain|gradle` writes the kit files first
+ * (src/lib/scaffold.ts), then the steps above run against the new config. A Kotlin toolchain
+ * project (a `kotlin` wrapper and project.yaml) is offered the toolchain template.
  */
 
 export type Scaffold = 'mise' | 'lefthook'
@@ -21,6 +25,51 @@ export type Scaffold = 'mise' | 'lefthook'
 export const SCAFFOLDS: Record<Scaffold, { file: string; alt: string[]; template: string }> = {
   mise: { file: 'mise.toml', alt: ['.mise.toml'], template: 'mise.toml' },
   lefthook: { file: 'lefthook.yml', alt: ['lefthook.yaml', '.lefthook.yml'], template: 'lefthook.yml' },
+}
+
+/**
+ * The template file of a scaffold, under kit's `templates/`. A Kotlin toolchain repo gets its own
+ * mise.toml: bun and ktlint, no java (the toolchain provisions its JDK).
+ */
+export function scaffoldTemplate(scaffold: Scaffold, toolchain: boolean): string {
+  const { template } = SCAFFOLDS[scaffold]
+  return scaffold === 'mise' && toolchain ? join('toolchain', template) : template
+}
+
+/** How a git hook reaches kit: the repo's own copy when kit lives in `.kit/`, else the one on PATH. */
+export function hookKit(kitDir: string): string {
+  return kitDir === '.' ? 'kit' : `./${kitDir}/node_modules/.bin/kit`
+}
+
+export type Shell = 'zsh' | 'bash' | 'fish'
+
+export interface CompletionState {
+  shell: Shell
+  /** The file init writes or appends to, as shown to the user (`~/.zshrc`). */
+  file: string
+  /** Why it is not installed now; undefined installs it. */
+  skip?: string
+}
+
+/** The user's shell from `$SHELL`, when kit has a completion script for it. */
+export function shellOf(shellPath: string | undefined): Shell | undefined {
+  const name = shellPath?.split('/').pop()
+  return name === 'zsh' || name === 'bash' || name === 'fish' ? name : undefined
+}
+
+/** Where completion goes: fish autoloads a file; zsh and bash source it from the rc file. */
+export function completionFile(shell: Shell, env: Record<string, string | undefined>, home: string): string {
+  if (shell === 'fish') return join(env.XDG_CONFIG_HOME || join(home, '.config'), 'fish/completions/kit.fish')
+  return shell === 'zsh' ? join(env.ZDOTDIR || home, '.zshrc') : join(home, '.bashrc')
+}
+
+/** The rc line; the script calls back into the `kit` on PATH. */
+export const completionLine = (shell: Shell) => `source <(kit completion ${shell})`
+
+/** Whether `current` (the target file's text, undefined when absent) already loads kit completion. */
+export function completionInstalled(shell: Shell, current: string | undefined): boolean {
+  if (current === undefined) return false
+  return shell === 'fish' ? true : /\bkit completion\b/.test(current)
 }
 
 export interface InitState {
@@ -45,12 +94,15 @@ export interface InitState {
   platform?: NodeJS.Platform
   /** `--js-only`: skip the Gradle, Kotlin toolchain and bundler steps. */
   jsOnly?: boolean
+  /** Shell completion for the user's shell; undefined (CI, unknown shell) plans nothing. */
+  completion?: CompletionState
 }
 
 export type InitAction =
   | { kind: 'env-file'; title: string }
   | { kind: 'scaffold'; title: string; scaffold: Scaffold }
   | { kind: 'cmd'; title: string; cmd: string[]; cwd: string; env?: Record<string, string> }
+  | { kind: 'completion'; title: string; shell: Shell; file: string }
   | { kind: 'skip'; title: string; reason: string }
 
 const WRANGLER_CONFIGS = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml']
@@ -103,6 +155,11 @@ export function planInit(s: InitState): InitAction[] {
     plan.push({ kind: 'cmd', title: `wrangler types (${name})`, cmd: s.exec(cwd, 'wrangler', 'types'), cwd })
   }
   plan.push(...planNative(s))
+  if (s.completion) {
+    const { shell, file, skip } = s.completion
+    const title = `${shell} completion`
+    plan.push(skip ? { kind: 'skip', title, reason: skip } : { kind: 'completion', title, shell, file })
+  }
   return plan
 }
 
@@ -196,37 +253,164 @@ export function renderTemplate(text: string, vars: Record<string, string>): stri
 }
 
 export default defineCommand({
-  description: 'Set up a fresh clone: .env, install, env sync, wrangler types, Gradle and bundler deps',
+  description: 'Set up a fresh clone, or a new repo: .env, install, env sync, wrangler types, native deps',
   group: 'Setup',
   args: {
     'js-only': { type: 'boolean', description: 'Skip the Gradle, Kotlin toolchain and bundler steps' },
+    template: {
+      type: 'string',
+      description:
+        'New repo: write the kit files first (toolchain: an existing Kotlin toolchain project; gradle)',
+    },
+    name: { type: 'string', description: 'App name for --template (default: the directory name)' },
   },
   examples: [
     'kit init',
     'kit init --dry-run',
     'kit init --yes       # also scaffold mise.toml and lefthook.yml',
     'kit init --js-only   # JS workspace only: no Gradle, no bundle install',
+    'kit init --template toolchain   # add kit to a Kotlin toolchain project (kit goes in .kit/)',
+    'kit init --template gradle --name MyApp',
   ].join('\n'),
   async run(ctx) {
-    const { chmodSync, writeFileSync } = await import('node:fs')
-    const { relative } = await import('node:path')
+    const { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import(
+      'node:fs'
+    )
+    const { homedir, tmpdir } = await import('node:os')
+    const { basename, normalize, relative } = await import('node:path')
     const pc = (await import('picocolors')).default
+    const { CONFIG_FILE, installDir, loadConfig, loadConfigFile } = await import('../config/load')
+    const { ExitCode, KitError } = await import('../lib/errors')
     const { emitJson } = await import('../lib/log')
     const { detectPackageManager, pmExec } = await import('../lib/pm')
-    const { run, runQuiet } = await import('../lib/proc')
-    const { confirm } = await import('../lib/prompt')
+    const { run, runCapture, runQuiet } = await import('../lib/proc')
+    const { confirm, text } = await import('../lib/prompt')
+    const { isToolchainRepo, planScaffold, TEMPLATES } = await import('../lib/scaffold')
+    type Template = (typeof TEMPLATES)[number]
+    type FileAction = ReturnType<typeof planScaffold>[number]
 
     const root = ctx.root ?? process.cwd()
-    const exists = (p: string) => existsSync(join(root, p))
+    const onDisk = (p: string) => existsSync(join(root, p))
+    const say = !ctx.flags.json
+
+    // ---- new repo: which template, if any ------------------------------------------------------
+    const wanted = ctx.args.template
+    if (wanted !== undefined && !TEMPLATES.includes(wanted as Template)) {
+      throw new KitError(
+        `Unknown template "${wanted}"`,
+        `Use one of: ${TEMPLATES.join(', ')}`,
+        ExitCode.usage,
+      )
+    }
+    if (wanted !== undefined && ctx.root) {
+      throw new KitError(
+        `${relative(process.cwd(), ctx.root) || '.'} already has a ${CONFIG_FILE}`,
+        'Run `kit init` without --template to set this clone up',
+        ExitCode.usage,
+      )
+    }
+    let template = wanted as Template | undefined
+    const toolchainRepo = isToolchainRepo(onDisk)
+    if (template === 'toolchain' && !toolchainRepo) {
+      throw new KitError(
+        'No Kotlin toolchain project here (a `kotlin` wrapper and project.yaml)',
+        'Create one first (https://kotlin-toolchain.org), then re-run in its root',
+        ExitCode.config,
+      )
+    }
+    if (!ctx.root && !template) {
+      if (toolchainRepo) {
+        const ask = 'Kotlin toolchain project without kit. Add kit (.kit/, CI workflows, hooks)?'
+        if (ctx.flags.yes || ctx.flags.dryRun) template = 'toolchain'
+        else if (ctx.flags.interactive) {
+          if (await confirm(ctx.flags, ask, { initial: true })) template = 'toolchain'
+        } else if (say) {
+          ctx.log.warn('Kotlin toolchain project without kit: re-run with `--template toolchain`')
+        }
+      } else if (say) {
+        ctx.log.dim(`no ${CONFIG_FILE} here: \`kit init --template gradle\` scaffolds a new repo`)
+      }
+    }
+
+    // ---- new repo: the files -------------------------------------------------------------------
+    let config = ctx.config
+    let scaffold: FileAction[] = []
+    if (template) {
+      const pkg = (await import('../../package.json', { with: { type: 'json' } })).default
+      const { tagSha, usesRef } = await import('../lib/kitref')
+      let name = typeof ctx.args.name === 'string' && ctx.args.name ? ctx.args.name : basename(root)
+      if (ctx.args.name === undefined && ctx.flags.interactive && !ctx.flags.yes && !ctx.flags.dryRun) {
+        name = (await text(ctx.flags, 'App name', { initial: name })).trim() || name
+      }
+      const sha = await tagSha(pkg.version)
+      if (!sha && say) {
+        ctx.log.warn(`v${pkg.version} not found on GitHub: workflows pin the tag, not a commit`)
+        ctx.log.dim('  › run `kit upgrade` once it is released to pin the SHA')
+      }
+      const dir = join(kitPackageRoot(), 'templates', template)
+      const files: Record<string, string> = {}
+      for (const rel of new Bun.Glob('**/*').scanSync({ cwd: dir, onlyFiles: true, dot: true })) {
+        // mise.toml goes through the mise scaffold below, which also honours an existing .mise.toml.
+        if (rel !== SCAFFOLDS.mise.template) files[rel] = readFileSync(join(dir, rel), 'utf8')
+      }
+      scaffold = planScaffold({
+        template,
+        name,
+        kitVersion: pkg.version,
+        kitRef: usesRef(pkg.version, sha),
+        zod: pkg.peerDependencies.zod,
+        files,
+        read: (p) => (onDisk(p) ? readFileSync(join(root, p), 'utf8') : undefined),
+        list: (d) =>
+          onDisk(d)
+            ? [...new Bun.Glob('**/*').scanSync({ cwd: join(root, d), onlyFiles: true })]
+                .filter((f) => !/(^|\/)(build|node_modules)\//.test(f))
+                .map((f) => join(d, f))
+            : [],
+      })
+      const configAction = scaffold.find((a) => basename(a.path) === CONFIG_FILE)
+      if (ctx.flags.dryRun && configAction?.kind === 'write') {
+        // Nothing is written on a dry run; validate and plan from a throwaway copy.
+        const tmp = mkdtempSync(join(tmpdir(), 'kit-init-'))
+        try {
+          writeFileSync(join(tmp, CONFIG_FILE), configAction.content)
+          config = await loadConfigFile(join(tmp, CONFIG_FILE), configAction.path)
+        } finally {
+          rmSync(tmp, { recursive: true, force: true })
+        }
+      }
+    }
+    const planned = new Set(scaffold.filter((a) => a.kind !== 'skip').map((a) => normalize(a.path)))
+    const exists = (p: string) => planned.has(normalize(p)) || onDisk(p)
+
+    const describe = (a: FileAction) =>
+      a.kind === 'write' ? `write ${a.path}` : a.kind === 'edit' ? `edit ${a.path}  ${pc.dim(a.note)}` : ''
+    const results: { title: string; ok: boolean; skipped?: string }[] = []
+    if (!ctx.flags.dryRun) {
+      for (const a of scaffold) {
+        if (a.kind === 'skip') {
+          if (say) ctx.log.dim(`- ${a.path}  ${a.reason}`)
+          results.push({ title: a.path, ok: true, skipped: a.reason })
+          continue
+        }
+        if (say) ctx.log.step(describe(a))
+        mkdirSync(join(root, a.path, '..'), { recursive: true })
+        writeFileSync(join(root, a.path), a.content)
+        results.push({ title: a.path, ok: true })
+      }
+      if (template) config = await loadConfig(root)
+    }
+
+    // ---- the clone setup -----------------------------------------------------------------------
     const pm = detectPackageManager(root, root)
     const missing = (Object.keys(SCAFFOLDS) as Scaffold[]).filter((n) =>
       [SCAFFOLDS[n].file, ...SCAFFOLDS[n].alt].every((f) => !exists(f)),
     )
 
-    // Answers first, before anything runs.
+    // Answers first, before anything runs. A template includes both scaffolds.
     const accepted: Scaffold[] = []
     let declinedReason: string | undefined
-    if (ctx.flags.yes) accepted.push(...missing)
+    if (ctx.flags.yes || template) accepted.push(...missing)
     else if (!ctx.flags.interactive) declinedReason = 'no terminal; re-run with --yes to add it'
     else if (ctx.flags.dryRun) declinedReason = 'would ask'
     else {
@@ -235,75 +419,129 @@ export default defineCommand({
       }
     }
 
+    // Shell completion lives in the home dir, so it is asked for, and never touched in CI.
+    let completion: CompletionState | undefined
+    const shell = shellOf(process.env.SHELL)
+    if (shell && !ctx.flags.ci) {
+      const home = homedir()
+      const target = completionFile(shell, process.env, home)
+      const file = target.startsWith(`${home}/`) ? `~/${relative(home, target)}` : target
+      const current = existsSync(target) ? readFileSync(target, 'utf8') : undefined
+      let skip: string | undefined
+      if (completionInstalled(shell, current)) skip = `already in ${file}`
+      else if (!Bun.which('kit')) skip = 'kit is not on PATH; bun add -g @jordond/kit, then re-run'
+      else if (ctx.flags.dryRun && !ctx.flags.yes) skip = 'would ask'
+      else if (!ctx.flags.yes && !ctx.flags.interactive) skip = 'no terminal; re-run with --yes to install it'
+      else if (
+        !(await confirm(ctx.flags, `Install kit completion for ${shell} (${file})?`, { initial: true }))
+      )
+        skip = 'declined'
+      completion = { shell, file: target, skip }
+    }
+
     const { bundleEnv } = await import('../lib/fastlane')
+    const self = [process.execPath, '--no-env-file', process.argv[1]!]
     const plan = planInit({
       root,
-      config: ctx.config,
+      config,
       exists,
       pm,
       accepted,
       declinedReason,
-      self: [process.execPath, '--no-env-file', process.argv[1]!],
+      self,
       exec: (cwd, bin, ...args) => pmExec(detectPackageManager(cwd, root), bin, ...args),
       which: (bin) => Bun.which(bin) !== null,
-      androidSdk: hasAndroidSdk(root, ctx.config),
+      androidSdk: hasAndroidSdk(root, config),
       platform: process.platform,
       bundleEnv,
       jsOnly: ctx.args['js-only'] === true,
+      completion,
     })
 
     const where = (cwd: string) => relative(root, cwd) || '.'
     if (ctx.flags.dryRun) {
       if (ctx.flags.json) {
         emitJson({
+          ...(template
+            ? {
+                template,
+                files: scaffold.map((a) =>
+                  a.kind === 'skip'
+                    ? a
+                    : { kind: a.kind, path: a.path, ...(a.kind === 'edit' ? { note: a.note } : {}) },
+                ),
+              }
+            : {}),
           plan: plan.map((a) =>
             a.kind === 'cmd' ? { kind: a.kind, title: a.title, cmd: a.cmd, cwd: where(a.cwd) } : a,
           ),
         })
         return
       }
+      for (const a of scaffold) {
+        if (a.kind === 'skip') ctx.log.dim(`- ${a.path}  ${a.reason}`)
+        else ctx.log.step(describe(a))
+      }
       for (const a of plan) {
         if (a.kind === 'skip') ctx.log.dim(`- ${a.title}  ${a.reason}`)
         else if (a.kind === 'cmd')
           ctx.log.step(`${a.title}  ${pc.dim(`${where(a.cwd)} $ ${a.cmd.join(' ')}`)}`)
+        else if (a.kind === 'completion') ctx.log.step(`${a.title}  ${pc.dim(a.file)}`)
         else ctx.log.step(a.kind === 'scaffold' ? `write ${a.title}` : `create ${a.title}`)
       }
       return
     }
 
-    const results: { title: string; ok: boolean; skipped?: string }[] = []
-    const kitRoot = ctx.flags.json ? undefined : kitPackageRoot()
+    const toolchain = !!config?.toolchain || toolchainRepo
     for (const a of plan) {
       if (a.kind === 'skip') {
-        if (!ctx.flags.json) ctx.log.dim(`- ${a.title}  ${a.reason}`)
+        if (say) ctx.log.dim(`- ${a.title}  ${a.reason}`)
         results.push({ title: a.title, ok: true, skipped: a.reason })
         continue
       }
-      if (!ctx.flags.json) ctx.log.step(a.title)
+      if (say) ctx.log.step(a.title)
       let ok = true
       if (a.kind === 'env-file') {
         // Secrets go in here: owner-only from creation, never the example's (usually 0644) mode.
         const dotenv = join(root, '.env')
         writeFileSync(dotenv, readFileSync(join(root, '.env.example')), { mode: 0o600 })
         chmodSync(dotenv, 0o600)
-        if (!ctx.flags.json) ctx.log.dim('  fill in the values, then run `kit doctor`')
+        if (say) ctx.log.dim('  fill in the values, then run `kit doctor`')
       } else if (a.kind === 'scaffold') {
-        const { file, template } = SCAFFOLDS[a.scaffold]
-        const text = readFileSync(join(kitRoot ?? kitPackageRoot(), 'templates', template), 'utf8')
-        writeFileSync(join(root, file), renderTemplate(text, { bun: Bun.version }))
+        const file = join(kitPackageRoot(), 'templates', scaffoldTemplate(a.scaffold, toolchain))
+        const vars = { bun: Bun.version, kit: hookKit(installDir(root)) }
+        writeFileSync(
+          join(root, SCAFFOLDS[a.scaffold].file),
+          renderTemplate(readFileSync(file, 'utf8'), vars),
+        )
+      } else if (a.kind === 'completion') {
+        if (a.shell === 'fish') {
+          const script = await runCapture([...self, 'completion', 'fish'], { cwd: root })
+          ok = script.code === 0
+          if (ok) {
+            mkdirSync(join(a.file, '..'), { recursive: true })
+            writeFileSync(a.file, script.stdout)
+          }
+        } else {
+          const rc = existsSync(a.file) ? readFileSync(a.file, 'utf8') : ''
+          const lead = rc === '' || rc.endsWith('\n') ? '' : '\n'
+          appendFileSync(a.file, `${lead}\n# kit shell completion\n${completionLine(a.shell)}\n`)
+        }
+        if (ok && say) ctx.log.dim('  open a new shell to use it')
+        if (!ok && say) ctx.log.error(`${a.title} failed`)
       } else {
         // --json keeps stdout for the one document, so child output is captured instead.
         const code = ctx.flags.json
           ? (await runQuiet(a.cmd, { cwd: a.cwd, env: a.env })).code
           : await run(a.cmd, { cwd: a.cwd, env: a.env })
         ok = code === 0
-        if (!ok && !ctx.flags.json) ctx.log.error(`${a.title} failed (exit ${code})`)
+        if (!ok && say) ctx.log.error(`${a.title} failed (exit ${code})`)
       }
       results.push({ title: a.title, ok })
     }
 
     const failed = results.filter((r) => !r.ok).map((r) => r.title)
-    if (ctx.flags.json) emitJson({ ok: !failed.length, steps: results })
+    if (ctx.flags.json) emitJson({ ok: !failed.length, ...(template ? { template } : {}), steps: results })
     else if (failed.length) ctx.log.error(`init failed: ${failed.join(', ')}`)
     else ctx.log.success('init complete')
     if (failed.length) process.exitCode = 1

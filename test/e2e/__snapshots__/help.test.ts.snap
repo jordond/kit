@@ -33,8 +33,9 @@ Infra
 
 Setup
   doctor      Check tools, versions and .env
-  init        Set up a fresh clone
+  init        Set up a fresh clone, or add kit to a new repo
   deps        List or update npm dependencies (catalog-aware)
+  upgrade     Move the @jordond/kit pin and the workflow SHAs to a kit release
   config      Print the resolved kit.config.ts
   completion  Print a shell completion script
 
@@ -580,7 +581,7 @@ Examples
 `;
 
 exports[`help kit init --help 1`] = `
-"Set up a fresh clone: .env, install, env sync, wrangler types, Gradle and bundler deps
+"Set up a fresh clone, or a new repo: .env, install, env sync, wrangler types, native deps
 
 Usage
   kit init [options]
@@ -590,17 +591,21 @@ Examples
   kit init --dry-run
   kit init --yes       # also scaffold mise.toml and lefthook.yml
   kit init --js-only   # JS workspace only: no Gradle, no bundle install
+  kit init --template toolchain   # add kit to a Kotlin toolchain project (kit goes in .kit/)
+  kit init --template gradle --name MyApp
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --js-only  Skip the Gradle, Kotlin toolchain and bundler steps
+  -h, --help               Show help
+  -V, --version            Show kit version
+      --json               Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run            Plan and run read-only steps; skip mutations
+  -y, --yes                Accept confirmations (never skips prod)
+  -v, --verbose            Stream all child output
+  -q, --quiet              Errors and summary only
+      --bail               Stop at the first failure
+      --js-only            Skip the Gradle, Kotlin toolchain and bundler steps
+      --template <string>  New repo: write the kit files first (toolchain: an existing Kotlin toolchain project; gradle)
+      --name <string>      App name for --template (default: the directory name)
 
 "
 `;
@@ -764,6 +769,30 @@ Usage
 
 Examples
   kit typecheck
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit upgrade --help 1`] = `
+"Move the @jordond/kit pin and the workflow SHAs to a kit release
+
+Usage
+  kit upgrade [options]
+
+Examples
+  kit upgrade           # the latest release on npm
+  kit upgrade 0.6.0
+  kit upgrade --dry-run
 
 Options
   -h, --help     Show help

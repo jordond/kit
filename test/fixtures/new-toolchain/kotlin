@@ -1,0 +1,5 @@
+#!/bin/sh
+# Fake Kotlin toolchain wrapper: records argv.
+kotlin_cli_version=0.13.0
+echo "$*" >> "${KIT_TEST_LOG:-/dev/null}"
+exit 0

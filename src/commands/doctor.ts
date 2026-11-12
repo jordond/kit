@@ -415,7 +415,7 @@ export function checkCiPin(
       label,
       status: strict ? 'fail' : 'warn',
       detail: `${off.map((f) => `${f.file} v${f.v}`).join(', ')} ≠ package.json ${want}`,
-      hint: 'Bump the workflow SHA with the npm pin',
+      hint: 'Run `kit upgrade <version>`: it moves the npm pin and the workflow SHAs together',
     }
   }
   return { id: 'ci-pin', label, status: 'ok', detail: want }

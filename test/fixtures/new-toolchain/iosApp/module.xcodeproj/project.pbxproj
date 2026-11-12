@@ -1,0 +1,7 @@
+// !$*UTF8*$!
+{
+	buildSettings = {
+		DEVELOPMENT_TEAM = "";
+		PRODUCT_BUNDLE_IDENTIFIER = "app.example.demo";
+	};
+}

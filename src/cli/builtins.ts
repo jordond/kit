@@ -171,7 +171,7 @@ export const builtins: BuiltinEntry[] = [
   },
   {
     path: ['init'],
-    description: 'Set up a fresh clone',
+    description: 'Set up a fresh clone, or add kit to a new repo',
     group: 'Setup',
     load: () => import('../commands/init'),
   },
@@ -180,6 +180,12 @@ export const builtins: BuiltinEntry[] = [
     description: 'List or update npm dependencies (catalog-aware)',
     group: 'Setup',
     load: () => import('../commands/deps'),
+  },
+  {
+    path: ['upgrade'],
+    description: 'Move the @jordond/kit pin and the workflow SHAs to a kit release',
+    group: 'Setup',
+    load: () => import('../commands/upgrade'),
   },
   // end setup
   {

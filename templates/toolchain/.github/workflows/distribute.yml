@@ -1,0 +1,41 @@
+name: distribute
+
+# Build and upload one platform to one store track with `kit release`. Version names come from
+# libs.versions.toml at the dispatched ref (`kit version bump` first); build numbers from the stores.
+# prod runs in the `production` environment: give it required reviewers.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        options: [ios, android]
+      track:
+        type: choice
+        options: [internal, alpha, beta, prod]
+        default: internal
+      notes:
+        description: Release notes (empty = commits since the last tag; required for ios prod)
+        type: string
+        default: ''
+
+jobs:
+  distribute:
+    # Keep the SHA on the same version as @jordond/kit in .kit/bun.lock; `kit doctor --ci` checks it.
+    uses: jordond/kit/.github/workflows/mobile-distribute.yml@{{kitRef}}
+    permissions:
+      contents: write
+    with:
+      platform: ${{ inputs.platform }}
+      track: ${{ inputs.track }}
+      notes: ${{ inputs.notes }}
+    secrets:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+      MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}

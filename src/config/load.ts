@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { ExitCode, KitError } from '../lib/errors'
 import { configSchema, type KitConfig } from './schema'
@@ -36,11 +36,21 @@ export function registerSelf(): void {
   })
 }
 
+/**
+ * The config file of `root`, repo-relative: `kit.config.ts`, else `.kit/kit.config.ts` (next to
+ * kit's node_modules, so editors resolve the `@jordond/kit` import). The root file wins. Paths in
+ * the config are relative to the repo root in both places.
+ */
+export function configFile(root: string, exists: (path: string) => boolean = existsSync): string | undefined {
+  return [CONFIG_FILE, join(KIT_DIR, CONFIG_FILE)].find((f) => exists(join(root, f)))
+}
+
 export function findRoot(from: string = process.cwd()): string | undefined {
-  if (process.env.KIT_ROOT && existsSync(join(process.env.KIT_ROOT, CONFIG_FILE))) return process.env.KIT_ROOT
+  if (process.env.KIT_ROOT && configFile(process.env.KIT_ROOT)) return process.env.KIT_ROOT
   let dir = from
   while (true) {
-    if (existsSync(join(dir, CONFIG_FILE))) return dir
+    // `.kit/kit.config.ts` belongs to the repo above it: `.kit` itself is never a root.
+    if (basename(dir) !== KIT_DIR && configFile(dir)) return dir
     const parent = dirname(dir)
     if (parent === dir) return undefined
     dir = parent
@@ -61,14 +71,20 @@ export async function loadDotEnv(root: string): Promise<void> {
 }
 
 export async function loadConfig(root: string): Promise<KitConfig> {
+  const file = configFile(root) ?? CONFIG_FILE
+  return loadConfigFile(join(root, file), file)
+}
+
+/** Load and validate one config file; `label` names it in errors. */
+export async function loadConfigFile(path: string, label = CONFIG_FILE): Promise<KitConfig> {
   registerSelf()
-  const mod = await import(pathToFileURL(join(root, CONFIG_FILE)).href)
+  const mod = await import(pathToFileURL(path).href)
   const result = configSchema.safeParse(mod.default)
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join('.') || '(root)'}: ${i.message}`)
       .join('\n')
-    throw new KitError(`Invalid ${CONFIG_FILE}:\n${issues}`, 'Fix the fields above', ExitCode.config)
+    throw new KitError(`Invalid ${label}:\n${issues}`, 'Fix the fields above', ExitCode.config)
   }
   return result.data
 }

@@ -2,5 +2,5 @@
 pre-commit:
   commands:
     lint:
-      run: kit lint --staged --fix
+      run: {{kit}} lint --staged --fix
       stage_fixed: true

@@ -20,10 +20,49 @@ a root `package.json`:
 mkdir -p .kit && cd .kit && bun init -y && bun add -d @jordond/kit   # then: .kit/node_modules/.bin/kit
 ```
 
-`kit.config.ts` stays at the root and keeps `import { defineConfig } from '@jordond/kit'`: kit resolves that
-import to itself. The launcher, `kit init`, `kit doctor`, the setup action and `mobile-distribute.yml` all
-look in both places. Kotlin toolchain repos need `.kit/`: the toolchain runs `pnpm add` for its Kotlin/Wasm
-test browser in a build folder with no `package.json`, and pnpm installs into the nearest one above it.
+The config can sit next to it as `.kit/kit.config.ts`, where editors resolve the `@jordond/kit` import
+through `.kit/node_modules`; a root `kit.config.ts` wins when both exist and still runs (kit resolves the
+import to itself), but editors show it unresolved. Paths in the config are relative to the repo root in
+both places. The launcher, `kit init`, `kit doctor`, `kit upgrade`, the setup action and
+`mobile-distribute.yml` all look in both places. Kotlin toolchain repos need `.kit/`: the toolchain runs
+`pnpm add` for its Kotlin/Wasm test browser in a build folder with no `package.json`, and pnpm installs
+into the nearest one above it.
+
+## New repos
+
+`kit init` in a repo without a `kit.config.ts` can write the kit files first, then set the clone up as
+usual (`.env`, install, toolchain download, fastlane bundle). Run it with a global kit or `bunx @jordond/kit init`.
+
+```sh
+kit init --template toolchain          # in a Kotlin toolchain project (a `kotlin` wrapper + project.yaml)
+kit init --template gradle --name MyApp
+kit init --template toolchain --dry-run
+```
+
+| Template | Writes |
+| --- | --- |
+| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
+| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`. Add the Gradle wrapper and the modules yourself |
+
+- `toolchain` layers kit over an existing project and never writes a root `package.json`. Create the project
+  first (`kotlin init`). A plain `kit init` there offers the template (`--yes` accepts it).
+- It reads the project to fill the config: the `android/app` module and its `applicationId`, the `ios/app`
+  module's Xcode project, scheme, bundle id, team and the xcconfig holding `MARKETING_VERSION`, and the
+  `jvm/app` module for `kit dev`. An id it cannot find is `com.example.<name>`: replace it before a release.
+  CI tests the non-Apple platforms the modules declare (`--platform jvm --platform android …`).
+- Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
+- A file that already exists is kept; `.gitignore` and the catalog only gain lines.
+
+## Upgrading
+
+```sh
+kit upgrade            # the latest release on npm
+kit upgrade 0.6.0
+```
+
+Moves the `@jordond/kit` range in `package.json` (or `.kit/package.json`), runs the install, and rewrites
+every `jordond/kit/…@<sha> # vX.Y.Z` in `.github/workflows` to that release's tag commit, which is what
+`kit doctor --ci` compares. Re-running it repairs workflow pins that lag the npm pin.
 
 ## Shell completion
 
@@ -34,7 +73,8 @@ kit completion fish > ~/.config/fish/completions/kit.fish
 ```
 
 The script calls back into the `kit` on your `PATH`, so it follows each repo's pinned version and
-works outside a repo too.
+works outside a repo too. `kit init` offers to install it for your `$SHELL` (the fish completions file,
+or the `source` line in `~/.zshrc` / `~/.bashrc`) when `kit` is on `PATH`; it never does in CI.
 
 ## Repo commands
 
@@ -87,8 +127,9 @@ a repo with `mise.toml` warns when mise isn't installed or a pinned version diff
 ## Kotlin toolchain
 
 Apps built with the [JetBrains Kotlin Toolchain](https://kotlin-toolchain.org/latest/) (formerly Amper)
-have a `kotlin` wrapper, `project.yaml` and one `module.yaml` per module instead of Gradle. Install kit
-in [`.kit/`](#install-dir-the-root-or-kit), set `toolchain.root` in place of `gradle` (they are exclusive)
+have a `kotlin` wrapper, `project.yaml` and one `module.yaml` per module instead of Gradle.
+[`kit init --template toolchain`](#new-repos) sets all of this up. By hand: install kit in
+[`.kit/`](#install-dir-the-root-or-kit), set `toolchain.root` in place of `gradle` (they are exclusive)
 and use the `kotlin` target kind:
 
 ```ts

@@ -34,7 +34,7 @@ export interface Fixture {
   calls(): Call[]
   /** Make a fake binary exit with `code` (and print `output`). */
   fail(bin: string, code?: number, output?: string): void
-  /** Replace a fake binary's body (sh). */
+  /** Replace a fake binary's body (sh); creates it when `bins` did not list it. */
   script(bin: string, body: string): void
   /** Start kit without waiting; for signal tests. */
   spawn(args: string[]): Bun.Subprocess<'ignore', 'pipe', 'pipe'>
@@ -71,7 +71,7 @@ echo "${bin} ok"
   return {
     dir,
     async kit(args, opts = {}) {
-      const proc = Bun.spawn(['bun', '--no-env-file', join(KIT, 'src/cli.ts'), ...args], {
+      const proc = Bun.spawn([process.execPath, '--no-env-file', join(KIT, 'src/cli.ts'), ...args], {
         cwd: opts.cwd ? join(dir, opts.cwd) : dir,
         env: {
           ...process.env,
@@ -108,9 +108,10 @@ echo "${bin} ok"
     },
     script(bin, body) {
       writeFileSync(join(binDir, bin), `#!/bin/sh\n${body}\n`)
+      chmodSync(join(binDir, bin), 0o755)
     },
     spawn(args) {
-      return Bun.spawn(['bun', '--no-env-file', join(KIT, 'src/cli.ts'), ...args], {
+      return Bun.spawn([process.execPath, '--no-env-file', join(KIT, 'src/cli.ts'), ...args], {
         cwd: dir,
         env: {
           ...process.env,

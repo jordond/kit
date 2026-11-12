@@ -1,7 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type InitState, kitPackageRoot, planInit, renderTemplate } from '../../src/commands/init'
+import {
+  completionFile,
+  completionInstalled,
+  completionLine,
+  hookKit,
+  type InitState,
+  kitPackageRoot,
+  planInit,
+  renderTemplate,
+  scaffoldTemplate,
+  shellOf,
+} from '../../src/commands/init'
 import { configSchema } from '../../src/config/schema'
 
 const config = configSchema.parse({
@@ -141,7 +152,63 @@ describe('templates', () => {
     expect(existsSync(join(root, 'templates/lefthook.yml'))).toBe(true)
   })
 
+  test('a toolchain repo gets the mise.toml without java; hooks call the repo kit when it is in .kit/', () => {
+    const read = (t: string) => readFileSync(join(kitPackageRoot(), 'templates', t), 'utf8')
+    expect(scaffoldTemplate('mise', false)).toBe('mise.toml')
+    expect(read(scaffoldTemplate('mise', false))).toContain('java = ')
+    expect(read(scaffoldTemplate('mise', true))).not.toContain('java')
+    expect(read(scaffoldTemplate('mise', true))).toContain('ktlint = ')
+    expect(scaffoldTemplate('lefthook', true)).toBe('lefthook.yml')
+    expect(hookKit('.')).toBe('kit')
+    expect(hookKit('.kit')).toBe('./.kit/node_modules/.bin/kit')
+    expect(renderTemplate(read('lefthook.yml'), { kit: hookKit('.kit') })).toContain(
+      'run: ./.kit/node_modules/.bin/kit lint --staged --fix',
+    )
+  })
+
   test('renderTemplate fills known placeholders and leaves the rest', () => {
     expect(renderTemplate('bun = "{{bun}}" {{other}}', { bun: '1.3.14' })).toBe('bun = "1.3.14" {{other}}')
+  })
+})
+
+describe('shell completion', () => {
+  test('shellOf knows zsh, bash and fish', () => {
+    expect(shellOf('/opt/homebrew/bin/fish')).toBe('fish')
+    expect(shellOf('/bin/zsh')).toBe('zsh')
+    expect(shellOf('/bin/bash')).toBe('bash')
+    expect(shellOf('/bin/tcsh')).toBeUndefined()
+    expect(shellOf(undefined)).toBeUndefined()
+  })
+
+  test('completionFile: a fish autoload file, or the rc file', () => {
+    expect(completionFile('fish', {}, '/h')).toBe('/h/.config/fish/completions/kit.fish')
+    expect(completionFile('fish', { XDG_CONFIG_HOME: '/x' }, '/h')).toBe('/x/fish/completions/kit.fish')
+    expect(completionFile('zsh', {}, '/h')).toBe('/h/.zshrc')
+    expect(completionFile('zsh', { ZDOTDIR: '/z' }, '/h')).toBe('/z/.zshrc')
+    expect(completionFile('bash', {}, '/h')).toBe('/h/.bashrc')
+  })
+
+  test('completionInstalled: the fish file exists, or the rc file loads it', () => {
+    expect(completionInstalled('fish', undefined)).toBe(false)
+    expect(completionInstalled('fish', '# anything')).toBe(true)
+    expect(completionInstalled('zsh', 'autoload compinit\n')).toBe(false)
+    expect(completionInstalled('zsh', `compinit\n${completionLine('zsh')}\n`)).toBe(true)
+    expect(completionInstalled('bash', undefined)).toBe(false)
+  })
+
+  test('planInit: installs last, skips with the reason, plans nothing without a state', () => {
+    const last = (over: Partial<InitState>) => planInit(state([], { config: undefined, ...over })).at(-1)
+    expect(last({ completion: { shell: 'fish', file: '/h/kit.fish' } })).toEqual({
+      kind: 'completion',
+      title: 'fish completion',
+      shell: 'fish',
+      file: '/h/kit.fish',
+    })
+    expect(last({ completion: { shell: 'zsh', file: '/h/.zshrc', skip: 'declined' } })).toEqual({
+      kind: 'skip',
+      title: 'zsh completion',
+      reason: 'declined',
+    })
+    expect(last({})?.title).toBe('lefthook.yml')
   })
 })

@@ -2,7 +2,7 @@
 # kit launcher. Hands off to the repo-pinned kit with exec, so only one Bun process starts.
 # 1. KIT_DEV=<kit checkout>  -> run that checkout's sources
 # 2. <root>/node_modules/@jordond/kit or <root>/.kit/node_modules/@jordond/kit present
-#    (root = nearest dir with kit.config.ts) -> exec it
+#    (root = nearest dir with kit.config.ts or .kit/kit.config.ts) -> exec it
 # 3. otherwise run this copy (only init, doctor, help, completion are useful outside a repo)
 # Uses only shell builtins on the hot path (no dirname/readlink forks).
 
@@ -12,7 +12,7 @@ fi
 
 dir=$PWD
 while :; do
-  if [ -f "$dir/kit.config.ts" ]; then
+  if [ -f "$dir/kit.config.ts" ] && [ "${dir##*/}" != .kit ] || [ -f "$dir/.kit/kit.config.ts" ]; then
     KIT_ROOT=$dir
     export KIT_ROOT
     if [ -f "$dir/node_modules/@jordond/kit/dist/cli.js" ]; then

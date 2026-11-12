@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KOTLIN_CLI_NO_WELCOME_BANNER: '1'
+
+# Linux only: the iOS targets need macOS and are compiled by the distribute workflow.
+# Keep the setup action on the same version as @jordond/kit in .kit/bun.lock; `kit doctor --ci` checks it.
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jordond/kit/.github/actions/setup@{{kitRef}}
+        with:
+          mise: true
+      - run: kit lint
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jordond/kit/.github/actions/setup@{{kitRef}}
+      # The wrapper downloads its own JRE and the toolchain its JDK; only the caches need restoring.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/JetBrains/Kotlin
+          key: kotlin-toolchain-${{ runner.os }}-${{ hashFiles('kotlin', 'libs.versions.toml', '**/module.yaml') }}
+          restore-keys: kotlin-toolchain-${{ runner.os }}-
+      - run: kit test{{platformArgs}}
+      - run: kit build{{platformArgs}}
