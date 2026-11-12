@@ -115,6 +115,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/env/init'),
   },
   {
+    path: ['env', 'rotate'],
+    description: 'Generate a new value for a key and sync',
+    group: 'Infra',
+    load: () => import('../commands/env/rotate'),
+  },
+  {
     path: ['db', 'migrate'],
     description: 'Apply pending D1 migrations',
     group: 'Infra',

@@ -21,16 +21,31 @@ import { redact, registerSecret } from '../secrets'
  *   Mark plain values with `secret: false`.
  * - `description` (or zod `.describe()`) is shown in `kit env init` prompts.
  * - Required = the schema rejects `undefined` (no `.optional()` or `.default()`).
+ * - `generate: 'hex' | 'base64url' | 'uuid'` marks a key kit itself can mint (`kit env rotate`), with
+ *   `length` random bytes (default 32; ignored for uuid). Keys without it belong to a provider.
  *
  * The schema module imports the repo's own zod, so it is inspected structurally, never with
  * `instanceof`. Values are never printed; validation messages are redacted.
  */
+
+export const GENERATE_KINDS = ['hex', 'base64url', 'uuid'] as const
+export type GenerateKind = (typeof GENERATE_KINDS)[number]
+export const DEFAULT_GENERATE_LENGTH = 32
+
+/** How `kit env rotate` mints a key's value. */
+export interface EnvGenerate {
+  kind: GenerateKind
+  /** Random bytes before encoding; unused for uuid. */
+  length: number
+}
 
 export interface EnvKey {
   name: string
   secret: boolean
   required: boolean
   description?: string
+  /** Set when the schema declares `.meta({ generate })`: the key is rotatable. */
+  generate?: EnvGenerate
 }
 
 export interface EnvIssue {
@@ -60,6 +75,8 @@ export interface EnvSchema {
   /** Keys in declaration order. */
   keys: EnvKey[]
   validate(values: EnvValues): { values: Record<string, string>; issues: EnvIssue[] }
+  /** Check one value against its key's own rule; returns the redacted message when it fails. */
+  validateKey(name: string, value: string): string | undefined
 }
 
 const isZodObject = (v: unknown): v is ZodObjectLike =>
@@ -69,16 +86,52 @@ const isZodObject = (v: unknown): v is ZodObjectLike =>
   typeof (v as ZodObjectLike).shape === 'object'
 
 /** Metadata on the field or on whatever it wraps (`.meta()` before `.optional()` lands inside). */
-function fieldMeta(field: ZodLike): { secret?: unknown; description?: unknown } {
-  const out: { secret?: unknown; description?: unknown } = {}
+interface FieldMeta {
+  secret?: unknown
+  description?: unknown
+  generate?: unknown
+  length?: unknown
+}
+
+function fieldMeta(field: ZodLike): FieldMeta {
+  const out: FieldMeta = {}
   let cur: ZodLike | undefined = field
   for (let depth = 0; cur && depth < 8; depth++) {
     const m = cur.meta?.() ?? {}
     if (out.secret === undefined && m.secret !== undefined) out.secret = m.secret
     if (out.description === undefined) out.description = m.description ?? cur.description
+    if (out.generate === undefined && m.generate !== undefined) {
+      out.generate = m.generate
+      out.length = m.length
+    }
     cur = cur._zod?.def?.innerType
   }
   return out
+}
+
+/** `.meta({ generate, length })` as an `EnvGenerate`; a value kit does not know is a config error (exit 3). */
+export function parseGenerate(
+  name: string,
+  meta: { generate?: unknown; length?: unknown },
+): EnvGenerate | undefined {
+  if (meta.generate === undefined) return undefined
+  const kind = GENERATE_KINDS.find((k) => k === meta.generate)
+  if (!kind) {
+    throw new KitError(
+      `env schema: ${name} has an unknown generate "${String(meta.generate)}"`,
+      `Use one of: ${GENERATE_KINDS.join(', ')}`,
+      ExitCode.config,
+    )
+  }
+  const length = meta.length ?? DEFAULT_GENERATE_LENGTH
+  if (typeof length !== 'number' || !Number.isInteger(length) || length < 1 || length > 1024) {
+    throw new KitError(
+      `env schema: ${name} has an invalid generate length`,
+      'length is a whole number of bytes, 1 to 1024',
+      ExitCode.config,
+    )
+  }
+  return { kind, length }
 }
 
 export function describeSchema(schema: unknown): EnvSchema {
@@ -86,15 +139,24 @@ export function describeSchema(schema: unknown): EnvSchema {
     throw new KitError('env schema must export a zod object', undefined, ExitCode.config)
   const keys: EnvKey[] = Object.entries(schema.shape).map(([name, field]) => {
     const meta = fieldMeta(field)
+    const generate = parseGenerate(name, meta)
     return {
       name,
       secret: meta.secret !== false,
       required: !field.safeParse(undefined).success,
       ...(typeof meta.description === 'string' ? { description: meta.description } : {}),
+      ...(generate ? { generate } : {}),
     }
   })
   return {
     keys,
+    validateKey(name, value) {
+      const field = schema.shape[name]
+      if (!field) return undefined
+      const result = field.safeParse(value)
+      if (result.success) return undefined
+      return redact(result.error?.issues[0]?.message ?? 'invalid value')
+    },
     validate(values) {
       const input: Record<string, string> = {}
       for (const k of keys) {
@@ -128,6 +190,7 @@ export function implicitSchema(config: KitConfig): EnvSchema {
   const keys = names.map((name) => ({ name, secret: true, required: false }))
   return {
     keys,
+    validateKey: () => undefined,
     validate(values) {
       const merged: Record<string, string> = {}
       for (const [k, v] of Object.entries(values)) if (typeof v === 'string') merged[k] = v

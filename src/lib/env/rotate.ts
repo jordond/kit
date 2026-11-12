@@ -1,0 +1,72 @@
+import { randomBytes, randomUUID } from 'node:crypto'
+import type { KitConfig } from '../../config/schema'
+import { registerSecret } from '../secrets'
+import { GITHUB } from './push'
+import type { PushSelection } from './push-run'
+import type { EnvGenerate } from './schema'
+
+/**
+ * `kit env rotate`: mint a new value for a key whose schema declares `.meta({ generate })`, rewrite
+ * its `.env` line, and work out which remotes hold the key. Pure apart from the random source; the
+ * command does the file write, the render and the push.
+ */
+
+/** A fresh value, registered for redaction before it is returned. */
+export function generateValue(spec: EnvGenerate): string {
+  const value =
+    spec.kind === 'uuid'
+      ? randomUUID()
+      : randomBytes(spec.length).toString(spec.kind === 'hex' ? 'hex' : 'base64url')
+  registerSecret(value)
+  return value
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Replace the value on `KEY=…` lines and leave everything else as it was: comments, order, other
+ * keys, `export`, spacing around `=`, the quote style and the file's line endings. A key the file
+ * lacks is appended as its own line. A commented `# KEY=` is a comment, not the key.
+ */
+export function rewriteKey(text: string, key: string, value: string): string {
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const re = new RegExp(`^(\\s*(?:export\\s+)?${escapeRe(key)}\\s*=[ \\t]*)(.*?)([ \\t]*)$`)
+  let replaced = false
+  const lines = text.split('\n').map((line) => {
+    const cr = line.endsWith('\r') ? '\r' : ''
+    const m = re.exec(cr ? line.slice(0, -1) : line)
+    if (!m) return line
+    replaced = true
+    const quote = /^(['"]).*\1$/.exec(m[2]!)?.[1] ?? ''
+    return `${m[1]}${quote}${value}${quote}${m[3]}${cr}`
+  })
+  if (replaced) return lines.join('\n')
+  const head = text === '' || text.endsWith('\n') ? text : `${text}${eol}`
+  return `${head}${key}=${value}${eol}`
+}
+
+/** Remotes that hold `key`: worker targets from `env.workerSecrets`, then `github` from `env.githubSecrets`. */
+export function destinationsFor(config: KitConfig, key: string): string[] {
+  const workers = Object.entries(config.env?.workerSecrets ?? {})
+    .filter(([, keys]) => keys.includes(key))
+    .map(([target]) => target)
+  return config.env?.githubSecrets?.includes(key) ? [...workers, GITHUB] : workers
+}
+
+/**
+ * The fewest `kit env push` runs that reach every remote holding `keys`, never widening to a remote
+ * that holds none of them. Empty when no remote holds any.
+ */
+export function pushSelections(config: KitConfig, keys: string[]): PushSelection[] {
+  const held = new Set(keys.flatMap((k) => destinationsFor(config, k)))
+  const github = held.has(GITHUB)
+  const all = Object.keys(config.env?.workerSecrets ?? {})
+  const workers = all.filter((t) => held.has(t))
+  if (!workers.length) return github ? [{ github: true }] : []
+  if (workers.length === 1) return [github ? { target: workers[0], github: true } : { target: workers[0] }]
+  if (workers.length === all.length) {
+    // Bare push also covers GitHub, so it only fits when GitHub holds a key or is not configured.
+    return [github || !config.env?.githubSecrets?.length ? {} : { workers: true }]
+  }
+  return [...workers.map((target) => ({ target })), ...(github ? [{ github: true }] : [])]
+}
