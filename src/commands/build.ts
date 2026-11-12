@@ -1,9 +1,11 @@
 import { defineCommand } from '../cli/command'
+import { affectedArgs } from './_affected'
 
 export default defineCommand({
   description: 'Build every target',
   group: 'Develop',
   args: {
+    ...affectedArgs,
     release: { type: 'boolean', description: 'Gradle or Kotlin toolchain: the signed release bundle (AAB)' },
     apk: { type: 'boolean', description: 'Gradle: the signed release APK' },
   },

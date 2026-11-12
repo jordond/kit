@@ -97,6 +97,11 @@ describe('kit release android', () => {
       artifacts: { aab: '/tmp/app.aab' },
     })
     expect(doc.notes).toBe('- fix: second\n- feat: first')
+    // Timings: a total, and ms on every step.
+    expect(Number.isInteger(doc.ms)).toBe(true)
+    expect(doc.steps.length).toBeGreaterThan(0)
+    for (const step of doc.steps)
+      expect(step).toEqual({ title: expect.any(String), ok: true, ms: expect.any(Number) })
     const calls = lanes()
     expect(calls.map((c) => c.argv.slice(2).join(' '))).toEqual([
       'android next_code',
@@ -363,6 +368,8 @@ describe('kit release <service>', () => {
       version: '2.0.1',
       tag: 'api/v2.0.1',
       tagPushed: true,
+      ms: expect.any(Number),
+      steps: expect.arrayContaining([{ title: 'deploy', ok: true, ms: expect.any(Number) }]),
     })
     const again = await run(['release', 'api', '--yes'])
     expect(again.code).toBe(4)

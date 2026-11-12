@@ -56,7 +56,9 @@ interface DeployResult {
   target: string
   env?: string
   ok: boolean
-  steps: { title: string; code: number }[]
+  /** Wall-clock time of this target's steps. */
+  ms: number
+  steps: { title: string; code: number; ms: number }[]
 }
 
 export default defineCommand({
@@ -130,18 +132,22 @@ export default defineCommand({
     // --json: children print to stderr and the one document comes last.
     const exec = ctx.flags.json ? runToStderr : run
     const results: DeployResult[] = []
+    const started = performance.now()
+    const since = (t: number) => Math.round(performance.now() - t)
     const report = () => {
-      if (ctx.flags.json) emitJson({ ok: results.every((r) => r.ok), deploys: results })
+      for (const r of results) r.ms = r.steps.reduce((sum, s) => sum + s.ms, 0)
+      if (ctx.flags.json) emitJson({ ok: results.every((r) => r.ok), ms: since(started), deploys: results })
     }
     for (const [i, d] of deploys.entries()) {
-      const result: DeployResult = { target: d.name, env: d.env, ok: false, steps: [] }
+      const result: DeployResult = { target: d.name, env: d.env, ok: false, ms: 0, steps: [] }
       results.push(result)
       const skipped = names.slice(i + 1)
       const and = skipped.length ? `; skipped ${skipped.join(', ')}` : ''
       for (const b of d.before) {
         ctx.log.step(b.title)
+        const t = performance.now()
         const code = await exec(b.cmd, { cwd: root, env: { KIT_ROOT: root } })
-        result.steps.push({ title: b.title, code })
+        result.steps.push({ title: b.title, code, ms: since(t) })
         if (code !== 0) {
           report()
           throw new KitError(
@@ -153,8 +159,9 @@ export default defineCommand({
       }
       for (const c of d.cmds) {
         ctx.log.step(`${d.name}: ${c.title}`)
+        const t = performance.now()
         const code = await exec(c.cmd, { cwd: c.cwd, env: c.env })
-        result.steps.push({ title: c.title, code })
+        result.steps.push({ title: c.title, code, ms: since(t) })
         if (code !== 0) {
           report()
           if (!ctx.flags.json) ctx.log.error(`deploy ${d.name} failed (exit ${code})${and}`)

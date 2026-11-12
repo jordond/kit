@@ -89,3 +89,58 @@ export async function tag(
 export async function push(refs: string[], opts: { cwd?: string; remote?: string } = {}): Promise<void> {
   await read(['push', opts.remote ?? 'origin', ...refs], opts.cwd ?? '.')
 }
+
+/** Whether `ref` names a commit in this repo. */
+async function refExists(ref: string, cwd: string): Promise<boolean> {
+  const { code } = await runPiped(['git', 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd })
+  return code === 0
+}
+
+/**
+ * The ref `--affected` compares against when no `--base` is given: `origin/<default branch>` (from
+ * `refs/remotes/origin/HEAD`), else `origin/main`, else `main`. Undefined when none of them exists.
+ */
+export async function defaultBase(cwd = '.'): Promise<string | undefined> {
+  const head = await runPiped(['git', 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], {
+    cwd,
+  })
+  const remote = head.code === 0 ? head.stdout.trim() : ''
+  for (const ref of [...(remote ? [remote] : []), 'origin/main', 'main']) {
+    if (await refExists(ref, cwd)) return ref
+  }
+  return undefined
+}
+
+/** Where HEAD forked from `base`, or undefined when `base` is unknown or shares no history. */
+export async function mergeBase(base: string, cwd = '.'): Promise<string | undefined> {
+  if (!(await refExists(base, cwd))) return undefined
+  const { code, stdout } = await runPiped(['git', 'merge-base', base, 'HEAD'], { cwd })
+  return code === 0 && stdout.trim() ? stdout.trim() : undefined
+}
+
+export interface Changed {
+  /** The ref compared against (`origin/main`). */
+  base: string
+  /** Paths relative to `cwd`, sorted, without duplicates. Deleted files count. */
+  files: string[]
+}
+
+/**
+ * Files that differ from where HEAD forked from `base` (default `defaultBase`): commits on the
+ * branch, plus staged, unstaged and untracked files. Undefined when the base cannot be resolved,
+ * which callers must treat as "everything changed". Paths outside `cwd` are left out.
+ */
+export async function changedFiles(cwd = '.', base?: string): Promise<Changed | undefined> {
+  const ref = base ?? (await defaultBase(cwd))
+  const fork = ref ? await mergeBase(ref, cwd) : undefined
+  if (!ref || !fork) return undefined
+  const lists = await Promise.all([
+    // Working tree against the fork point: committed and unstaged changes to tracked files.
+    read(['diff', '--name-only', '-z', '--relative', fork], cwd),
+    // The index too: a staged change reverted in the working tree shows up only here.
+    read(['diff', '--cached', '--name-only', '-z', '--relative', fork], cwd),
+    read(['ls-files', '--others', '--exclude-standard', '-z'], cwd),
+  ])
+  const files = new Set(lists.flatMap((out) => out.split('\0').filter(Boolean)))
+  return { base: ref, files: [...files].sort() }
+}

@@ -34,8 +34,16 @@ export interface PlanOptions {
   extra?: string[]
   /** `--env` for dev and deploy. */
   env?: string
-  /** Staged files (repo-relative). Workspace commands get them appended; targets without one are skipped. */
+  /**
+   * Staged files (repo-relative). Workspace commands get them appended; targets with none under
+   * their `dir` or `paths` are skipped. A staged file no target owns selects no target.
+   */
   staged?: string[]
+  /**
+   * `--affected`: changed files (repo-relative). Only selects: targets no changed file affects are
+   * skipped, and nothing changed plans nothing. No file list reaches the tools.
+   */
+  affected?: string[]
   /** Gradle and kotlin targets build the release artifact instead. */
   release?: 'aab' | 'apk'
 }
@@ -260,10 +268,35 @@ function workspaceCommands(c: Ctx, verb: Verb | 'prepare'): PlannedCommand[] {
   return fromValue(withStaged, value, c.root)
 }
 
-function touchesStaged(root: string, dir: string, staged: string[]): boolean {
-  const rel = relative(root, resolve(root, dir))
-  if (!staged.length) return false
-  return !rel || staged.some((f) => f === rel || f.startsWith(`${rel}/`))
+/** `file` (repo-relative) is `dir` or under it. An empty `dir` is the repo root: every file. */
+const under = (dir: string, file: string): boolean => !dir || file === dir || file.startsWith(`${dir}/`)
+
+/** `targets.<name>.paths` entry: a dir (prefix match) or a glob. */
+function matchesPath(root: string, entry: string, file: string): boolean {
+  const dir = relative(root, resolve(root, entry))
+  return (!!dir && under(dir, file)) || new Bun.Glob(entry.replace(/^\.\//, '')).match(file)
+}
+
+/**
+ * Whether any of `files` (repo-relative) belongs to the target: under its `dir`, or matching one of
+ * its `paths`. The one selection rule for `--staged` and `--affected`.
+ */
+export function touches(root: string, t: Pick<TargetConfig, 'dir' | 'paths'>, files: string[]): boolean {
+  const dir = relative(root, resolve(root, t.dir))
+  return files.some((f) => under(dir, f) || (t.paths ?? []).some((p) => matchesPath(root, p, f)))
+}
+
+/**
+ * Targets `--affected` runs for `files` (changed files, repo-relative). A file under no target's
+ * `dir` and matching no target's `paths` (root lockfile, CI, shared tooling) affects every target.
+ * A target at the repo root is affected by any change but claims no file, so that rule still holds.
+ */
+export function affectedTargets(root: string, config: KitConfig, files: string[]): string[] {
+  const all = Object.entries(config.targets)
+  if (!files.length) return []
+  const owned = all.filter(([, t]) => relative(root, resolve(root, t.dir)) !== '')
+  const orphan = files.some((f) => !owned.some(([, t]) => touches(root, t, [f])))
+  return all.filter(([, t]) => orphan || touches(root, t, files)).map(([n]) => n)
 }
 
 /**
@@ -279,7 +312,9 @@ export function planVerbs(
   const sel = selectTargets(config, opts.targets)
   const c: Ctx = { root, config, opts }
   const groups: PlannedGroup[] = []
-  if (sel.workspace && !(opts.staged && !opts.staged.length)) {
+  const affected = opts.affected && new Set(affectedTargets(root, config, opts.affected))
+  // The workspace runs whenever anything changed (or was staged).
+  if (sel.workspace && !(opts.staged && !opts.staged.length) && !(opts.affected && !opts.affected.length)) {
     const commands: PlannedCommand[] = []
     if (verbs.some((v) => PREPARES.includes(v))) commands.push(...workspaceCommands(c, 'prepare'))
     // prepare runs even with no workspace verb command: target steps need the codegen too.
@@ -287,7 +322,8 @@ export function planVerbs(
     if (commands.length) groups.push({ title: WORKSPACE, commands })
   }
   for (const [name, t] of sel.targets) {
-    if (opts.staged && !touchesStaged(root, t.dir, opts.staged)) continue
+    if (opts.staged && !touches(root, t, opts.staged)) continue
+    if (affected && !affected.has(name)) continue
     const commands = verbs.flatMap((v) => targetCommands(root, config, name, v, opts) ?? [])
     if (commands.length) groups.push({ title: name, commands })
   }
