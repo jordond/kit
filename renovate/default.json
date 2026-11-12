@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Keep the @jordond/kit npm pin and the SHA-pinned jordond/kit workflow refs on the same release, in one PR. Usage: \"extends\": [\"github>jordond/kit//renovate/default\"]",
+  "packageRules": [
+    {
+      "description": "One PR for kit: the npm package, the setup action and the reusable workflows. `kit doctor --ci` fails when they are on different versions.",
+      "matchManagers": ["npm", "bun", "github-actions"],
+      "matchPackageNames": ["@jordond/kit", "jordond/kit"],
+      "groupName": "kit",
+      "groupSlug": "kit"
+    },
+    {
+      "description": "Always move the range in package.json (^0.6.0 to ^0.6.1), never only the lockfile: `kit doctor` compares the range with the workflow version comment.",
+      "matchManagers": ["npm", "bun"],
+      "matchPackageNames": ["@jordond/kit"],
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "Workflow refs stay `jordond/kit/...@<commit sha> # vX.Y.Z`: the SHA is pinned and the version comment moves with it.",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["jordond/kit"],
+      "pinDigests": true
+    }
+  ]
+}

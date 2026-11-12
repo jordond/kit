@@ -1,5 +1,6 @@
 import { defineCommand } from '../cli/command'
 import type { KitConfig } from '../config/schema'
+import type { Fix, FixResult } from '../lib/fix'
 import { wrapperVersion } from '../lib/toolchain'
 
 /**
@@ -7,6 +8,9 @@ import { wrapperVersion } from '../lib/toolchain'
  * Each check is a pure function over what the run probed, so the rules are unit-tested without the
  * tools. A tool the project needs (java for a Gradle root, Xcode for an iOS release, …) fails; one
  * it doesn't need only warns. Any failure exits 4.
+ *
+ * `--fix` applies the repairs some checks carry (src/lib/fix.ts) after one confirmation, runs those
+ * checks again, and reports the state after the fixes.
  */
 
 export type Status = 'ok' | 'warn' | 'fail' | 'skip'
@@ -17,6 +21,8 @@ export interface Check {
   status: Status
   detail?: string
   hint?: string
+  /** A safe, local repair `kit doctor --fix` can apply. */
+  fix?: Fix
 }
 
 /** Output of a probed command; undefined when the binary is not on PATH. */
@@ -109,7 +115,10 @@ export function checkAndroidSdk(
 }
 
 /** `wrangler whoami`; undefined when the repo has no worker target. */
-export function checkWranglerLogin(probe: Probe | 'skip'): Check {
+export function checkWranglerLogin(
+  probe: Probe | 'skip',
+  install: { cmd: string[]; cwd?: string } = { cmd: ['bun', 'install'] },
+): Check {
   const label = 'wrangler login'
   if (probe === 'skip') return { id: 'wrangler', label, status: 'skip', detail: 'no worker target' }
   const hint = 'Run `kit wrangler <target> login`, or set CLOUDFLARE_API_TOKEN'
@@ -119,7 +128,8 @@ export function checkWranglerLogin(probe: Probe | 'skip'): Check {
       label,
       status: 'warn',
       detail: 'wrangler not installed',
-      hint: 'Run `bun install`',
+      hint: `Run \`${install.cmd.join(' ')}\``,
+      fix: { description: install.cmd.join(' '), action: install },
     }
   if (probe.code !== 0 || /not authenticated|not logged in/i.test(probe.output)) {
     return { id: 'wrangler', label, status: 'warn', detail: 'not logged in', hint }
@@ -172,7 +182,19 @@ export function checkMise(
     else if (!versionMatches(spec, actual)) drift.push(`${tool} ${spec} (have ${actual})`)
   }
   if (drift.length)
-    return { id: 'mise', label, status: 'warn', detail: drift.join(', '), hint: 'Run `mise install`' }
+    return {
+      id: 'mise',
+      label,
+      status: 'warn',
+      detail: drift.join(', '),
+      hint: 'Run `mise install`',
+      // The tools it installs are what java, ruby and ktlint probe.
+      fix: {
+        description: 'mise install',
+        action: { cmd: ['mise', 'install'] },
+        rechecks: ['java', 'ruby', 'ktlint'],
+      },
+    }
   return { id: 'mise', label, status: 'ok', detail: Object.keys(tools).join(', ') }
 }
 
@@ -220,6 +242,7 @@ export function checkLefthook(
       status: 'warn',
       detail: `${file} hooks not installed in this clone`,
       hint: 'Run `lefthook install`',
+      fix: { description: 'lefthook install', action: { cmd: ['lefthook', 'install'] } },
     }
   }
   return { id: 'lefthook', label, status: 'ok', detail: 'pre-commit hook installed' }
@@ -269,6 +292,7 @@ const KIT_USES = /jordond\/kit\/[^@\s]+@\S+\s*#\s*v?(\d+\.\d+\.\d+\S*)/g
  */
 export function checkIosVersion(
   drift: () => { toml: string; xcconfig: string | undefined; file: string } | undefined,
+  fix?: (drift: { toml: string; file: string }) => Fix,
 ): Check {
   const label = 'iOS version'
   try {
@@ -280,6 +304,8 @@ export function checkIosVersion(
       status: 'fail',
       detail: `TOML ${d.toml}, ${d.file} ${d.xcconfig ?? '(no MARKETING_VERSION)'}`,
       hint: `Set MARKETING_VERSION = ${d.toml} in ${d.file}`,
+      // Without the line there is nothing to rewrite: adding it stays a manual edit.
+      ...(fix && d.xcconfig !== undefined ? { fix: fix(d) } : {}),
     }
   } catch (e) {
     return { id: 'ios-version', label, status: 'fail', detail: e instanceof Error ? e.message : String(e) }
@@ -288,6 +314,7 @@ export function checkIosVersion(
 
 export function checkAndroidVersion(
   drift: () => { toml: string; module: string; file: string } | undefined,
+  fix?: (drift: { toml: string; file: string }) => Fix,
 ): Check {
   const label = 'Android version'
   try {
@@ -299,6 +326,7 @@ export function checkAndroidVersion(
       status: 'fail',
       detail: `TOML ${d.toml}, ${d.file} ${d.module}`,
       hint: `Set settings.android.versionName: "${d.toml}" in ${d.file}`,
+      ...(fix ? { fix: fix(d) } : {}),
     }
   } catch (e) {
     return {
@@ -338,6 +366,7 @@ export function checkToolchain(
       status: 'fail',
       detail: `${path} not executable`,
       hint: `chmod +x ${path}`,
+      fix: { description: `chmod +x ${path}`, action: { cmd: ['chmod', '+x', path] } },
     }
   }
   const version = wrapperVersion(wrapper)
@@ -401,6 +430,7 @@ export function checkCiPin(
   workflows: { file: string; text: string }[],
   pin: string | undefined,
   strict: boolean,
+  fix?: (version: string) => Fix | undefined,
 ): Check {
   const label = 'CI kit pin'
   const found = workflows.flatMap(({ file, text }) =>
@@ -410,12 +440,14 @@ export function checkCiPin(
   const want = pin.replace(/^[\^~=v]+/, '')
   const off = found.filter((f) => f.v !== want)
   if (off.length) {
+    const repin = fix?.(want)
     return {
       id: 'ci-pin',
       label,
       status: strict ? 'fail' : 'warn',
       detail: `${off.map((f) => `${f.file} v${f.v}`).join(', ')} ≠ package.json ${want}`,
       hint: 'Run `kit upgrade <version>`: it moves the npm pin and the workflow SHAs together',
+      ...(repin ? { fix: repin } : {}),
     }
   }
   return { id: 'ci-pin', label, status: 'ok', detail: want }
@@ -475,10 +507,11 @@ export default defineCommand({
   group: 'Setup',
   args: {
     ci: { type: 'boolean', description: 'Fail when CI workflow pins drift from the package.json pin' },
+    fix: { type: 'boolean', description: 'Apply the safe, local fixes, then check again' },
   },
-  examples: 'kit doctor\nkit doctor --json\nkit doctor --ci',
+  examples: 'kit doctor\nkit doctor --json\nkit doctor --ci\nkit doctor --fix\nkit doctor --fix --dry-run',
   async run(ctx) {
-    const { existsSync, readdirSync, readFileSync } = await import('node:fs')
+    const { accessSync, constants, existsSync, readdirSync, readFileSync } = await import('node:fs')
     const { join, resolve } = await import('node:path')
     const pc = (await import('picocolors')).default
     const { emitJson } = await import('../lib/log')
@@ -487,152 +520,264 @@ export default defineCommand({
     const { parseToml, readToml } = await import('../lib/toml')
     const { ExitCode } = await import('../lib/errors')
     const { installDir } = await import('../config/load')
+    const { androidVersionFix, applyFix, ciPinFix, describeFix, fixable, iosVersionFix, pinVersion } =
+      await import('../lib/fix')
 
     const { onGitHubActions, releaseSecrets, renameHints } = await import('../lib/release/creds')
     const { androidVersionDrift, iosVersionDrift } = await import('../lib/release/version')
-    const { accessSync, constants } = await import('node:fs')
     const root = ctx.root ?? process.cwd()
     const config = ctx.config
     const read = (p: string) => (existsSync(join(root, p)) ? readFileSync(join(root, p), 'utf8') : undefined)
-    const probe = async (cmd: string[], cwd = root): Promise<Probe> => {
-      if (!Bun.which(cmd[0]!)) return undefined
-      return await runQuiet(cmd, { cwd })
+
+    // Probes run once per pass and are shared between checks; a fix clears them before the re-check.
+    let probes = new Map<string, Promise<unknown>>()
+    const once = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+      if (!probes.has(key)) probes.set(key, fn())
+      return probes.get(key) as Promise<T>
     }
+    const probe = (cmd: string[]): Promise<Probe> =>
+      once(cmd.join(' '), async () => (Bun.which(cmd[0]!) ? await runQuiet(cmd, { cwd: root }) : undefined))
 
     const targets = Object.values(config?.targets ?? {})
     // The Kotlin toolchain provisions its own JDK and Android SDK: neither is required for it.
     const gradle = !!config?.gradle || targets.some((t) => t.kind === 'gradle')
     const toolchainRoot = config?.toolchain?.root
     const wrapperPath = toolchainRoot === undefined ? undefined : join(root, toolchainRoot, 'kotlin')
-    let wrapperExec = false
-    if (wrapperPath && existsSync(wrapperPath)) {
-      try {
-        accessSync(wrapperPath, constants.X_OK)
-        wrapperExec = true
-      } catch {}
-    }
     const ios = !!config?.release?.ios
     const fastlane = ios || !!config?.release?.android
-    const worker = Object.values(config?.targets ?? {}).find((t) => t.kind === 'worker')
-
+    const worker = targets.find((t) => t.kind === 'worker')
     // kotlin targets lint and format with ktlint unless both verbs are overridden or off.
     const ktlintUsed = targets.some(
       (t) => t.kind === 'kotlin' && (t.lint === undefined || t.format === undefined),
     )
-    const ktlint = ktlintUsed ? await probe(['ktlint', '--version']) : undefined
     const lefthookFile = LEFTHOOK_FILES.find((f) => existsSync(join(root, f)))
-    let lefthookHook: string | undefined
-    if (lefthookFile) {
-      // --git-path follows worktrees and core.hooksPath.
-      const r = await probe(['git', 'rev-parse', '--git-path', 'hooks/pre-commit'])
-      const hookPath = r?.code === 0 ? resolve(root, r.output.trim()) : undefined
-      if (hookPath && existsSync(hookPath)) lefthookHook = readFileSync(hookPath, 'utf8')
-    }
-
-    const [java, ruby, xcode, wrangler] = await Promise.all([
-      probe(['java', '-version']),
-      probe(['ruby', '--version']),
-      process.platform === 'darwin' ? probe(['xcodebuild', '-version']) : Promise.resolve(undefined),
-      worker
-        ? (async () => {
-            const dir = join(root, worker.dir)
-            // Never let `bun x` download wrangler just to ask who is logged in.
-            const bin = 'node_modules/.bin/wrangler'
-            if (!existsSync(join(dir, bin)) && !existsSync(join(root, bin))) return undefined
-            return await runQuiet(pmExec(detectPackageManager(dir, root), 'wrangler', 'whoami'), {
-              cwd: dir,
-            }).catch(() => undefined)
-          })()
-        : Promise.resolve('skip' as const),
-    ])
-
     const miseFile = ['mise.toml', '.mise.toml'].find((f) => existsSync(join(root, f)))
-    let miseTools: Record<string, string> | undefined
-    let miseCheck: Check | undefined
-    if (miseFile) {
-      try {
-        miseTools = parseMiseTools(readToml(join(root, miseFile)).tools)
-      } catch (e) {
-        miseCheck = checkUnreadable('mise', 'mise.toml versions', miseFile, e)
-      }
-    }
-    const detected: Record<string, string | undefined> = {
-      bun: Bun.version,
-      java: java?.code === 0 ? parseJavaVersion(java.output) : undefined,
-      ruby: ruby?.output.match(/ruby (\d[\w.]*)/)?.[1],
-    }
-    if (miseTools?.ktlint) {
-      detected.ktlint = ktlint?.code === 0 ? parseKtlintVersion(ktlint.output) : undefined
-    }
-    if (miseTools?.node) detected.node = (await probe(['node', '--version']))?.output.trim().replace(/^v/, '')
-
-    const wfDir = join(root, '.github/workflows')
-    const workflows = existsSync(wfDir)
-      ? readdirSync(wfDir)
-          .filter((f) => /\.ya?ml$/.test(f))
-          .map((f) => ({ file: f, text: readFileSync(join(wfDir, f), 'utf8') }))
-      : []
     // The kit pin: `.kit/package.json` when the repo installs kit there, else the root package.json.
     const pkgFile = installDir(root) === '.' ? 'package.json' : `${installDir(root)}/package.json`
-    const pkg = read(pkgFile)
-    let pin: { devDependencies?: Record<string, string>; dependencies?: Record<string, string> } | undefined
-    let pkgCheck: Check | undefined
-    try {
-      pin = pkg ? JSON.parse(pkg) : undefined
-    } catch (e) {
-      pkgCheck = checkUnreadable('package-json', 'package.json', pkgFile, e)
-    }
-    const kitPin = pin?.devDependencies?.['@jordond/kit'] ?? pin?.dependencies?.['@jordond/kit']
-
     const catalogFile = catalogPath(config)
-    let catalogCheck: Check
-    try {
-      const text = catalogFile ? read(catalogFile) : undefined
-      catalogCheck = checkCatalogKeys(catalogFile, text === undefined ? undefined : parseToml(text))
-    } catch (e) {
-      catalogCheck = checkUnreadable('catalog', 'catalog keys', catalogFile ?? '', e)
+
+    const java = () => probe(['java', '-version'])
+    const ruby = () => probe(['ruby', '--version'])
+    const ktlint = async () => (ktlintUsed ? await probe(['ktlint', '--version']) : undefined)
+    const wrangler = async (): Promise<Probe | 'skip'> => {
+      if (!worker) return 'skip'
+      const dir = join(root, worker.dir)
+      // Never let `bun x` download wrangler just to ask who is logged in.
+      const bin = 'node_modules/.bin/wrangler'
+      if (!existsSync(join(dir, bin)) && !existsSync(join(root, bin))) return undefined
+      return await runQuiet(pmExec(detectPackageManager(dir, root), 'wrangler', 'whoami'), {
+        cwd: dir,
+      }).catch(() => undefined)
+    }
+    /** `<pm> install` where the worker's dependencies come from: the root workspace, else its own dir. */
+    const install = () => {
+      const dir = worker && !existsSync(join(root, 'package.json')) ? worker.dir : '.'
+      return { cmd: [detectPackageManager(join(root, dir), root), 'install'], cwd: dir }
+    }
+    const mise = async (): Promise<Check> => {
+      if (!miseFile) return checkMise(undefined, {})
+      let tools: Record<string, string>
+      try {
+        tools = parseMiseTools(readToml(join(root, miseFile)).tools)
+      } catch (e) {
+        return checkUnreadable('mise', 'mise.toml versions', miseFile, e)
+      }
+      const [j, r] = await Promise.all([java(), ruby()])
+      const detected: Record<string, string | undefined> = {
+        bun: Bun.version,
+        java: j?.code === 0 ? parseJavaVersion(j.output) : undefined,
+        ruby: r?.output.match(/ruby (\d[\w.]*)/)?.[1],
+      }
+      if (tools.ktlint) {
+        const k = await ktlint()
+        detected.ktlint = k?.code === 0 ? parseKtlintVersion(k.output) : undefined
+      }
+      if (tools.node) detected.node = (await probe(['node', '--version']))?.output.trim().replace(/^v/, '')
+      return checkMise(tools, detected, !!Bun.which('mise'))
+    }
+    const lefthook = async (): Promise<Check> => {
+      let hook: string | undefined
+      if (lefthookFile) {
+        // --git-path follows worktrees and core.hooksPath.
+        const r = await probe(['git', 'rev-parse', '--git-path', 'hooks/pre-commit'])
+        const hookPath = r?.code === 0 ? resolve(root, r.output.trim()) : undefined
+        if (hookPath && existsSync(hookPath)) hook = readFileSync(hookPath, 'utf8')
+      }
+      return checkLefthook(lefthookFile, !!Bun.which('lefthook'), hook, onGitHubActions())
+    }
+    const toolchain = (): Check => {
+      const wrapper = wrapperPath && existsSync(wrapperPath) ? readFileSync(wrapperPath, 'utf8') : undefined
+      let executable = false
+      if (wrapperPath && wrapper !== undefined) {
+        try {
+          accessSync(wrapperPath, constants.X_OK)
+          executable = true
+        } catch {}
+      }
+      return checkToolchain(toolchainRoot, wrapper, executable)
+    }
+    const kitPin = (): { pin?: string; unreadable?: Check } => {
+      const text = read(pkgFile)
+      try {
+        const pkg = (text ? JSON.parse(text) : {}) as {
+          devDependencies?: Record<string, string>
+          dependencies?: Record<string, string>
+        }
+        return { pin: pkg.devDependencies?.['@jordond/kit'] ?? pkg.dependencies?.['@jordond/kit'] }
+      } catch (e) {
+        return { unreadable: checkUnreadable('package-json', 'package.json', pkgFile, e) }
+      }
+    }
+    const ciPin = (): Check => {
+      const wfDir = join(root, '.github/workflows')
+      const workflows = existsSync(wfDir)
+        ? readdirSync(wfDir)
+            .filter((f) => /\.ya?ml$/.test(f))
+            .map((f) => ({ file: f, text: readFileSync(join(wfDir, f), 'utf8') }))
+        : []
+      const { pin } = kitPin()
+      const version = pinVersion(pin)
+      return checkCiPin(workflows, pin, ctx.args.ci === true, () =>
+        version ? ciPinFix(root, version) : undefined,
+      )
+    }
+    const catalog = (): Check => {
+      try {
+        const text = catalogFile ? read(catalogFile) : undefined
+        return checkCatalogKeys(catalogFile, text === undefined ? undefined : parseToml(text))
+      } catch (e) {
+        return checkUnreadable('catalog', 'catalog keys', catalogFile ?? '', e)
+      }
     }
 
-    const checks: Check[] = [
-      checkBun(Bun.version),
-      checkJava(java, gradle),
-      checkRuby(ruby, fastlane),
-      checkXcode(xcode, ios, process.platform),
-      checkAndroidSdk(
-        process.env,
-        config?.gradle ? read(join(config.gradle.root, 'local.properties')) : undefined,
-        existsSync,
-        gradle,
-      ),
-      ...(toolchainRoot !== undefined
-        ? [
-            checkToolchain(
-              toolchainRoot,
-              wrapperPath && existsSync(wrapperPath) ? readFileSync(wrapperPath, 'utf8') : undefined,
-              wrapperExec,
-            ),
-          ]
-        : []),
-      checkWranglerLogin(wrangler),
-      ...(ktlintUsed ? [checkKtlint(ktlint, true)] : []),
-      miseCheck ?? checkMise(miseTools, detected, !!Bun.which('mise')),
-      checkLefthook(lefthookFile, !!Bun.which('lefthook'), lefthookHook, onGitHubActions()),
-      checkEnvFile(read('.env.example'), read('.env')),
-      ...(config?.release?.ios?.xcconfig ? [checkIosVersion(() => iosVersionDrift(root, config))] : []),
-      ...(config?.toolchain && config.release?.android
-        ? [checkAndroidVersion(() => androidVersionDrift(root, config))]
-        : []),
-      checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
-        renameHints(m, (old) => !!process.env[old]),
-      ),
-      checkCiPin(workflows, kitPin, ctx.args.ci === true),
-      catalogCheck,
-      ...(pkgCheck ? [pkgCheck] : []),
+    // One entry per check, in report order; `run` returns undefined for a check that does not apply.
+    type Entry = { id: string; run: () => Check | undefined | Promise<Check | undefined> }
+    const entries: Entry[] = [
+      { id: 'bun', run: () => checkBun(Bun.version) },
+      { id: 'java', run: async () => checkJava(await java(), gradle) },
+      { id: 'ruby', run: async () => checkRuby(await ruby(), fastlane) },
+      {
+        id: 'xcode',
+        run: async () =>
+          checkXcode(
+            process.platform === 'darwin' ? await probe(['xcodebuild', '-version']) : undefined,
+            ios,
+            process.platform,
+          ),
+      },
+      {
+        id: 'android-sdk',
+        run: () =>
+          checkAndroidSdk(
+            process.env,
+            config?.gradle ? read(join(config.gradle.root, 'local.properties')) : undefined,
+            existsSync,
+            gradle,
+          ),
+      },
+      { id: 'toolchain', run: () => (toolchainRoot !== undefined ? toolchain() : undefined) },
+      { id: 'wrangler', run: async () => checkWranglerLogin(await wrangler(), install()) },
+      { id: 'ktlint', run: async () => (ktlintUsed ? checkKtlint(await ktlint(), true) : undefined) },
+      { id: 'mise', run: mise },
+      { id: 'lefthook', run: lefthook },
+      { id: 'env', run: () => checkEnvFile(read('.env.example'), read('.env')) },
+      {
+        id: 'ios-version',
+        run: () =>
+          config?.release?.ios?.xcconfig
+            ? checkIosVersion(
+                () => iosVersionDrift(root, config),
+                (d) => iosVersionFix(root, d),
+              )
+            : undefined,
+      },
+      {
+        id: 'android-version',
+        run: () =>
+          config?.toolchain && config.release?.android
+            ? checkAndroidVersion(
+                () => androidVersionDrift(root, config),
+                (d) => androidVersionFix(root, d),
+              )
+            : undefined,
+      },
+      {
+        id: 'release-secrets',
+        run: () =>
+          checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
+            renameHints(m, (old) => !!process.env[old]),
+          ),
+      },
+      { id: 'ci-pin', run: ciPin },
+      { id: 'catalog', run: catalog },
+      { id: 'package-json', run: () => kitPin().unreadable },
     ]
+    const found = await Promise.all(entries.map((e) => e.run()))
+    const current = () => found.filter((c): c is Check => c !== undefined)
 
+    // ---- --fix ---------------------------------------------------------------------------------
+    const say = !ctx.flags.json
+    const wantFix = ctx.args.fix === true
+    const fixes: FixResult[] = []
+    const todo = wantFix ? fixable(current()) : []
+    if (todo.length) {
+      if (say) {
+        ctx.log.info(`${todo.length} fixable:`)
+        for (const c of todo) ctx.log.step(`${c.label}  ${pc.dim(c.fix.description)}`)
+      }
+      let refused: string | undefined
+      if (ctx.flags.dryRun) refused = 'dry run'
+      else if (!ctx.flags.yes && !ctx.flags.interactive) refused = 'no terminal; re-run with --yes'
+      else {
+        const { confirm } = await import('../lib/prompt')
+        const n = todo.length
+        if (!(await confirm(ctx.flags, `Apply ${n} fix${n === 1 ? '' : 'es'}?`, { initial: true }))) {
+          refused = 'declined'
+        }
+      }
+      if (refused !== undefined) {
+        for (const c of todo) {
+          fixes.push({
+            id: c.id,
+            description: c.fix.description,
+            applied: false,
+            ok: ctx.flags.dryRun,
+            ...(ctx.flags.dryRun ? {} : { error: refused }),
+          })
+        }
+        if (say) ctx.log.warn(`Nothing fixed (${refused})`)
+      } else {
+        const again = new Set<string>()
+        for (const c of todo) {
+          const r = await applyFix(root, c.id, c.fix)
+          fixes.push(r)
+          if (say) {
+            if (r.ok) ctx.log.success(`fixed ${c.label}  ${pc.dim(r.description)}`)
+            else if (r.applied) ctx.log.error(`${r.description} failed`, r.error)
+            else ctx.log.warn(`skipped ${r.description}: ${r.error}`)
+          }
+          if (r.applied) for (const id of [c.id, ...(c.fix.rechecks ?? [])]) again.add(id)
+        }
+        // Only the checks a fix touched run again, on fresh probes.
+        probes = new Map()
+        await Promise.all(
+          entries.map(async (e, i) => {
+            if (again.has(e.id)) found[i] = await e.run()
+          }),
+        )
+      }
+      if (say) ctx.log.info('')
+    }
+
+    const checks = current()
     const ok = !checks.some((c) => c.status === 'fail')
-    if (ctx.flags.json) emitJson({ ok, checks })
-    else {
+    if (ctx.flags.json) {
+      emitJson({
+        ok,
+        checks: checks.map((c) => (c.fix ? { ...c, fix: describeFix(c.fix) } : c)),
+        ...(wantFix ? { fixes } : {}),
+      })
+    } else {
       const width = Math.max(...checks.map((c) => c.label.length)) + 2
       for (const c of checks) {
         const line = `${c.label.padEnd(width)}${pc.dim(c.detail ?? '')}`
@@ -643,6 +788,8 @@ export default defineCommand({
         } else if (c.status === 'fail') ctx.log.error(line, c.hint)
         else if (!ctx.flags.quiet) ctx.log.dim(`- ${line}`)
       }
+      const left = fixable(checks).length
+      if (left && !wantFix) ctx.log.dim(`${left} fixable with \`kit doctor --fix\``)
     }
     if (!ok) process.exitCode = ExitCode.precondition
   },

@@ -294,6 +294,17 @@ export interface ScaffoldInput {
   list?: (dir: string) => string[]
 }
 
+/** Where Renovate looks for a repo's config; the templates write the first. */
+export const RENOVATE_FILES = [
+  'renovate.json',
+  'renovate.json5',
+  '.github/renovate.json',
+  '.github/renovate.json5',
+  '.renovaterc',
+  '.renovaterc.json',
+  '.renovaterc.json5',
+]
+
 export const fill = (text: string, vars: Record<string, string>) =>
   text.replace(/\{\{(\w+)\}\}/g, (m, k: string) => vars[k] ?? m)
 
@@ -330,8 +341,14 @@ export function planScaffold(input: ScaffoldInput): FileAction[] {
     )
   }
   for (const [path, content] of wanted) {
+    // Renovate reads its config from several places: any of them means the repo already has one.
+    const present = [path, ...(path === RENOVATE_FILES[0] ? RENOVATE_FILES : [])].find(
+      (f) => read(f) !== undefined,
+    )
     plan.push(
-      read(path) === undefined ? { kind: 'write', path, content } : { kind: 'skip', path, reason: 'exists' },
+      present === undefined
+        ? { kind: 'write', path, content }
+        : { kind: 'skip', path, reason: present === path ? 'exists' : `${present} exists` },
     )
   }
 

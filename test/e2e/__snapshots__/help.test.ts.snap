@@ -26,6 +26,7 @@ Release
   release     Ship to the stores …
   version     Version names in the catalog TOML …
   fastlane    Run fastlane with kit's shared Fastfile
+  changelog   List the changes since the last release tag
 
 Infra
   env         Render, check and push env from .env …
@@ -212,6 +213,37 @@ Options
       --bail     Stop at the first failure
       --release  Gradle or Kotlin toolchain: the signed release bundle (AAB)
       --apk      Gradle: the signed release APK
+
+"
+`;
+
+exports[`help kit changelog --help 1`] = `
+"List the changes since the last release tag
+
+Usage
+  kit changelog [options]
+
+Examples
+  kit changelog
+  kit changelog --platform ios
+  kit changelog --from v0.5.0 --to v0.6.0 --json
+  kit changelog --write
+  kit changelog --platform api --write docs/api-changes.md
+
+Options
+  -h, --help               Show help
+  -V, --version            Show kit version
+      --json               Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run            Plan and run read-only steps; skip mutations
+  -y, --yes                Accept confirmations (never skips prod)
+  -v, --verbose            Stream all child output
+  -q, --quiet              Errors and summary only
+      --bail               Stop at the first failure
+      --from <string>      Start after this tag or ref (default: the last release tag)
+      --to <string>        End at this ref (default: HEAD)
+      --platform <string>  ios, android or a service: use its <name>/v* tags
+      --all                Include chore, test, ci and style commits
+      --write              Add the section to CHANGELOG.md, or to the file named after it
 
 "
 `;
@@ -478,6 +510,8 @@ Examples
   kit doctor
   kit doctor --json
   kit doctor --ci
+  kit doctor --fix
+  kit doctor --fix --dry-run
 
 Options
   -h, --help     Show help
@@ -489,6 +523,7 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --ci       Fail when CI workflow pins drift from the package.json pin
+      --fix      Apply the safe, local fixes, then check again
 
 "
 `;

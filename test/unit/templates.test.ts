@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import pkg from '../../package.json' with { type: 'json' }
@@ -65,6 +65,12 @@ describe('templates/gradle', () => {
     expect(render('apps/client/fastlane/Fastfile').trim().split('\n')).toEqual([
       'import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via `kit fastlane ...` or `kit release ...`") })',
     ])
+  })
+
+  test('renovate.json extends the kit preset', () => {
+    const config = JSON.parse(render('renovate.json', NEW)) as { extends: string[] }
+    expect(config.extends).toEqual(['config:recommended', 'github>jordond/kit//renovate/default'])
+    expect(existsSync(join(KIT, 'renovate/default.json'))).toBe(true)
   })
 
   test('settings.gradle.kts resolves kit plugins from node_modules and applies kit.settings', () => {
@@ -134,6 +140,12 @@ describe('templates/toolchain', () => {
   test('.env.example and the Fastfile match the gradle template', () => {
     expect(render('.env.example', TOOLCHAIN)).toBe(render('.env.example'))
     expect(render('fastlane/Fastfile', TOOLCHAIN)).toBe(render('apps/client/fastlane/Fastfile'))
+  })
+
+  test('renovate.json extends the kit preset', () => {
+    const config = JSON.parse(render('renovate.json', TOOLCHAIN)) as { extends: string[] }
+    expect(config.extends).toEqual(['config:recommended', 'github>jordond/kit//renovate/default'])
+    expect(existsSync(join(KIT, 'renovate/default.json'))).toBe(true)
   })
 
   test('.editorconfig styles Kotlin for ktlint', () => {

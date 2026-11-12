@@ -41,8 +41,8 @@ kit init --template toolchain --dry-run
 
 | Template | Writes |
 | --- | --- |
-| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
-| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`. Add the Gradle wrapper and the modules yourself |
+| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`, `renovate.json`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
+| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`, `renovate.json`. Add the Gradle wrapper and the modules yourself |
 
 - `toolchain` layers kit over an existing project and never writes a root `package.json`. Create the project
   first (`kotlin init`). A plain `kit init` there offers the template (`--yes` accepts it).
@@ -51,7 +51,8 @@ kit init --template toolchain --dry-run
   `jvm/app` module for `kit dev`. An id it cannot find is `com.example.<name>`: replace it before a release.
   CI tests the non-Apple platforms the modules declare (`--platform jvm --platform android …`).
 - Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
-- A file that already exists is kept; `.gitignore` and the catalog only gain lines.
+- A file that already exists is kept; `.gitignore` and the catalog only gain lines. `renovate.json` is
+  skipped when the repo has a Renovate config anywhere (`.github/renovate.json`, `.renovaterc`, …).
 
 ## Adding modules and targets
 
@@ -83,16 +84,34 @@ kit add target api --kind worker --dir apps/api  # worker | vite | astro | docke
   (placeholder name, no account id), `src/index.ts`, `package.json`, `tsconfig.json`. An existing directory
   is only registered; other kinds get an empty directory when it is missing.
 
-## Upgrading
+## Keeping kit up to date
+
+A repo pins kit twice: the `@jordond/kit` range in `package.json` (or `.kit/package.json`) and the
+`jordond/kit/…@<sha> # vX.Y.Z` refs in `.github/workflows`. Both must name the same release;
+`kit doctor --ci` fails when they differ.
+
+By hand:
 
 ```sh
 kit upgrade            # the latest release on npm
 kit upgrade 0.6.0
 ```
 
-Moves the `@jordond/kit` range in `package.json` (or `.kit/package.json`), runs the install, and rewrites
-every `jordond/kit/…@<sha> # vX.Y.Z` in `.github/workflows` to that release's tag commit, which is what
-`kit doctor --ci` compares. Re-running it repairs workflow pins that lag the npm pin.
+Moves the range, runs the install, and rewrites every workflow ref to that release's tag commit.
+Re-running it repairs workflow pins that lag the npm pin (`kit doctor --fix` does that part too).
+
+With Renovate, extend kit's preset (the `kit init` templates write this `renovate.json`):
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "github>jordond/kit//renovate/default"]
+}
+```
+
+The preset puts the npm package and the workflow refs in one group, so a kit release arrives as one
+PR; moves the `package.json` range itself (`^0.6.0` to `^0.6.1`), never only the lockfile; and keeps
+the workflow refs pinned to a commit SHA with the `# vX.Y.Z` comment kit reads.
 
 ## Shell completion
 
@@ -206,6 +225,49 @@ export default defineCommand({
 `kit doctor` checks the tools the config needs. Two checks only warn, because they are per-machine setup:
 a repo with `mise.toml` warns when mise isn't installed or a pinned version differs, and a repo with
 `lefthook.yml` warns when lefthook isn't installed or `lefthook install` hasn't been run in the clone.
+
+```sh
+kit doctor --fix             # list the fixes, confirm once, apply, check again
+kit doctor --fix --yes       # no question (needed without a terminal)
+kit doctor --fix --dry-run   # list them only
+```
+
+`--fix` repairs what is safe and local, then reports (and exits on) the state after the fixes:
+
+| Check | Fix |
+| --- | --- |
+| lefthook hook not installed | `lefthook install` |
+| mise tool missing or drifted | `mise install` |
+| wrangler not installed | the package manager's install (`bun install`, `pnpm install`, …) |
+| iOS / Android version drift | writes the TOML version to the xcconfig's `MARKETING_VERSION` / the module.yaml's `versionName` |
+| Kotlin toolchain wrapper not executable | `chmod +x` |
+| workflow pins behind the npm pin | moves them to that release's tag commit, as `kit upgrade` does; skipped with a note when the tag cannot be resolved (offline) |
+
+Xcode, the JDK, the Android SDK, logins, `.env` values and secrets are never fixed: those checks keep
+their hint. Plain `kit doctor` ends with `N fixable with kit doctor --fix` when there is something to
+apply, and `--json` adds `fixes: [{ id, description, applied, ok, error? }]`.
+
+## Changelog
+
+```sh
+kit changelog                              # Markdown since the last release tag
+kit changelog --platform ios               # since the last ios/v* tag
+kit changelog --from v0.5.0 --to v0.6.0 --json
+kit changelog --platform android --write   # add a section to CHANGELOG.md
+kit changelog --write docs/CHANGES.md
+```
+
+Groups the Conventional Commits in the range into Breaking (`!` or a `BREAKING CHANGE:` footer),
+Features, Fixes, Performance and Other. `chore(release)` and merge commits are always left out;
+`chore`, `test`, `ci` and `style` too unless `--all` is given. The range starts at the newest release
+tag reachable from `--to` (`<platform>/v*` with `--platform`, any `…v<version>` tag without); with no
+tag it is the whole history. `--to <tag>` lists that release: the range starts at the tag before it.
+
+`--write` puts a `## <version> (<date>)` section above the newest one in `CHANGELOG.md` (or the file
+named after it), creating the file when needed. The version is the `--to` tag's, else the platform's
+version in the catalog TOML, else the root `package.json` version, else `Unreleased`; with `--platform`
+the heading is `## ios 1.4.0 (…)`. A version that already has a section is not added again.
+`--json` prints `{ from, to, sections: [{ title, commits }] }`.
 
 ## Kotlin toolchain
 
