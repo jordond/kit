@@ -213,6 +213,18 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/init'),
   },
   {
+    path: ['add', 'module'],
+    description: 'Add a KMP library module (Gradle or Kotlin toolchain)',
+    group: 'Setup',
+    load: () => import('../commands/add/module'),
+  },
+  {
+    path: ['add', 'target'],
+    description: 'Add a target to kit.config.ts',
+    group: 'Setup',
+    load: () => import('../commands/add/target'),
+  },
+  {
     path: ['deps'],
     description: 'List or update npm dependencies (catalog-aware)',
     group: 'Setup',
@@ -252,4 +264,5 @@ export const groupDescriptions: Record<string, string> = {
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations and queries',
+  add: 'Scaffold a module or a target into this repo',
 }

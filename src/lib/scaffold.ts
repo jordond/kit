@@ -294,7 +294,7 @@ export interface ScaffoldInput {
   list?: (dir: string) => string[]
 }
 
-const fill = (text: string, vars: Record<string, string>) =>
+export const fill = (text: string, vars: Record<string, string>) =>
   text.replace(/\{\{(\w+)\}\}/g, (m, k: string) => vars[k] ?? m)
 
 /** Every file the template would put in the repo, in a stable order. */
