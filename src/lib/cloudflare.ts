@@ -342,3 +342,29 @@ export async function runD1(
 export function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
+
+/** Every table of a database, for the "is it empty" check before a remote restore. */
+export const TABLES_SQL = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+
+/**
+ * User tables from `d1 execute --json` output for `TABLES_SQL` (`[{ results: [{ name }] }]`), leaving
+ * out SQLite's and Cloudflare's own (`sqlite_*`, `_cf_*`). Undefined when the output is not that shape.
+ */
+export function d1Tables(stdout: string): string[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    const first: unknown = Array.isArray(parsed) ? parsed[0] : parsed
+    if (!first || typeof first !== 'object' || !('results' in first)) return undefined
+    const { results } = first as { results: unknown }
+    if (!Array.isArray(results)) return undefined
+    const names: string[] = []
+    for (const row of results) {
+      const name: unknown = row && typeof row === 'object' ? (row as { name?: unknown }).name : undefined
+      if (typeof name !== 'string') return undefined
+      if (!name.startsWith('sqlite_') && !name.startsWith('_cf_')) names.push(name)
+    }
+    return names
+  } catch {
+    return undefined
+  }
+}

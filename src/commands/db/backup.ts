@@ -35,6 +35,14 @@ export default defineCommand({
       { kind: 'export', remote: !!ctx.args.remote, output: file },
       { mutates: true, confirm: false, json: { file: shown } },
     )
-    if (outcome === 'ok' && !ctx.flags.json) process.stdout.write(`${shown}\n`)
+    if (outcome !== 'ok') return
+    if (!ctx.flags.json) process.stdout.write(`${shown}\n`)
+    // A dump (a production one with --remote) must not be committed by accident. Exit 1 = not
+    // ignored; anything else (not a git repo, no git) is nothing to warn about.
+    const { runPiped } = await import('../../lib/proc')
+    const ignored = await runPiped(['git', 'check-ignore', '-q', file], { cwd: root }).catch(() => undefined)
+    if (ignored?.code === 1) {
+      ctx.log.warn(`${shown} is not ignored by git; add \`backups/\` to .gitignore before committing`)
+    }
   },
 })

@@ -352,12 +352,13 @@ export function planScaffold(input: ScaffoldInput): FileAction[] {
     )
   }
 
-  const ignore = withGitignore(read('.gitignore'), ['node_modules/', '.env'])
+  // backups/: `kit db backup --remote` writes production dumps there.
+  const ignore = withGitignore(read('.gitignore'), ['node_modules/', '.env', 'backups/'])
   if (ignore !== undefined) {
     plan.push(
       read('.gitignore') === undefined
         ? { kind: 'write', path: '.gitignore', content: ignore }
-        : { kind: 'edit', path: '.gitignore', content: ignore, note: 'add node_modules/ and .env' },
+        : { kind: 'edit', path: '.gitignore', content: ignore, note: 'add node_modules/, .env and backups/' },
     )
   }
   if (facts) {
