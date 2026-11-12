@@ -28,7 +28,7 @@
     "bun": ">=1.3"
   },
   "scripts": {
-    "build": "rm -rf dist && bun build src/cli.ts src/index.ts --outdir dist --target bun --splitting --external zod && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && bun build src/cli.ts src/index.ts --outdir dist --target bun --splitting --external zod && bun build src/lib/storeshots/page/main.ts --target browser --outfile dist/shots-page.js && tsc -p tsconfig.build.json",
     "build:gradle": "gradle/gradlew -p gradle publishKit",
     "dev": "bun src/cli.ts",
     "test": "bun test",
