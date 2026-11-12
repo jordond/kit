@@ -127,6 +127,14 @@ class PromoteBuildTest < Minitest::Test
     assert_same unset, kit_ios_require_explicit_group(unset)
   end
 
+  def test_an_internal_group_with_no_answer_is_refused
+    group = Group.new("g-team", "Team", nil, true)
+    error = assert_raises(KitUserError) { kit_ios_require_explicit_group(group) }
+    assert_includes error.message, "receives every build automatically"
+    explicit = Group.new("g-qa", "QA", false, true)
+    assert_same explicit, kit_ios_require_explicit_group(explicit)
+  end
+
   def test_lookup_fails_on_an_unknown_source_group
     stub_connect_api({})
     error = assert_raises(KitUserError) { lookup(FakeApp.new, "KIT_TESTFLIGHT_FROM_GROUP" => "gamma") }

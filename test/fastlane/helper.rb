@@ -29,7 +29,7 @@ def desc(*); end
 load File.expand_path("../../fastlane/Fastfile", __dir__)
 
 module KitFastfileTest
-  Group = Struct.new(:id, :name, :has_access_to_all_builds)
+  Group = Struct.new(:id, :name, :has_access_to_all_builds, :is_internal_group)
   Build = Struct.new(:version)
   Release = Struct.new(:status, :version_codes, :user_fraction)
   Track = Struct.new(:track, :releases)

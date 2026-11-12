@@ -745,7 +745,11 @@ end
 # internal group) holds every upload, `--track internal` builds included, and
 # kit cannot tell those apart there.
 def kit_ios_require_explicit_group(group)
-  return group unless group.has_access_to_all_builds
+  all_builds = group.has_access_to_all_builds
+  # No answer for an internal group counts as "all builds": that is App Store
+  # Connect's default for them, and promoting an internal build is the worse error.
+  all_builds = true if all_builds.nil? && group.is_internal_group
+  return group unless all_builds
 
   UI.user_error!(
     "The TestFlight group '#{group.name}' receives every build automatically, internal (KIT_INTERNAL) builds " \
