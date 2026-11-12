@@ -193,6 +193,7 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 | `kit version bump <patch\|minor\|major> [--platform ios\|android\|all\|<service>]` | Edit the TOML value, commit `chore(release): …`, push (`--no-push`, `--pr`) |
 | `kit release ios\|android --track internal\|alpha\|beta\|prod` | Preflight → next build number from the store → confirm → build → upload → tag `<platform>/v<version>+<build>` |
 | `kit release <service>` | `release.services.<name>`: build, deploy, tag `<name>/v<version>` |
+| `kit release rollback <service> [--to <version-id>]` | Worker services only: `wrangler rollback`; tags stay put (see [Cloudflare workers](#cloudflare-workers)) |
 | `kit release certs [--add]` | match `appstore`, readonly; `--add` creates only what this app is missing (never nuke) |
 | `kit fastlane …` | fastlane with kit's env and the ASC/Play key files |
 
@@ -258,3 +259,29 @@ jobs:
       MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
+
+## Cloudflare workers
+
+For targets of kind `worker`. Every command runs wrangler from the target's directory with
+`CLOUDFLARE_ACCOUNT_ID` pinned from `cloudflare.accountId`.
+
+| Command | Does |
+| --- | --- |
+| `kit deploy <target> --preview [--comment]` | `wrangler versions upload`: a new version, production traffic untouched. The preview URL is the only thing on stdout (`--json`: `{ target, url, version }`) |
+| `kit release rollback <service> [--to <version-id>]` | `wrangler rollback` for a service whose `deploy` is `kit deploy <worker target>`; confirms first (`--yes` skips) |
+| `kit logs <target> [-- <wrangler tail flags>]` | `wrangler tail`, attached to the terminal; Ctrl-C stops |
+| `kit open <target> [--print]` | The worker's Cloudflare dashboard page; `--print` or `--json` writes the URL instead |
+| `kit db backup [--remote] [--out <file>]` | `wrangler d1 export` to `backups/<db>-<UTC timestamp>.sql`; prints the path |
+| `kit db restore <file> [--remote]` | Run a `.sql` file against the database |
+| `kit db seed [--remote]` | Run the file named by `cloudflare.d1.<db>.seed` (relative to the repo root) |
+| `kit db reset` | Local only: delete the local database, re-apply migrations, then seed if configured |
+
+- `--preview` takes one worker target, honours `--env` and `deploy.before`, and aliases the preview
+  to the branch (`feat/login` → `feat-login-<worker>.<subdomain>.workers.dev`); with no usable branch
+  name the URL is the per-version one. `--comment` posts the URL on the branch's pull request with
+  `gh`, and updates that comment on the next preview; with no pull request it warns.
+- `kit release rollback` never moves or deletes git tags: it names the `<service>/v*` tag that no
+  longer matches production. A service whose deploy is not a worker exits 2.
+- `kit db` commands take `--db`; `--remote` writes (`restore`, `seed`) confirm first, and
+  `kit db reset --remote` is a usage error.
+- `--dry-run` runs nothing in any of them.
