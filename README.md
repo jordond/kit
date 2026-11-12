@@ -496,6 +496,28 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
 
+The same workflow promotes and changes rollouts through `operation` (default `release`):
+
+| `operation` | Runs | Inputs |
+| --- | --- | --- |
+| `release` | `kit release <platform> --track <track>` | `track`, `build`, `notes`, `rollout`, `draft`, `skip` |
+| `promote` | `kit release promote <platform> --from <from> --to <track>` | `from`, `track` (the destination), `build`, `app-version`, `notes`, `rollout`, `draft`, `skip` |
+| `rollout` | `kit release rollout <platform> --<rollout-action>` | `rollout-action` (`percent`, `halt`, `resume`, `complete`), `percent`, `build` |
+
+```yaml
+  promote:
+    uses: jordond/kit/.github/workflows/mobile-distribute.yml@<sha> # vX.Y.Z
+    permissions: { contents: write }
+    with: { operation: promote, platform: android, from: beta, track: prod }
+    secrets:
+      PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}
+```
+
+The job runs in the `production` environment for a release or promote to `prod` and for every
+rollout, so its required reviewers approve whatever widens production. That is the gate kit relies on
+when it skips the typed `prod` confirmation on GitHub Actions: run `kit release promote --to prod` and
+`kit release rollout` in CI through this workflow, or from a job that sets `environment: production`.
+
 ### Lane tests
 
 The shared Fastfile's selection logic (which build a promotion moves, which Play release a rollout

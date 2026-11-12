@@ -15,6 +15,15 @@ name: mobile-distribute
 # Version names come from the catalog TOML at the dispatched ref (bump with `kit version bump`
 # first); build numbers come from the stores. prod runs in the `production` environment, so give
 # that environment required reviewers. Tags (`ios/v1.4.0+12`) are pushed after a successful upload.
+#
+# `operation` (default release) also runs the two commands that change what a track holds without
+# a build:
+#   promote: `kit release promote <platform> --from <from> --to <track>` (`track` is the destination)
+#   rollout: `kit release rollout <platform> --<rollout-action>` (`track` is not used)
+# Whatever widens production runs in `production` too: a promote to prod, and every rollout (a halt
+# included, to keep the rule simple). kit skips its typed "prod" confirmation on GitHub Actions
+# because this environment's reviewers answer it, so call kit for these only through this workflow
+# or from a job that sets `environment: production` itself.
 # The setup is inlined rather than using kit's composite action: a reusable workflow cannot
 # reference its own repo's action at its own SHA.
 
@@ -26,11 +35,37 @@ on:
         required: true
         type: string
       track:
-        description: internal | alpha | beta | prod
-        required: true
+        description: internal | alpha | beta | prod (promote = the destination, beta | prod; rollout = unused)
+        required: false
         type: string
+        default: ''
+      operation:
+        description: release (build and upload) | promote (move a build to a later track) | rollout (change the prod rollout)
+        required: false
+        type: string
+        default: release
+      from:
+        description: 'promote: the source track, alpha | beta'
+        required: false
+        type: string
+        default: ''
+      app-version:
+        description: 'promote ios: version name of the build when it predates a version bump (empty = the TOML version)'
+        required: false
+        type: string
+        default: ''
+      rollout-action:
+        description: 'rollout: percent | halt | resume | complete'
+        required: false
+        type: string
+        default: ''
+      percent:
+        description: 'rollout android, action percent: 1-100'
+        required: false
+        type: string
+        default: ''
       build:
-        description: Build number / version code (empty = next from the store)
+        description: Build number / version code (empty = next from the store; promote = latest on the source track; rollout android = the release's version code)
         required: false
         type: string
         default: ''
@@ -100,23 +135,41 @@ permissions:
 
 jobs:
   distribute:
-    name: ${{ inputs.platform }} → ${{ inputs.track }}
+    name: ${{ inputs.platform }} ${{ inputs.operation != 'release' && inputs.operation || '' }} → ${{ inputs.operation == 'rollout' && 'prod' || inputs.track }}
     runs-on: ${{ inputs.runs-on || (inputs.platform == 'ios' && 'macos-latest' || 'ubuntu-latest') }}
-    environment: ${{ inputs.track == 'prod' && 'production' || '' }}
+    # release and promote: a prod destination. rollout: always (it only ever touches production).
+    environment: ${{ (inputs.operation == 'rollout' || inputs.track == 'prod') && 'production' || '' }}
     timeout-minutes: 90
     concurrency:
       # Per track: GitHub keeps one pending run per group, so a later internal dispatch must not
       # cancel a prod run waiting for approval.
-      group: mobile-distribute-${{ github.repository }}-${{ inputs.platform }}-${{ inputs.track }}
+      group: mobile-distribute-${{ github.repository }}-${{ inputs.platform }}-${{ inputs.operation == 'release' && inputs.track || format('{0}-{1}', inputs.operation, inputs.track) }}
       cancel-in-progress: false
     steps:
       - name: Validate inputs
         env:
           PLATFORM: ${{ inputs.platform }}
           TRACK: ${{ inputs.track }}
+          OPERATION: ${{ inputs.operation }}
+          FROM: ${{ inputs.from }}
+          ROLLOUT_ACTION: ${{ inputs.rollout-action }}
+          PERCENT: ${{ inputs.percent }}
         run: |
           case "$PLATFORM" in ios|android) ;; *) echo "::error::platform must be ios or android, got '$PLATFORM'"; exit 2 ;; esac
-          case "$TRACK" in internal|alpha|beta|prod) ;; *) echo "::error::track must be internal|alpha|beta|prod, got '$TRACK'"; exit 2 ;; esac
+          case "$OPERATION" in
+            release)
+              case "$TRACK" in internal|alpha|beta|prod) ;; *) echo "::error::track must be internal|alpha|beta|prod, got '$TRACK'"; exit 2 ;; esac ;;
+            promote)
+              case "$FROM" in alpha|beta) ;; *) echo "::error::promote: from must be alpha or beta, got '$FROM' (internal builds are never promoted)"; exit 2 ;; esac
+              case "$TRACK" in beta|prod) ;; *) echo "::error::promote: track (the destination) must be beta or prod, got '$TRACK'"; exit 2 ;; esac ;;
+            rollout)
+              case "$ROLLOUT_ACTION" in
+                percent) [ -n "$PERCENT" ] || { echo "::error::rollout: rollout-action percent needs percent"; exit 2; } ;;
+                halt|resume|complete) ;;
+                *) echo "::error::rollout: rollout-action must be percent|halt|resume|complete, got '$ROLLOUT_ACTION'"; exit 2 ;;
+              esac ;;
+            *) echo "::error::operation must be release|promote|rollout, got '$OPERATION'"; exit 2 ;;
+          esac
 
       # Full history: release notes come from `git describe --match '<platform>/v*'`.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -193,11 +246,16 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: kit release
+      - name: kit ${{ inputs.operation }}
         env:
           CI: 'true'
           PLATFORM: ${{ inputs.platform }}
           TRACK: ${{ inputs.track }}
+          OPERATION: ${{ inputs.operation }}
+          FROM: ${{ inputs.from }}
+          APP_VERSION: ${{ inputs.app-version }}
+          ROLLOUT_ACTION: ${{ inputs.rollout-action }}
+          PERCENT: ${{ inputs.percent }}
           BUILD: ${{ inputs.build }}
           NOTES: ${{ inputs.notes }}
           ROLLOUT: ${{ inputs.rollout }}
@@ -215,13 +273,32 @@ jobs:
           PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
+          # Inputs arrive as env vars and are only ever passed as single arguments, never evaluated.
           # `--flag=value`: a value starting with "-" (kit's own "- subject" notes) is not read as a flag.
-          args=(release "$PLATFORM" "--track=$TRACK" --yes)
-          if [ -n "$BUILD" ]; then
-            if [ "$PLATFORM" = ios ]; then args+=("--build=$BUILD"); else args+=("--code=$BUILD"); fi
-          fi
-          [ -n "$NOTES" ] && args+=("--notes=$NOTES")
-          [ -n "$ROLLOUT" ] && args+=("--rollout=$ROLLOUT")
-          [ "$DRAFT" = true ] && args+=(--draft)
-          [ -n "$SKIP" ] && args+=("--skip=$SKIP")
+          case "$OPERATION" in
+            release)
+              args=(release "$PLATFORM" "--track=$TRACK" --yes)
+              if [ -n "$BUILD" ]; then
+                if [ "$PLATFORM" = ios ]; then args+=("--build=$BUILD"); else args+=("--code=$BUILD"); fi
+              fi
+              [ -n "$NOTES" ] && args+=("--notes=$NOTES")
+              [ -n "$ROLLOUT" ] && args+=("--rollout=$ROLLOUT")
+              [ "$DRAFT" = true ] && args+=(--draft)
+              [ -n "$SKIP" ] && args+=("--skip=$SKIP")
+              ;;
+            promote)
+              args=(release promote "$PLATFORM" "--from=$FROM" "--to=$TRACK" --yes)
+              [ -n "$BUILD" ] && args+=("--build=$BUILD")
+              [ -n "$APP_VERSION" ] && args+=("--app-version=$APP_VERSION")
+              [ -n "$NOTES" ] && args+=("--notes=$NOTES")
+              [ -n "$ROLLOUT" ] && args+=("--rollout=$ROLLOUT")
+              [ "$DRAFT" = true ] && args+=(--draft)
+              [ -n "$SKIP" ] && args+=("--skip=$SKIP")
+              ;;
+            rollout)
+              args=(release rollout "$PLATFORM" --yes)
+              if [ "$ROLLOUT_ACTION" = percent ]; then args+=("--percent=$PERCENT"); else args+=("--$ROLLOUT_ACTION"); fi
+              [ -n "$BUILD" ] && args+=("--build=$BUILD")
+              ;;
+          esac
           "$KIT_NODE_MODULES/.bin/kit" "${args[@]}"
