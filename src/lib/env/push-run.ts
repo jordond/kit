@@ -82,6 +82,8 @@ export async function preflightPush(
   config: KitConfig,
   values: EnvValues,
   sel: PushSelection,
+  /** `strict`: a remote that cannot be listed is a failure even with `--yes` (rotate must not write first). */
+  opts: { strict?: boolean } = {},
 ): Promise<PushPreflight> {
   assertSelection(sel)
   // No flags (or --all): every worker and GitHub (when env.githubSecrets is set).
@@ -118,8 +120,9 @@ export async function preflightPush(
   }
   if (workerNames.length) pinCloudflareAccount(root, config)
 
+  const proceedOnListFailure = !opts.strict && ctx.flags.yes
   const plans: PlannedDestination[] = []
-  for (const d of destinations) plans.push(await planPush(d, values, { proceedOnListFailure: ctx.flags.yes }))
+  for (const d of destinations) plans.push(await planPush(d, values, { proceedOnListFailure }))
   const count = plans.flatMap((p) =>
     p.items.filter((i) => i.status === 'new' || i.status === 'overwrite' || i.status === 'unknown'),
   ).length
@@ -134,7 +137,7 @@ export async function preflightPush(
       if (p.listError) ctx.log.warn(`could not list existing secrets: ${p.listError}`)
       for (const i of p.items) ctx.log.dim(`  ${i.key}  ${i.status}`)
     }
-    if (listFailed.length)
+    if (listFailed.length && !opts.strict)
       ctx.log.warn('Skipping remotes kit could not list; re-run with --yes to push anyway')
   }
   return { plans, count, listFailed }

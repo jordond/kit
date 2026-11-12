@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type { KitConfig } from '../../config/schema'
+import { dotenvEncode, dotenvLine } from '../dotenv'
 import { registerSecret } from '../secrets'
 import { GITHUB } from './push'
 import type { PushSelection } from './push-run'
@@ -26,7 +27,7 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 /**
  * Replace the value on `KEY=…` lines and leave everything else as it was: comments (a trailing
  * ` # note` after the value too), order, other keys, `export`, spacing around `=`, the quote style
- * and the file's line endings. A `#` inside quotes is part of the value, not a comment. A key the
+ * and the file's line endings; the new value is quoted when it needs it. A `#` inside quotes is part of the value, not a comment. A key the
  * file lacks is appended as its own line. A commented `# KEY=` is a comment, not the key.
  */
 export function rewriteKey(text: string, key: string, value: string): string {
@@ -39,16 +40,18 @@ export function rewriteKey(text: string, key: string, value: string): string {
     if (!m) return line
     replaced = true
     const rest = m[2]!
+    // `KEY= # note`: an empty value and a comment.
+    if (rest.startsWith('#')) return `${m[1]!.trimEnd()}${dotenvEncode(value)} ${rest}${cr}`
     // Quoted: the value runs to the closing quote; what follows is blank or a comment.
-    const quoted = /^(['"]).*?\1([ \t]+#.*|[ \t]*)$/.exec(rest)
-    if (quoted) return `${m[1]}${quoted[1]}${value}${quoted[1]}${quoted[2]}${cr}`
+    const quoted = /^(['"`]).*?\1([ \t]+#.*|[ \t]*)$/.exec(rest)
+    if (quoted) return `${m[1]}${dotenvEncode(value, quoted[1])}${quoted[2]}${cr}`
     // Unquoted: the value ends at the first whitespace-then-#, else at trailing whitespace.
     const tail = /[ \t]+#.*$/.exec(rest)?.[0] ?? /[ \t]*$/.exec(rest)?.[0] ?? ''
-    return `${m[1]}${value}${tail}${cr}`
+    return `${m[1]}${dotenvEncode(value)}${tail}${cr}`
   })
   if (replaced) return lines.join('\n')
   const head = text === '' || text.endsWith('\n') ? text : `${text}${eol}`
-  return `${head}${key}=${value}${eol}`
+  return `${head}${dotenvLine(key, value)}${eol}`
 }
 
 /** Remotes that hold `key`: worker targets from `env.workerSecrets`, then `github` from `env.githubSecrets`. */

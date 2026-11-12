@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { dotenvLine } from '../dotenv'
 import { parseDotenv, writeAtomic } from './render'
 import type { EnvKey, EnvSchema } from './schema'
 
@@ -11,7 +12,7 @@ import type { EnvKey, EnvSchema } from './schema'
 
 export const PLACEHOLDER_RE = /^replace-me/
 
-/** Replace `KEY=…` in place, or append it. Comments and other lines are kept. */
+/** Replace `KEY=…` in place, or append it. Comments and other lines are kept; the value is quoted when it needs it. */
 export function setKey(text: string, key: string, value: string): string {
   const lines = text.split('\n')
   let replaced = false
@@ -24,11 +25,11 @@ export function setKey(text: string, key: string, value: string): string {
       .trim()
     if (k !== key) return line
     replaced = true
-    return `${key}=${value}`
+    return dotenvLine(key, value)
   })
   if (!replaced) {
-    if (next.length && next[next.length - 1] === '') next.splice(next.length - 1, 0, `${key}=${value}`)
-    else next.push(`${key}=${value}`)
+    if (next.length && next[next.length - 1] === '') next.splice(next.length - 1, 0, dotenvLine(key, value))
+    else next.push(dotenvLine(key, value))
   }
   return next.join('\n')
 }
