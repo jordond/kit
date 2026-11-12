@@ -88,6 +88,25 @@ describe('status parsing', () => {
       { track: 'testflight', state: 'ok', build: 7, version: '1.4.0' },
       { track: 'prod', state: 'ok', build: 5, version: '1.3.0', phased: 'ACTIVE' },
     ])
+    // The phased release could not be read: unknown, not "none".
+    expect(
+      parseIosStatus({
+        STATUS_TESTFLIGHT_BUILD: '7',
+        STATUS_APPSTORE_BUILD: '5',
+        STATUS_APPSTORE_PHASED_ERROR: 'Authentication credentials are missing or invalid',
+      })[1],
+    ).toEqual({
+      track: 'prod',
+      state: 'ok',
+      build: 5,
+      phased: 'unknown',
+      phasedError: 'Authentication credentials are missing or invalid',
+    })
+    expect(parseIosStatus({ STATUS_APPSTORE_BUILD: '5' })[1]).toEqual({
+      track: 'prod',
+      state: 'ok',
+      build: 5,
+    })
     expect(parseIosStatus({ STATUS_TESTFLIGHT_ERROR: 'no key', STATUS_APPSTORE_BUILD: '' })).toEqual([
       { track: 'testflight', state: 'unknown', build: null, error: 'no key' },
       { track: 'prod', state: 'empty', build: null },

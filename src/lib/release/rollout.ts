@@ -185,11 +185,15 @@ export async function rolloutMobile(
   const state = outputs.ROLLOUT_STATE
   const fraction = outputs.ROLLOUT_FRACTION ? Number(outputs.ROLLOUT_FRACTION) : undefined
   const version = outputs.ROLLOUT_VERSION
+  // Android: the version code of the release the lane changed.
+  const code = Number(outputs.ROLLOUT_CODE)
+  const build = Number.isInteger(code) && code > 0 ? code : undefined
   if (flags.json) {
     emitJson({
       ...doc,
       ok: true,
       changed: true,
+      ...(build !== undefined ? { build } : {}),
       ...(state ? { state } : {}),
       ...(fraction !== undefined && Number.isFinite(fraction) ? { fraction } : {}),
       ...(version ? { version } : {}),
@@ -198,7 +202,7 @@ export async function rolloutMobile(
   summarize(`rollout ${platform}`, results, started)
   if (!flags.json && state) {
     ctx.log.dim(
-      `  ${version ? `${version}: ` : ''}${state}${fraction !== undefined ? ` at ${Math.round(fraction * 1000) / 10}%` : ''}`,
+      `  ${version ? `${version}: ` : ''}${build !== undefined ? `version code ${build}: ` : ''}${state}${fraction !== undefined ? ` at ${Math.round(fraction * 1000) / 10}%` : ''}`,
     )
   }
 }

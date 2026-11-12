@@ -45,7 +45,12 @@ class PromoteBuildTest < Minitest::Test
     end
 
     def get_beta_groups
-      [KitFastfileTest::Group.new("g-alpha", "alpha"), KitFastfileTest::Group.new("g-beta", "Beta Testers")]
+      [
+        KitFastfileTest::Group.new("g-alpha", "alpha", false),
+        KitFastfileTest::Group.new("g-beta", "Beta Testers", false),
+        # App Store Connect's default for an internal group: every upload lands in it.
+        KitFastfileTest::Group.new("g-team", "Team", true)
+      ]
     end
   end
 
@@ -99,6 +104,27 @@ class PromoteBuildTest < Minitest::Test
       lookup(FakeApp.new, "KIT_TESTFLIGHT_FROM_GROUP" => "alpha", "KIT_IOS_BUILD" => "9")
     end
     assert_includes error.message, "is not in the TestFlight group 'alpha'"
+  end
+
+  # In an all-builds group the internal build 9 is "in" the group and has the
+  # highest number: it would be the default pick. The group is refused instead.
+  def test_lookup_refuses_a_source_group_that_receives_every_build
+    filters = stub_connect_api("g-team" => [Build.new("9"), *ALPHA_BUILDS])
+    [{}, { "KIT_IOS_BUILD" => "7" }].each do |env|
+      error = assert_raises(KitUserError) do
+        lookup(FakeApp.new, { "KIT_TESTFLIGHT_FROM_GROUP" => "Team" }.merge(env))
+      end
+      assert_includes error.message, "The TestFlight group 'Team' receives every build automatically"
+      assert_includes error.message, "source group that receives builds explicitly"
+    end
+    assert_empty filters, "the builds are not even asked for"
+  end
+
+  def test_explicit_groups_pass_the_check
+    group = Group.new("g-alpha", "alpha", false)
+    assert_same group, kit_ios_require_explicit_group(group)
+    unset = Group.new("g", "no attribute in the answer", nil)
+    assert_same unset, kit_ios_require_explicit_group(unset)
   end
 
   def test_lookup_fails_on_an_unknown_source_group

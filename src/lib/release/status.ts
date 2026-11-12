@@ -30,8 +30,10 @@ export interface TrackStatus {
   codes?: number[]
   /** Android: release names on the track. */
   names?: string[]
-  /** iOS prod: phased release state (ACTIVE, PAUSED, COMPLETE, INACTIVE). */
+  /** iOS prod: phased release state (ACTIVE, PAUSED, COMPLETE, INACTIVE); `unknown` when it could not be read. */
   phased?: string
+  /** Why `phased` is unknown. Absent with no `phased`: the version has no phased release. */
+  phasedError?: string
   /** Why the track is unknown. */
   error?: string
 }
@@ -108,6 +110,10 @@ export function parseIosStatus(o: Record<string, string>): TrackStatus[] {
   }
   const prod = one('prod', 'APPSTORE')
   if (o.STATUS_APPSTORE_PHASED) prod.phased = o.STATUS_APPSTORE_PHASED
+  else if (o.STATUS_APPSTORE_PHASED_ERROR !== undefined) {
+    prod.phased = 'unknown'
+    prod.phasedError = o.STATUS_APPSTORE_PHASED_ERROR || 'the lane could not read it'
+  }
   return [one('testflight', 'TESTFLIGHT'), prod]
 }
 
@@ -153,7 +159,7 @@ function line(t: TrackStatus): string {
     t.version,
     t.names?.length ? t.names.join(', ') : undefined,
     t.codes && t.codes.length > 1 ? `codes ${t.codes.join(', ')}` : undefined,
-    t.phased ? `phased ${t.phased}` : undefined,
+    t.phased ? `phased ${t.phased}${t.phasedError ? ` (${t.phasedError})` : ''}` : undefined,
   ].filter(Boolean)
   return `  ${label}${t.build}${extra.length ? pc.dim(`  ${extra.join(' · ')}`) : ''}`
 }
@@ -207,6 +213,9 @@ export async function releaseStatus(
   for (const p of report) {
     for (const t of p.tracks.filter((x) => x.state === 'unknown')) {
       ctx.log.warn(`${p.platform} ${t.track}: unknown${t.error ? ` (${t.error})` : ''}`)
+    }
+    for (const t of p.tracks.filter((x) => x.phasedError)) {
+      ctx.log.warn(`${p.platform} ${t.track}: phased release unknown (${t.phasedError})`)
     }
   }
   if (ctx.flags.json) {

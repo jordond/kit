@@ -69,7 +69,7 @@ const ANSWERS = `  *"android status"*)
     echo "KIT_STATUS_TESTFLIGHT_BUILD=7"; echo "KIT_STATUS_TESTFLIGHT_VERSION=1.4.0"
     echo "KIT_STATUS_APPSTORE_BUILD=5"; echo "KIT_STATUS_APPSTORE_VERSION=1.3.0"
     echo "KIT_STATUS_APPSTORE_PHASED=ACTIVE" ;;
-  *"android rollout"*) echo "KIT_ROLLOUT_STATE=inProgress"; echo "KIT_ROLLOUT_FRACTION=0.25" ;;
+  *"android rollout"*) echo "KIT_ROLLOUT_STATE=inProgress"; echo "KIT_ROLLOUT_FRACTION=0.25"; echo "KIT_ROLLOUT_CODE=\${KIT_ANDROID_CODE:-40}" ;;
   *"ios promote_build"*) echo "KIT_PROMOTE_BUILD=7" ;;
   *"ios rollout"*) echo "KIT_ROLLOUT_VERSION=1.3.0"; echo "KIT_ROLLOUT_STATE=PAUSED" ;;`
 
@@ -145,6 +145,28 @@ describe('kit release status', () => {
     expect(out[2]).toBe('  alpha      40')
     expect(out[3]).toBe('  beta       unknown (Google Api Error: forbidden)')
     expect(out[4]).toBe('  prod       no build')
+  })
+
+  test('ios: a phased release that could not be read is unknown, with the reason', async () => {
+    fakeBundle(`  *"ios status"*)
+    echo "KIT_STATUS_TESTFLIGHT_BUILD=7"; echo "KIT_STATUS_TESTFLIGHT_VERSION=1.4.0"
+    echo "KIT_STATUS_APPSTORE_BUILD=5"; echo "KIT_STATUS_APPSTORE_VERSION=1.3.0"
+    echo "KIT_STATUS_APPSTORE_PHASED_ERROR=Authentication credentials are missing or invalid" ;;`)
+    const r = await run(['release', 'status', 'ios', '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout).platforms[0].tracks[1]).toEqual({
+      track: 'prod',
+      state: 'ok',
+      build: 5,
+      version: '1.3.0',
+      phased: 'unknown',
+      phasedError: 'Authentication credentials are missing or invalid',
+    })
+    expect(r.stderr).toContain(
+      'ios prod: phased release unknown (Authentication credentials are missing or invalid)',
+    )
+    const human = await run(['release', 'status', 'ios'])
+    expect(human.stdout).toContain('phased unknown (Authentication credentials are missing or invalid)')
   })
 
   test('every track unreadable → exit 1, still one JSON document', async () => {
@@ -618,8 +640,12 @@ describe('kit release rollout', () => {
       dryRun: false,
       ok: true,
       changed: true,
+      build: 40,
       state: 'inProgress',
     })
+    // the summary names the version code the lane changed
+    const human = await run(['release', 'rollout', 'android', '--halt', '--yes'])
+    expect(human.stderr).toContain('version code 40: inProgress at 25%')
   })
 
   test.each(['halt', 'resume', 'complete'])('android --%s', async (action) => {
