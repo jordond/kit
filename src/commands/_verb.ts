@@ -30,6 +30,8 @@ interface Affected {
   files?: string[]
   /** Affected targets among the selected ones, in config order. */
   targets: string[]
+  /** Why every selected target runs although no changed file picked it. */
+  reason?: 'base-not-found' | 'head-is-base'
 }
 
 /** `--affected [--base <ref>]`: the changed files and the targets they select. Undefined without the flag. */
@@ -58,7 +60,15 @@ async function resolveAffected(
     log.warn(
       `--affected: ${args.base ? `base "${args.base}"` : 'no base (origin/HEAD, origin/main, main)'} not found; running every target`,
     )
-    return { base: null, targets: selected }
+    return { base: null, targets: selected, reason: 'base-not-found' }
+  }
+  if (!args.base && changed.headIsBase && !changed.files.length) {
+    // On the base itself (a push build of the default branch): there is nothing to compare, not nothing to do.
+    log.warn(
+      `--affected: HEAD is the base (${changed.base}) and nothing is uncommitted; running every target`,
+    )
+    log.dim('  › For push builds pass --base HEAD~1, or the previous release tag')
+    return { base: changed.base, targets: selected, reason: 'head-is-base' }
   }
   const hit = new Set(affectedTargets(root, config, changed.files))
   return { base: changed.base, files: changed.files, targets: selected.filter((n) => hit.has(n)) }
@@ -79,7 +89,13 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
   const started = performance.now()
   const affected = await resolveAffected(ctx, root, config)
   /** `affected` and `base` in every `--json` document of an `--affected` run. */
-  const selection = affected ? { affected: affected.targets, base: affected.base } : {}
+  const selection = affected
+    ? {
+        affected: affected.targets,
+        base: affected.base,
+        ...(affected.reason ? { reason: affected.reason } : {}),
+      }
+    : {}
   const groups = planVerbs(root, config, v.verbs, {
     ...v.plan,
     targets: ctx.positionals,

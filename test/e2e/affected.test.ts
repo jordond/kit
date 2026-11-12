@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -46,14 +46,14 @@ beforeEach(() => {
 afterEach(() => fx.cleanup())
 
 describe('--affected', () => {
-  test('nothing changed: exit 0, says so, runs nothing', async () => {
-    const r = await fx.kit(['check', '--affected'])
+  test('nothing changed against an explicit base: exit 0, says so, runs nothing', async () => {
+    const r = await fx.kit(['check', '--affected', '--base', 'main'])
     expect(r.code).toBe(0)
     expect(r.stdout).toBe('')
     expect(r.stderr).toContain('nothing affected since main')
     expect(fx.calls()).toEqual([])
 
-    const json = await fx.kit(['check', '--affected', '--json'])
+    const json = await fx.kit(['check', '--affected', '--base', 'main', '--json'])
     expect(json.code).toBe(0)
     expect(JSON.parse(json.stdout)).toEqual({
       verb: 'check',
@@ -63,6 +63,82 @@ describe('--affected', () => {
       base: 'main',
     })
     expect(json.stderr).toBe('')
+  })
+
+  test('HEAD is the default base and the tree is clean: runs everything, warns, gives a reason', async () => {
+    git('checkout', '-q', 'main')
+    const r = await fx.kit(['lint', '--affected'])
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain(
+      '--affected: HEAD is the base (main) and nothing is uncommitted; running every target',
+    )
+    expect(r.stderr).toContain('--base HEAD~1')
+    expect(summary()).toEqual([
+      '. prep',
+      '. biome check .',
+      './apps/web astro check',
+      './apps/client fake-gradlew spotlessCheck',
+    ])
+    const json = await fx.kit(['lint', 'web', 'client', '--affected', '--dry-run', '--json'])
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      affected: ['web', 'client'],
+      base: 'main',
+      reason: 'head-is-base',
+    })
+    // An uncommitted change on the base is a real diff again.
+    write('apps/web/src/a.astro')
+    const dirty = await fx.kit(['lint', '--affected', '--dry-run', '--json'])
+    const doc = JSON.parse(dirty.stdout)
+    expect(doc).toMatchObject({ affected: ['web'], base: 'main' })
+    expect(doc.reason).toBeUndefined()
+  })
+
+  test('a file moved from one target into another affects both', async () => {
+    git('checkout', '-q', 'main')
+    commit('apps/client/shared/util.kt', 'fun util() = "a helper long enough for rename detection"\n')
+    git('checkout', '-q', '-B', 'feature')
+    mkdirSync(join(fx.dir, 'apps/web/src'), { recursive: true })
+    git('mv', 'apps/client/shared/util.kt', 'apps/web/src/util.kt')
+    git('commit', '-q', '-m', 'refactor: move util')
+    const r = await fx.kit(['lint', '--affected', '--dry-run', '--json'])
+    expect(JSON.parse(r.stdout)).toMatchObject({ affected: ['web', 'client'], base: 'main' })
+  })
+
+  test('kit root below the git toplevel: a change outside it affects every target', async () => {
+    // A second fixture whose git root is one level above kit.config.ts.
+    const nested = fixture('bun-workers', BINS)
+    try {
+      const top = join(nested.dir, 'mono')
+      const g = (...args: string[]) => {
+        const p = Bun.spawnSync(['git', ...args], { cwd: nested.dir, stdout: 'pipe', stderr: 'pipe' })
+        if (p.exitCode !== 0) throw new Error(`git ${args.join(' ')}: ${p.stderr.toString()}`)
+      }
+      mkdirSync(top)
+      for (const f of ['kit.config.ts', 'apps', 'bun.lock']) renameSync(join(nested.dir, f), join(top, f))
+      writeFileSync(join(nested.dir, '.gitignore'), '.fakebin/\n.calls.log\nnode_modules/\n')
+      writeFileSync(join(nested.dir, 'root.lock'), 'v1')
+      g('init', '-q', '-b', 'main')
+      g('config', 'user.email', 'kit@example.com')
+      g('config', 'user.name', 'kit')
+      g('config', 'commit.gpgsign', 'false')
+      g('add', '-A')
+      g('commit', '-q', '-m', 'chore: init')
+      g('checkout', '-q', '-b', 'feature')
+      writeFileSync(join(nested.dir, 'root.lock'), 'v2')
+      g('commit', '-q', '-am', 'chore: root lockfile')
+      const r = await nested.kit(['lint', '--affected', '--dry-run', '--json'], { cwd: 'mono' })
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toMatchObject({ affected: ['api', 'web', 'client'], base: 'main' })
+
+      mkdirSync(join(top, 'apps/web/src'), { recursive: true })
+      writeFileSync(join(top, 'apps/web/src/a.astro'), 'x')
+      const inside = await nested.kit(['lint', '--affected', '--base', 'HEAD', '--dry-run', '--json'], {
+        cwd: 'mono',
+      })
+      expect(JSON.parse(inside.stdout)).toMatchObject({ affected: ['web'], base: 'HEAD' })
+    } finally {
+      nested.cleanup()
+    }
   })
 
   test('a commit on the branch under one target: the workspace and that target', async () => {
