@@ -119,8 +119,12 @@ describe.skipIf(!enabled)('packed tarball', () => {
         'toolchain/.github/workflows/ci.yml',
         'toolchain/.github/workflows/distribute.yml',
         'gradle/.github/workflows/ci.yml',
+        'gradle/renovate.json',
+        'toolchain/renovate.json',
       ]),
     )
+    // The Renovate preset is read from the GitHub repo, never from the package.
+    expect(readdirSync(join(app, 'node_modules/@jordond/kit'))).not.toContain('renovate')
   })
 
   test('kit init --template runs from the built dist', async () => {

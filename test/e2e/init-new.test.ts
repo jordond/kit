@@ -100,6 +100,7 @@ describe('kit init in a Kotlin toolchain project', () => {
       'write .github/workflows/ci.yml',
       'write .github/workflows/distribute.yml',
       'write fastlane/Fastfile',
+      'write renovate.json',
       'edit .gitignore',
       'edit libs.versions.toml',
     ])
@@ -253,6 +254,7 @@ describe('kit init --template elsewhere', () => {
     expect(at('.gitignore')).toBe('node_modules/\n.env\n')
     expect(at('mise.toml')).toContain('java = ')
     expect(at('lefthook.yml')).toContain('run: kit lint --staged --fix')
+    expect(JSON.parse(at('renovate.json')).extends).toContain('github>jordond/kit//renovate/default')
     expect(existsSync(join(dir, '.kit'))).toBe(false)
     expect(lines('.bun.log')).toEqual([`${dir.split('/').pop()} install`])
   })

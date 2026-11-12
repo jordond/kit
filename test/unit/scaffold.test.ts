@@ -231,6 +231,20 @@ describe('planScaffold', () => {
     ])
   })
 
+  test('renovate.json is written unless the repo has a Renovate config somewhere', () => {
+    const files = { 'renovate.json': '{}\n' }
+    expect(summary(planScaffold(input({ files })))).toContain('write renovate.json')
+    for (const present of ['renovate.json', '.github/renovate.json5', '.renovaterc']) {
+      const on = { ...disk, [present]: '{}' }
+      const plan = planScaffold(input({ files, read: reader(on), list: lister(on) }))
+      expect(plan.find((a) => a.path === 'renovate.json')).toEqual({
+        kind: 'skip',
+        path: 'renovate.json',
+        reason: present === 'renovate.json' ? 'exists' : `${present} exists`,
+      })
+    }
+  })
+
   test('an existing package.json without kit gains the dependency, and keeps the rest', () => {
     const files = { 'package.json': '{ "name": "mine", "devDependencies": { "typescript": "^5" } }' }
     const plan = planScaffold(input({ template: 'gradle', files: {}, read: reader(files) }))

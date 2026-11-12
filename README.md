@@ -41,8 +41,8 @@ kit init --template toolchain --dry-run
 
 | Template | Writes |
 | --- | --- |
-| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
-| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`. Add the Gradle wrapper and the modules yourself |
+| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`, `renovate.json`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
+| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`, `renovate.json`. Add the Gradle wrapper and the modules yourself |
 
 - `toolchain` layers kit over an existing project and never writes a root `package.json`. Create the project
   first (`kotlin init`). A plain `kit init` there offers the template (`--yes` accepts it).
@@ -51,18 +51,37 @@ kit init --template toolchain --dry-run
   `jvm/app` module for `kit dev`. An id it cannot find is `com.example.<name>`: replace it before a release.
   CI tests the non-Apple platforms the modules declare (`--platform jvm --platform android …`).
 - Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
-- A file that already exists is kept; `.gitignore` and the catalog only gain lines.
+- A file that already exists is kept; `.gitignore` and the catalog only gain lines. `renovate.json` is
+  skipped when the repo has a Renovate config anywhere (`.github/renovate.json`, `.renovaterc`, …).
 
-## Upgrading
+## Keeping kit up to date
+
+A repo pins kit twice: the `@jordond/kit` range in `package.json` (or `.kit/package.json`) and the
+`jordond/kit/…@<sha> # vX.Y.Z` refs in `.github/workflows`. Both must name the same release;
+`kit doctor --ci` fails when they differ.
+
+By hand:
 
 ```sh
 kit upgrade            # the latest release on npm
 kit upgrade 0.6.0
 ```
 
-Moves the `@jordond/kit` range in `package.json` (or `.kit/package.json`), runs the install, and rewrites
-every `jordond/kit/…@<sha> # vX.Y.Z` in `.github/workflows` to that release's tag commit, which is what
-`kit doctor --ci` compares. Re-running it repairs workflow pins that lag the npm pin.
+Moves the range, runs the install, and rewrites every workflow ref to that release's tag commit.
+Re-running it repairs workflow pins that lag the npm pin (`kit doctor --fix` does that part too).
+
+With Renovate, extend kit's preset (the `kit init` templates write this `renovate.json`):
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "github>jordond/kit//renovate/default"]
+}
+```
+
+The preset puts the npm package and the workflow refs in one group, so a kit release arrives as one
+PR; moves the `package.json` range itself (`^0.6.0` to `^0.6.1`), never only the lockfile; and keeps
+the workflow refs pinned to a commit SHA with the `# vX.Y.Z` comment kit reads.
 
 ## Shell completion
 
