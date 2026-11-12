@@ -8,7 +8,8 @@ export default defineCommand({
     'kit device boot ios\nkit device boot android --device pixel_10_pro_xl --yes\nkit device boot ipad --json',
   async run(ctx) {
     const { requireProject } = await import('../../cli/command')
-    const { bootDevice, familyOf, listDevices, parseTarget, platformOf } = await import('../../lib/devices')
+    const { bootDevice, familyOf, listDevices, noteEmulatorArgsNotApplied, parseTarget, platformOf } =
+      await import('../../lib/devices')
     const { preferredAmong } = await import('../../lib/devices/pick')
     const { emitJson } = await import('../../lib/log')
     const { root, config } = requireProject(ctx)
@@ -22,6 +23,7 @@ export default defineCommand({
         const device = preferredAmong(platformOf(target), running, familyOf(target))
         if (ctx.flags.json) emitJson({ target, id: device.id, booted: true })
         else ctx.log.success(`Already running: ${device.label}`)
+        if (device.id.startsWith('emulator-')) noteEmulatorArgsNotApplied(env)
         return
       }
     }

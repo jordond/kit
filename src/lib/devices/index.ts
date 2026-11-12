@@ -7,6 +7,7 @@ import { ExitCode, KitError } from '../errors'
 import type { Logger } from '../log'
 import { exitOf, runPiped, spawnDetached } from '../proc'
 import { confirm, select } from '../prompt'
+import { EMULATOR_ARGS_SOURCES, emulatorArgs } from './emulator-args'
 import {
   type DeviceOption,
   isIpadName,
@@ -288,6 +289,12 @@ export async function resolveDevice(env: DeviceEnv, target: DeviceTarget, flag?:
   if (flag !== undefined && flag !== '') return flag
   const devices = await listDevices(env, target)
   if (devices.length === 0) return await bootDevice(env, target)
+  const id = await runningDevice(env, target, devices)
+  if (id.startsWith('emulator-')) noteEmulatorArgsNotApplied(env)
+  return id
+}
+
+async function runningDevice(env: DeviceEnv, target: DeviceTarget, devices: DeviceOption[]): Promise<string> {
   const [only] = devices
   if (devices.length === 1 && only !== undefined) {
     env.log.step(`using ${only.label}`)
@@ -333,12 +340,14 @@ async function pollUntil(
   probe: () => Promise<boolean>,
   /** Throws when what is being waited on can no longer happen (the emulator process died). */
   check?: () => void,
+  /** What a timeout adds under the message (the emulator's log); without it the message stands alone. */
+  timeoutHint?: () => string,
 ): Promise<void> {
   const deadline = Date.now() + bootTimeout()
   for (;;) {
     if (await probe()) return
     check?.()
-    if (Date.now() >= deadline) throw new KitError(`Gave up waiting for ${what}`)
+    if (Date.now() >= deadline) throw new KitError(`Gave up waiting for ${what}`, timeoutHint?.())
     await Bun.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())))
   }
 }
@@ -445,7 +454,20 @@ const pixelLabel = (device: string): string =>
     .replace(/\b\w/g, (c) => c.toUpperCase())
     .replace(' Xl', ' XL')
 
+/**
+ * An emulator that was already running keeps the arguments it was started with; say so once when
+ * the project or this machine asks for extra ones.
+ */
+export function noteEmulatorArgsNotApplied(env: Pick<DeviceEnv, 'config' | 'log'>): void {
+  const extra = emulatorArgs(env.config)
+  if (extra.length) {
+    env.log.dim(`  emulator args not applied (the emulator was already running): ${extra.join(' ')}`)
+  }
+}
+
 async function bootEmulator(env: DeviceEnv, name?: string): Promise<string> {
+  // Read first: a refused argument stops the run before anything is asked or created.
+  const extra = emulatorArgs(env.config)
   const sdk = androidSdkDir(env.root, env.config)
   const emulator = emulatorBin(env)
   const avds = await listAvds(env)
@@ -468,6 +490,7 @@ async function bootEmulator(env: DeviceEnv, name?: string): Promise<string> {
     const serial = await emulatorSerial(env, avd)
     if (serial !== undefined) {
       env.log.step(`using ${serial} (${label})`)
+      noteEmulatorArgsNotApplied(env)
       return serial
     }
     await confirmBoot(env, `Boot the ${label} emulator?`)
@@ -504,21 +527,34 @@ async function bootEmulator(env: DeviceEnv, name?: string): Promise<string> {
     }
   }
 
+  if (extra.length) env.log.dim(`  emulator args: ${extra.join(' ')}`)
   if (env.flags.dryRun) return avd
   if (create) await createAvd(env, avd, create.device, create.image)
 
   const headless = env.flags.ci ? ['-no-window', '-no-audio', '-no-boot-anim'] : []
   const logFile = join(tmpdir(), `kit-emulator-${avd}.log`)
-  const proc = spawnDetached([emulator, '-avd', avd, ...headless], logFile)
+  // The child writes from the start of the file without truncating it: empty it, or a shorter log
+  // ends in the last boot's lines and the tail shown on a failure is the wrong run's.
+  writeFileSync(logFile, '')
+  const proc = spawnDetached([emulator, '-avd', avd, ...headless, ...extra], logFile)
   // An emulator that dies at once (no hypervisor, a locked AVD) would otherwise cost the whole timeout.
+  const logTail = (): string =>
+    existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').slice(-5).join('\n') : ''
   const alive = (): void => {
     const exit = exitOf(proc)
     if (exit === undefined) return
-    const tail = existsSync(logFile)
-      ? readFileSync(logFile, 'utf8').trim().split('\n').slice(-5).join('\n')
-      : ''
+    const tail = logTail()
     throw new KitError(`The ${avd} emulator exited (${exit})`, tail || `See ${logFile}`)
   }
+  // A boot that hangs (a stale netsimd, a flag the image needs) is only explained by the emulator's log.
+  const stuck = (): string =>
+    [
+      logTail(),
+      `See ${logFile}`,
+      `If the emulator needs other arguments to boot, set ${EMULATOR_ARGS_SOURCES}`,
+    ]
+      .filter(Boolean)
+      .join('\n')
   env.log.dim(`  booting ${avd}…`)
   let serial: string | undefined
   await pollUntil(
@@ -528,6 +564,7 @@ async function bootEmulator(env: DeviceEnv, name?: string): Promise<string> {
       return serial !== undefined
     },
     alive,
+    stuck,
   )
   const found = serial!
   await pollUntil(
@@ -537,6 +574,7 @@ async function bootEmulator(env: DeviceEnv, name?: string): Promise<string> {
       return stdout.trim() === '1'
     },
     alive,
+    stuck,
   )
   env.log.step(`using ${found} (${label})`)
   return found

@@ -167,6 +167,19 @@ export const configSchema = z
       })
       .strict()
       .optional(),
+    /** The devices kit boots: `kit device boot`, and every command that boots through it. */
+    devices: z
+      .object({
+        android: z
+          .object({
+            /** Extra arguments for `emulator -avd <avd>` (`['-feature', '-HardwareDecoder']`); `KIT_EMULATOR_ARGS` adds this machine's. */
+            emulatorArgs: z.array(z.string().min(1)).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
     /** Maestro flows: `kit qa`, `kit shots`, `kit maestro`. */
     maestro: z
       .object({

@@ -150,6 +150,145 @@ describe('kit device boot (android)', () => {
   })
 })
 
+describe('emulator args (android)', () => {
+  const HEADLESS = '-no-window -no-audio -no-boot-anim'
+  const boot = ['device', 'boot', 'android', '--device', 'Pixel_Test', '--yes']
+  const emulatorLine = (): string | undefined => argv().find((l) => l.startsWith('emulator -avd'))
+  const configure = (args: string[]): void =>
+    writeFileSync(
+      join(f.dir, 'kit.config.ts'),
+      `export default { name: 'Devices', gradle: { root: '.' }, devices: { android: { emulatorArgs: ${JSON.stringify(args)} } } }\n`,
+    )
+
+  test('with none configured the emulator gets only the AVD', async () => {
+    const r = await run(boot, { CI: '' })
+    expect(r.code).toBe(0)
+    expect(emulatorLine()).toBe('emulator -avd Pixel_Test')
+    expect(r.stderr).not.toContain('emulator args')
+  })
+
+  test('in CI the headless flags follow the AVD', async () => {
+    expect((await run(boot)).code).toBe(0)
+    expect(emulatorLine()).toBe(`emulator -avd Pixel_Test ${HEADLESS}`)
+  })
+
+  test('config args are passed and printed', async () => {
+    configure(['-feature', '-HardwareDecoder'])
+    const r = await run(boot, { CI: '' })
+    expect(r.code).toBe(0)
+    expect(emulatorLine()).toBe('emulator -avd Pixel_Test -feature -HardwareDecoder')
+    expect(r.stderr).toContain('  emulator args: -feature -HardwareDecoder')
+  })
+
+  test('KIT_EMULATOR_ARGS is split and passed', async () => {
+    const r = await run(boot, { CI: '', KIT_EMULATOR_ARGS: '  -packet-streamer-endpoint   default ' })
+    expect(r.code).toBe(0)
+    expect(emulatorLine()).toBe('emulator -avd Pixel_Test -packet-streamer-endpoint default')
+    expect(r.stderr).toContain('  emulator args: -packet-streamer-endpoint default')
+  })
+
+  test('order: the AVD, the CI headless flags, config args, then KIT_EMULATOR_ARGS', async () => {
+    configure(['-feature', '-HardwareDecoder'])
+    const r = await run(boot, { KIT_EMULATOR_ARGS: '-packet-streamer-endpoint default' })
+    expect(r.code).toBe(0)
+    expect(emulatorLine()).toBe(
+      `emulator -avd Pixel_Test ${HEADLESS} -feature -HardwareDecoder -packet-streamer-endpoint default`,
+    )
+  })
+
+  test('--dry-run prints the args and boots nothing', async () => {
+    configure(['-feature', '-HardwareDecoder'])
+    const r = await run([...boot, '--dry-run'])
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('  emulator args: -feature -HardwareDecoder')
+    expect(emulatorLine()).toBeUndefined()
+  })
+
+  test('-avd in the config is a usage error: kit picks the AVD', async () => {
+    configure(['-avd', 'Other'])
+    const r = await run(boot)
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('devices.android.emulatorArgs cannot hold -avd')
+    expect(emulatorLine()).toBeUndefined()
+  })
+
+  test('@name in KIT_EMULATOR_ARGS is a usage error', async () => {
+    const r = await run(boot, { KIT_EMULATOR_ARGS: '@Other -no-snapshot' })
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('KIT_EMULATOR_ARGS cannot hold @Other')
+    expect(emulatorLine()).toBeUndefined()
+  })
+
+  test('an emulator already running is used as is, with one note that the args were not applied', async () => {
+    configure(['-feature', '-HardwareDecoder'])
+    writeFileSync(join(f.dir, '.up'), '')
+    const note = 'emulator args not applied (the emulator was already running): -feature -HardwareDecoder -x'
+    for (const args of [
+      boot,
+      ['device', 'boot', 'android'],
+      ['device', 'statusbar', 'android', '--dry-run'],
+    ]) {
+      const r = await run(args, { KIT_EMULATOR_ARGS: '-x' })
+      expect(r.code).toBe(0)
+      expect(r.stderr.split(note).length).toBe(2)
+    }
+    expect(emulatorLine()).toBeUndefined()
+  })
+
+  test('an emulator already running prints no note when no args are configured', async () => {
+    writeFileSync(join(f.dir, '.up'), '')
+    const r = await run(boot)
+    expect(r.code).toBe(0)
+    expect(r.stderr).not.toContain('emulator args')
+  })
+
+  const logFile = join(tmpdir(), 'kit-emulator-Pixel_Test.log')
+  const hint =
+    'If the emulator needs other arguments to boot, set `devices.android.emulatorArgs` in kit.config.ts or `KIT_EMULATOR_ARGS`'
+
+  test('a boot that never reaches adb times out with the emulator log tail, its path and the hint', async () => {
+    fake(
+      'emulator',
+      `
+case "$1" in
+  -list-avds) echo Pixel_Test;;
+  -avd) for n in 1 2 3 4 5 6 7; do echo "netsim line $n"; done; exec sleep 4;;
+esac
+exit 0`,
+    )
+    const r = await run(boot, { KIT_DEVICE_TIMEOUT_MS: '1500' })
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('Gave up waiting for Pixel_Test to appear in adb devices')
+    expect(r.stderr).toContain(
+      ['netsim line 3', 'netsim line 4', 'netsim line 5', 'netsim line 6', 'netsim line 7'].join('\n'),
+    )
+    expect(r.stderr).not.toContain('netsim line 2')
+    expect(r.stderr).toContain(`See ${logFile}`)
+    expect(r.stderr).toContain(hint)
+  })
+
+  test('a boot that never completes times out the same way', async () => {
+    fake(
+      'emulator',
+      `
+case "$1" in
+  -list-avds) echo Pixel_Test;;
+  -avd) touch "$UP"; echo "stuck on boot animation"; exec sleep 4;;
+esac
+exit 0`,
+    )
+    fake('adb', adbFake.replace('*getprop*) echo 1;', '*getprop*) echo 0;'))
+    const r = await run(boot, { KIT_DEVICE_TIMEOUT_MS: '1500' })
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('Gave up waiting for Pixel_Test to finish booting')
+    expect(r.stderr).toContain('stuck on boot animation')
+    // The log is this boot's alone: nothing of an earlier, longer one is left under it.
+    expect(r.stderr).not.toContain('netsim line')
+    expect(r.stderr).toContain(`See ${logFile}`)
+    expect(r.stderr).toContain(hint)
+  })
+})
+
 describe('kit device statusbar (android)', () => {
   test('pins the status bar through demo mode', async () => {
     writeFileSync(join(f.dir, '.up'), '')
