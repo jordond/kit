@@ -14,6 +14,7 @@ Develop
   kotlin      Run the Kotlin toolchain wrapper in toolchain.root
   wrangler    Run wrangler in a worker target's directory
   xcode       Open the iOS project in Xcode
+  clean       Remove build output
 
 Quality
   lint        Lint every target
@@ -127,16 +128,18 @@ Examples
   kit build client --release
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --release  Gradle or Kotlin toolchain: the signed release bundle (AAB)
-      --apk      Gradle: the signed release APK
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+      --release        Gradle or Kotlin toolchain: the signed release bundle (AAB)
+      --apk            Gradle: the signed release APK
 
 "
 `;
@@ -151,6 +154,35 @@ Examples
   kit check
   kit check api admin web
   kit check --fix
+  kit check --affected
+
+Options
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+  -f, --fix            Format instead of lint, then typecheck
+
+"
+`;
+
+exports[`help kit clean --help 1`] = `
+"Remove build output
+
+Usage
+  kit clean [options]
+
+Examples
+  kit clean
+  kit clean client
+  kit clean --dry-run
+  kit clean --deep --yes
 
 Options
   -h, --help     Show help
@@ -161,7 +193,7 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
-  -f, --fix      Format instead of lint, then typecheck
+      --deep     Also node_modules, .wrangler/state (local D1/KV data) and Xcode DerivedData
 
 "
 `;
@@ -549,16 +581,18 @@ Examples
   kit format --check
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --check    Check only (runs each target's lint command)
-      --staged   Only targets with staged files; workspace commands get the files
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+      --check          Check only (runs each target's lint command)
+      --staged         Only targets with staged files; workspace commands get the files
 
 "
 `;
@@ -639,16 +673,18 @@ Examples
   kit lint --staged --fix
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-  -f, --fix      Apply fixes (runs each target's format command)
-      --staged   Only targets with staged files; workspace commands get the files
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+  -f, --fix            Apply fixes (runs each target's format command)
+      --staged         Only targets with staged files; workspace commands get the files
 
 "
 `;
@@ -747,16 +783,19 @@ Examples
   kit test
   kit test api
   kit test client -- --rerun
+  kit test --affected --base origin/develop
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
 
 "
 `;
@@ -771,14 +810,16 @@ Examples
   kit typecheck
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
 
 "
 `;
