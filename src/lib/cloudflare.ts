@@ -179,6 +179,8 @@ export interface D1Database {
   name: string
   target: string
   default?: boolean
+  /** SQL file `kit db seed` runs, relative to the repo root. */
+  seed?: string
 }
 
 /**
@@ -213,6 +215,7 @@ export type D1Action =
   | { kind: 'list'; remote: boolean }
   | { kind: 'create'; migration: string }
   | { kind: 'exec'; remote: boolean; sql?: string; file?: string; json?: boolean }
+  | { kind: 'export'; remote: boolean; output: string }
 
 /** `wrangler d1 …` args for an action. Wrangler finds `migrations_dir` from its d1_databases entry. */
 export function d1Args(db: D1Database, action: D1Action): string[] {
@@ -234,6 +237,8 @@ export function d1Args(db: D1Database, action: D1Action): string[] {
         ...(action.json ? ['--json'] : []),
       ]
     }
+    case 'export':
+      return ['d1', 'export', db.name, locality(action.remote), '--output', action.output]
   }
 }
 
@@ -249,21 +254,56 @@ export const remoteArg = {
   remote: { type: 'boolean', description: 'Deployed D1 (default: local)' },
 } as const
 
+/** `backups/<db>-<UTC timestamp>.sql` under the repo root: where `kit db backup` writes by default. */
+export function backupFile(root: string, db: D1Database, now = new Date()): string {
+  const stamp = now
+    .toISOString()
+    .replace(/\.\d+Z$/, 'Z')
+    .replace(/[-:]/g, '')
+  return join(root, 'backups', `${db.name}-${stamp}.sql`)
+}
+
+/** The database's `seed` file as an absolute path; exit 3 when none is configured or it is missing. */
+export function seedFile(root: string, db: D1Database): string {
+  if (!db.seed) {
+    throw new KitError(
+      `No seed file for ${db.name}`,
+      `Set cloudflare.d1.${db.key}.seed in kit.config.ts, e.g. 'apps/${db.target}/seed.sql'`,
+      ExitCode.config,
+    )
+  }
+  const file = resolve(root, db.seed)
+  if (!existsSync(file)) {
+    throw new KitError(
+      `Seed file ${db.seed} not found`,
+      `cloudflare.d1.${db.key}.seed is relative to the repo root`,
+      ExitCode.config,
+    )
+  }
+  return file
+}
+
+/** How a `runD1` call ended. A dry run of a mutation runs nothing. */
+export type D1Outcome = 'ok' | 'failed' | 'dry-run'
+
 /**
  * Body of `kit db …`: resolve the database, pin the account, print the plan on --dry-run, confirm
  * remote mutations, run wrangler from the database's target dir with inherited stdio (wrangler's own
  * "apply N migrations?" prompt works). `--json` captures wrangler's output into one document, except
  * `exec`, where wrangler's `--json` result is the document.
+ *
+ * `confirm` defaults to `mutates`: a backup writes a local file (so --dry-run skips it) but changes
+ * nothing remote. `json` adds fields to the document kit writes (`file` for a backup).
  */
 export async function runD1(
   ctx: Pick<KitContext, 'root' | 'config' | 'flags' | 'log'> & { args: { db?: string } },
   action: D1Action,
-  opts: { mutates: boolean },
-): Promise<void> {
+  opts: { mutates: boolean; confirm?: boolean; json?: Record<string, unknown> },
+): Promise<D1Outcome> {
   const { requireProject } = await import('../cli/command')
   const { confirm } = await import('./prompt')
   const { emitJson } = await import('./log')
-  const { run, runQuiet } = await import('./proc')
+  const { run, runQuiet, runToStderr } = await import('./proc')
   const { root, config } = requireProject(ctx)
   const db = resolveD1(config, ctx.args.db)
   const remote = 'remote' in action && action.remote
@@ -273,26 +313,58 @@ export async function runD1(
 
   if (ctx.flags.dryRun && opts.mutates) {
     if (ctx.flags.json)
-      emitJson({ dryRun: true, db: db.name, remote, cmd: w.cmd, cwd: relative(root, w.cwd) })
+      emitJson({ dryRun: true, db: db.name, remote, ...opts.json, cmd: w.cmd, cwd: relative(root, w.cwd) })
     else ctx.log.step(shown)
-    return
+    return 'dry-run'
   }
   pinCloudflareAccount(root, config)
-  if (opts.mutates && remote && !(await confirm(ctx.flags, `Run against remote ${db.name}?`))) {
+  if (
+    (opts.confirm ?? opts.mutates) &&
+    remote &&
+    !(await confirm(ctx.flags, `Run against remote ${db.name}?`))
+  ) {
     throw new KitError('Cancelled', undefined, ExitCode.interrupted)
   }
   if (!ctx.flags.json) ctx.log.dim(shown)
   if (ctx.flags.json && !passJson) {
     const { code, output } = await runQuiet(w.cmd, { cwd: w.cwd })
-    emitJson({ db: db.name, remote, ok: code === 0, output })
+    emitJson({ db: db.name, remote, ...opts.json, ok: code === 0, output })
     if (code !== 0) process.exitCode = ExitCode.failed
-    return
+    return code === 0 ? 'ok' : 'failed'
   }
-  const code = await run(w.cmd, { cwd: w.cwd })
+  // An export's result is the file; wrangler's progress must not land on stdout beside its path.
+  const code = await (action.kind === 'export' ? runToStderr : run)(w.cmd, { cwd: w.cwd })
   if (code !== 0) process.exitCode = ExitCode.failed
+  return code === 0 ? 'ok' : 'failed'
 }
 
 /** SQLite string literal (doubles embedded `'`). Values go to wrangler as one argv element, never a shell. */
 export function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
+}
+
+/** Every table of a database, for the "is it empty" check before a remote restore. */
+export const TABLES_SQL = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+
+/**
+ * User tables from `d1 execute --json` output for `TABLES_SQL` (`[{ results: [{ name }] }]`), leaving
+ * out SQLite's and Cloudflare's own (`sqlite_*`, `_cf_*`). Undefined when the output is not that shape.
+ */
+export function d1Tables(stdout: string): string[] | undefined {
+  try {
+    const parsed: unknown = JSON.parse(stdout)
+    const first: unknown = Array.isArray(parsed) ? parsed[0] : parsed
+    if (!first || typeof first !== 'object' || !('results' in first)) return undefined
+    const { results } = first as { results: unknown }
+    if (!Array.isArray(results)) return undefined
+    const names: string[] = []
+    for (const row of results) {
+      const name: unknown = row && typeof row === 'object' ? (row as { name?: unknown }).name : undefined
+      if (typeof name !== 'string') return undefined
+      if (!name.startsWith('sqlite_') && !name.startsWith('_cf_')) names.push(name)
+    }
+    return names
+  } catch {
+    return undefined
+  }
 }

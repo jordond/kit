@@ -294,7 +294,18 @@ export interface ScaffoldInput {
   list?: (dir: string) => string[]
 }
 
-const fill = (text: string, vars: Record<string, string>) =>
+/** Where Renovate looks for a repo's config; the templates write the first. */
+export const RENOVATE_FILES = [
+  'renovate.json',
+  'renovate.json5',
+  '.github/renovate.json',
+  '.github/renovate.json5',
+  '.renovaterc',
+  '.renovaterc.json',
+  '.renovaterc.json5',
+]
+
+export const fill = (text: string, vars: Record<string, string>) =>
   text.replace(/\{\{(\w+)\}\}/g, (m, k: string) => vars[k] ?? m)
 
 /** Every file the template would put in the repo, in a stable order. */
@@ -330,17 +341,24 @@ export function planScaffold(input: ScaffoldInput): FileAction[] {
     )
   }
   for (const [path, content] of wanted) {
+    // Renovate reads its config from several places: any of them means the repo already has one.
+    const present = [path, ...(path === RENOVATE_FILES[0] ? RENOVATE_FILES : [])].find(
+      (f) => read(f) !== undefined,
+    )
     plan.push(
-      read(path) === undefined ? { kind: 'write', path, content } : { kind: 'skip', path, reason: 'exists' },
+      present === undefined
+        ? { kind: 'write', path, content }
+        : { kind: 'skip', path, reason: present === path ? 'exists' : `${present} exists` },
     )
   }
 
-  const ignore = withGitignore(read('.gitignore'), ['node_modules/', '.env'])
+  // backups/: `kit db backup --remote` writes production dumps there.
+  const ignore = withGitignore(read('.gitignore'), ['node_modules/', '.env', 'backups/'])
   if (ignore !== undefined) {
     plan.push(
       read('.gitignore') === undefined
         ? { kind: 'write', path: '.gitignore', content: ignore }
-        : { kind: 'edit', path: '.gitignore', content: ignore, note: 'add node_modules/ and .env' },
+        : { kind: 'edit', path: '.gitignore', content: ignore, note: 'add node_modules/, .env and backups/' },
     )
   }
   if (facts) {

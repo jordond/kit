@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, expect, describe as group, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  changedFiles,
   currentBranch,
+  defaultBase,
   describe,
   dirtyFiles,
   isClean,
   logSince,
+  mergeBase,
   push,
   stagedFiles,
   tag,
@@ -119,6 +122,124 @@ group('git', () => {
       expect(r.stdout.toString().trim()).toBe('v1')
     } finally {
       rmSync(remote, { recursive: true, force: true })
+    }
+  })
+})
+
+group('changedFiles (--affected)', () => {
+  test('defaultBase: origin/HEAD, then origin/main, then main, then nothing', async () => {
+    expect(await defaultBase(dir)).toBe('main')
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+    expect(await defaultBase(dir)).toBe('origin/main')
+    git('update-ref', 'refs/remotes/origin/develop', 'HEAD')
+    git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/develop')
+    expect(await defaultBase(dir)).toBe('origin/develop')
+    git('checkout', '-q', '-b', 'feature')
+    git('branch', '-q', '-D', 'main')
+    git('symbolic-ref', '-d', 'refs/remotes/origin/HEAD')
+    git('update-ref', '-d', 'refs/remotes/origin/main')
+    expect(await defaultBase(dir)).toBeUndefined()
+  })
+
+  test('mergeBase: the fork point, undefined for an unknown ref', async () => {
+    const fork = git('rev-parse', 'HEAD')
+    git('checkout', '-q', '-b', 'feature')
+    commit('b.txt', 'feat: branch')
+    git('checkout', '-q', 'main')
+    commit('c.txt', 'feat: main moved on')
+    git('checkout', '-q', 'feature')
+    expect(await mergeBase('main', dir)).toBe(fork)
+    expect(await mergeBase('nope', dir)).toBeUndefined()
+  })
+
+  test('nothing changed on the base itself', async () => {
+    expect(await changedFiles(dir)).toEqual({ base: 'main', files: [], headIsBase: true })
+  })
+
+  test('commits on the branch plus staged, unstaged, untracked and deleted files', async () => {
+    commit('gone.txt', 'feat: to delete')
+    git('checkout', '-q', '-b', 'feature')
+    mkdirSync(join(dir, 'sub'))
+    commit('sub/committed.txt', 'feat: committed')
+    // main moving on does not count: only what the branch changed since the fork.
+    git('checkout', '-q', '--detach', 'main')
+    commit('main-only.txt', 'feat: main moved on')
+    git('branch', '-q', '-f', 'main', 'HEAD')
+    git('checkout', '-q', 'feature')
+    writeFileSync(join(dir, 'staged.txt'), 'staged')
+    git('add', 'staged.txt')
+    writeFileSync(join(dir, 'a.txt'), 'unstaged edit')
+    writeFileSync(join(dir, 'untracked é.txt'), 'new')
+    rmSync(join(dir, 'gone.txt'))
+    expect(await changedFiles(dir)).toEqual({
+      base: 'main',
+      files: ['a.txt', 'gone.txt', 'staged.txt', 'sub/committed.txt', 'untracked é.txt'],
+      headIsBase: false,
+    })
+  })
+
+  test('ignored files do not count; an explicit base is used as given', async () => {
+    commit('.gitignore', 'build/\n')
+    commit('b.txt', 'feat: second')
+    mkdirSync(join(dir, 'build'))
+    writeFileSync(join(dir, 'build/out.txt'), 'x')
+    expect(await changedFiles(dir, 'HEAD~1')).toEqual({ base: 'HEAD~1', files: ['b.txt'], headIsBase: false })
+  })
+
+  test('a moved file lists its old and its new path, committed or only staged', async () => {
+    mkdirSync(join(dir, 'api'))
+    mkdirSync(join(dir, 'web'))
+    commit('api/util.ts', 'export const util = () => "a helper long enough for rename detection"\n')
+    commit('api/other.ts', 'export const other = () => "another helper long enough to be detected"\n')
+    git('checkout', '-q', '-b', 'feature')
+    git('mv', 'api/util.ts', 'web/util.ts')
+    git('commit', '-q', '-m', 'refactor: move util')
+    git('mv', 'api/other.ts', 'web/other.ts')
+    expect((await changedFiles(dir))!.files).toEqual([
+      'api/other.ts',
+      'api/util.ts',
+      'web/other.ts',
+      'web/util.ts',
+    ])
+  })
+
+  test('kit root below the git toplevel: changes outside it come back as ../ paths', async () => {
+    mkdirSync(join(dir, 'tools/kit/apps'), { recursive: true })
+    commit('tools/kit/kit.config.ts', 'config')
+    git('checkout', '-q', '-b', 'feature')
+    commit('tools/kit/apps/a.ts', 'feat: inside')
+    commit('bun.lock', 'chore: lockfile')
+    mkdirSync(join(dir, '.github'))
+    writeFileSync(join(dir, '.github/ci.yml'), 'untracked')
+    writeFileSync(join(dir, 'tools/other.txt'), 'untracked sibling')
+    expect(await changedFiles(join(dir, 'tools/kit'))).toEqual({
+      base: 'main',
+      files: ['../../.github/ci.yml', '../../bun.lock', '../other.txt', 'apps/a.ts'],
+      headIsBase: false,
+    })
+  })
+
+  test('stagedFiles below the git toplevel: relative to the kit root, outside files left out', async () => {
+    mkdirSync(join(dir, 'tools/kit/apps/api'), { recursive: true })
+    writeFileSync(join(dir, 'tools/kit/apps/api/a.ts'), 'x')
+    writeFileSync(join(dir, 'tools/kit/b é.ts'), 'x')
+    writeFileSync(join(dir, 'root.lock'), 'x')
+    git('add', '-A')
+    expect((await stagedFiles(join(dir, 'tools/kit'))).sort()).toEqual(['apps/api/a.ts', 'b é.ts'])
+    expect((await stagedFiles(dir)).sort()).toEqual([
+      'root.lock',
+      'tools/kit/apps/api/a.ts',
+      'tools/kit/b é.ts',
+    ])
+  })
+
+  test('an unknown base, or no repo at all, is undefined (callers run everything)', async () => {
+    expect(await changedFiles(dir, 'origin/nope')).toBeUndefined()
+    const bare = mkdtempSync(join(tmpdir(), 'kit-nogit-'))
+    try {
+      expect(await changedFiles(bare)).toBeUndefined()
+    } finally {
+      rmSync(bare, { recursive: true, force: true })
     }
   })
 })

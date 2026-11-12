@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { dotenvValue } from '../lib/dotenv'
 import { ExitCode, KitError } from '../lib/errors'
 import { configSchema, type KitConfig } from './schema'
 
@@ -66,7 +67,7 @@ export async function loadDotEnv(root: string): Promise<void> {
     if (!m) continue
     const [, key, raw] = m as unknown as [string, string, string]
     if (process.env[key] !== undefined) continue
-    process.env[key] = raw.replace(/^(['"])(.*)\1$/, '$2')
+    process.env[key] = dotenvValue(raw, 'env')
   }
 }
 

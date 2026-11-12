@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import pkg from '../../package.json' with { type: 'json' }
 import { CATALOG_KEYS, checkCatalogKeys, checkCiPin, parseEnvKeys } from '../../src/commands/doctor'
 import { configSchema } from '../../src/config/schema'
+import { stripJsonc } from '../../src/lib/cloudflare'
 import { usesRef } from '../../src/lib/kitref'
 import { parseToml } from '../../src/lib/toml'
 
@@ -64,6 +65,12 @@ describe('templates/gradle', () => {
     expect(render('apps/client/fastlane/Fastfile').trim().split('\n')).toEqual([
       'import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via `kit fastlane ...` or `kit release ...`") })',
     ])
+  })
+
+  test('renovate.json extends the kit preset', () => {
+    const config = JSON.parse(render('renovate.json', NEW)) as { extends: string[] }
+    expect(config.extends).toEqual(['config:recommended', 'github>jordond/kit//renovate/default'])
+    expect(existsSync(join(KIT, 'renovate/default.json'))).toBe(true)
   })
 
   test('settings.gradle.kts resolves kit plugins from node_modules and applies kit.settings', () => {
@@ -135,7 +142,89 @@ describe('templates/toolchain', () => {
     expect(render('fastlane/Fastfile', TOOLCHAIN)).toBe(render('apps/client/fastlane/Fastfile'))
   })
 
+  test('renovate.json extends the kit preset', () => {
+    const config = JSON.parse(render('renovate.json', TOOLCHAIN)) as { extends: string[] }
+    expect(config.extends).toEqual(['config:recommended', 'github>jordond/kit//renovate/default'])
+    expect(existsSync(join(KIT, 'renovate/default.json'))).toBe(true)
+  })
+
   test('.editorconfig styles Kotlin for ktlint', () => {
     expect(render('.editorconfig', TOOLCHAIN)).toContain('[*.{kt,kts}]\nindent_size = 2')
+  })
+})
+
+// templates/add: what `kit add module` and `kit add target` write (src/lib/add/plan.ts fills them).
+describe('templates/add', () => {
+  const ADD = join(KIT, 'templates/add')
+  const ADD_VARS: Record<string, string> = {
+    compose: '\n    id("io.github.jordond.kit.compose")',
+    targets: '        android()\n        jvm()',
+    package: 'com.example.app.core',
+    module: ':core',
+    platforms: 'android, jvm',
+    settings: '\nsettings:\n  compose:\n    enabled: true',
+    worker: 'api',
+    date: '2026-01-02',
+  }
+  const add = (file: string) => {
+    const text = readFileSync(join(ADD, file), 'utf8').replace(
+      /\{\{(\w+)\}\}/g,
+      (m, k: string) => ADD_VARS[k] ?? m,
+    )
+    expect(text).not.toMatch(/\{\{\w+\}\}/)
+    return text
+  }
+
+  test('every file is one the plans render, and nothing lands in the init templates', () => {
+    const files = [...new Bun.Glob('**/*').scanSync({ cwd: ADD, onlyFiles: true, dot: true })].sort()
+    expect(files).toEqual([
+      'Placeholder.kt',
+      'gradle-module/build.gradle.kts',
+      'toolchain-module/module.yaml',
+      'worker/package.json',
+      'worker/src/index.ts',
+      'worker/tsconfig.json',
+      'worker/wrangler.jsonc',
+    ])
+    for (const file of files) add(file)
+  })
+
+  test('gradle module: only kit plugin ids, and the kit { targets { } } block', () => {
+    const text = add('gradle-module/build.gradle.kts')
+    expect([...text.matchAll(/id\("([^"]+)"\)/g)].map((m) => m[1])).toEqual([
+      'io.github.jordond.kit.kmp.library',
+      'io.github.jordond.kit.compose',
+    ])
+    expect(text).toContain('kit {\n    targets {\n        android()\n        jvm()\n    }\n}')
+    expect(add('Placeholder.kt')).toStartWith('package com.example.app.core\n')
+  })
+
+  test('toolchain module.yaml parses as a kmp/lib product', () => {
+    expect(Bun.YAML.parse(add('toolchain-module/module.yaml'))).toEqual({
+      product: { type: 'kmp/lib', platforms: ['android', 'jvm'] },
+      settings: { compose: { enabled: true } },
+    })
+  })
+
+  test('worker: JSON files parse; wrangler.jsonc has a name and no account id', () => {
+    const wrangler = JSON.parse(stripJsonc(add('worker/wrangler.jsonc')))
+    expect(wrangler).toMatchObject({ name: 'api', main: 'src/index.ts', compatibility_date: '2026-01-02' })
+    expect(wrangler).not.toHaveProperty('account_id')
+    expect(Object.keys(JSON.parse(add('worker/package.json')).scripts)).toEqual(
+      expect.arrayContaining(['dev', 'deploy', 'typecheck']),
+    )
+    expect(JSON.parse(add('worker/tsconfig.json')).compilerOptions.strict).toBe(true)
+  })
+
+  test('worker src/index.ts type-checks with its own tsconfig', () => {
+    const dir = join(tmp, 'worker')
+    cpSync(join(ADD, 'worker'), dir, { recursive: true })
+    writeFileSync(join(dir, 'src/index.ts'), add('worker/src/index.ts'))
+    const tsc = Bun.spawnSync([join(KIT, 'node_modules/.bin/tsc'), '-p', dir], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(`${tsc.stdout}${tsc.stderr}`).toBe('')
+    expect(tsc.exitCode).toBe(0)
   })
 })

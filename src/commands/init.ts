@@ -367,7 +367,8 @@ export default defineCommand({
 
     const describe = (a: FileAction) =>
       a.kind === 'write' ? `write ${a.path}` : a.kind === 'edit' ? `edit ${a.path}  ${pc.dim(a.note)}` : ''
-    const results: { title: string; ok: boolean; skipped?: string }[] = []
+    const results: { title: string; ok: boolean; skipped?: string; ms?: number }[] = []
+    const started = performance.now()
     if (!ctx.flags.dryRun) {
       for (const a of scaffold) {
         if (a.kind === 'skip') {
@@ -490,6 +491,7 @@ export default defineCommand({
         continue
       }
       if (say) ctx.log.step(a.title)
+      const stepStarted = performance.now()
       let ok = true
       if (a.kind === 'env-file') {
         // Secrets go in here: owner-only from creation, never the example's (usually 0644) mode.
@@ -527,11 +529,17 @@ export default defineCommand({
         ok = code === 0
         if (!ok && say) ctx.log.error(`${a.title} failed (exit ${code})`)
       }
-      results.push({ title: a.title, ok })
+      results.push({ title: a.title, ok, ms: Math.round(performance.now() - stepStarted) })
     }
 
     const failed = results.filter((r) => !r.ok).map((r) => r.title)
-    if (ctx.flags.json) emitJson({ ok: !failed.length, ...(template ? { template } : {}), steps: results })
+    if (ctx.flags.json)
+      emitJson({
+        ok: !failed.length,
+        ...(template ? { template } : {}),
+        steps: results,
+        ms: Math.round(performance.now() - started),
+      })
     else if (failed.length) ctx.log.error(`init failed: ${failed.join(', ')}`)
     else ctx.log.success('init complete')
     if (failed.length) process.exitCode = 1

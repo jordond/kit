@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { KitConfig } from '../../config/schema'
+import { type DotenvFormat, dotenvLine, dotenvValue } from '../dotenv'
 import type { EnvSchema, EnvValues } from './schema'
 
 /**
@@ -44,12 +45,14 @@ export function outputs(config: KitConfig, schema: EnvSchema): Output[] {
   })
 }
 
-/** One `.dev.vars` line. Multi-line values (a PEM) are double-quoted with `\n`, which dotenv expands. */
+/**
+ * One `.dev.vars` line. wrangler reads the file with dotenv, so values follow `dotenvLine`: quoted
+ * when bare would be cut or trimmed, multi-line values (a PEM) double-quoted with `\n`.
+ */
 function line(name: string, value: string | undefined, literal = false): string {
   if (!literal && (value === undefined || value === '')) return `# ${name}=\n`
   value ??= ''
-  if (/[\r\n]/.test(value)) return `${name}="${value.replace(/\r?\n/g, '\\n')}"\n`
-  return `${name}=${value}\n`
+  return `${dotenvLine(name, value, 'vars')}\n`
 }
 
 /** Render an output. Pure. */
@@ -61,7 +64,7 @@ export function render(output: Output, values: EnvValues): string {
 }
 
 /** Parse a rendered (or any dotenv) file into name → value; `# KEY=` placeholders read as ''. */
-export function parseDotenv(text: string): Record<string, string> {
+export function parseDotenv(text: string, format: DotenvFormat): Record<string, string> {
   const out: Record<string, string> = {}
   for (const raw of text.split('\n')) {
     const placeholder = /^#\s*([A-Za-z_][A-Za-z0-9_]*)=\s*$/.exec(raw.trim())
@@ -71,7 +74,7 @@ export function parseDotenv(text: string): Record<string, string> {
     }
     const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(raw)
     if (!m) continue
-    out[m[1]!] = m[2]!.replace(/^(['"])(.*)\1$/, '$2')
+    out[m[1]!] = dotenvValue(m[2]!, format)
   }
   return out
 }
@@ -84,8 +87,8 @@ export interface KeyDiff {
 
 /** Which names differ between two files. Names only; values never leave this function. */
 export function diffKeys(prev: string | null, next: string): KeyDiff {
-  const a = prev === null ? {} : parseDotenv(prev)
-  const b = parseDotenv(next)
+  const a = prev === null ? {} : parseDotenv(prev, 'vars')
+  const b = parseDotenv(next, 'vars')
   return {
     added: Object.keys(b).filter((k) => !(k in a)),
     updated: Object.keys(b).filter((k) => k in a && a[k] !== b[k]),

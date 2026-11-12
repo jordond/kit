@@ -3,6 +3,18 @@ import { z } from 'zod'
 export const verbs = ['lint', 'format', 'typecheck', 'test', 'build', 'dev', 'deploy'] as const
 export type Verb = (typeof verbs)[number]
 
+/** `kit release <name>` built-ins: a service cannot take one of these names. */
+export const RESERVED_SERVICE_NAMES = [
+  'ios',
+  'android',
+  'certs',
+  'status',
+  'promote',
+  'rollout',
+  'metadata',
+  'rollback',
+] as const
+
 export const kinds = ['gradle', 'kotlin', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
 
@@ -35,6 +47,8 @@ const target = z
     kind: z.enum(kinds),
     dir: z.string(),
     envs: z.array(z.string()).optional(),
+    /** `--affected`: repo-relative dirs or globs outside `dir` whose changes also affect this target. */
+    paths: z.array(z.string()).optional(),
     ...verbOverrides,
     deploy: deploy.optional(),
   })
@@ -111,6 +125,8 @@ export const configSchema = z
                 target: z.string(),
                 /** Used when `kit db` gets no --db and several are configured. */
                 default: z.boolean().optional(),
+                /** SQL file `kit db seed` runs, relative to the repo root. */
+                seed: z.string().optional(),
               })
               .strict(),
           )
@@ -136,6 +152,8 @@ export const configSchema = z
             xcconfig: z.string().optional(),
             testflightGroups: z.object({ alpha: z.string(), beta: z.string() }).partial().optional(),
             sentry: z.object({ org: z.string(), project: z.string() }).strict().optional(),
+            /** Store listing dir (deliver layout), relative to the repo root; screenshots sit in `screenshots/` next to it. */
+            metadata: z.string().optional(),
           })
           .strict()
           .optional(),
@@ -154,6 +172,8 @@ export const configSchema = z
                 }),
               )
               .optional(),
+            /** Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`), relative to the repo root. */
+            metadata: z.string().optional(),
           })
           .strict()
           .optional(),
@@ -195,6 +215,15 @@ export const configSchema = z
     }
     if (c.targets.workspace) {
       ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })
+    }
+    for (const name of Object.keys(c.release?.services ?? {})) {
+      if ((RESERVED_SERVICE_NAMES as readonly string[]).includes(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['release', 'services', name],
+          message: `"${name}" is a kit release command; rename the service`,
+        })
+      }
     }
   })
 

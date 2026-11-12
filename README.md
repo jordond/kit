@@ -41,8 +41,8 @@ kit init --template toolchain --dry-run
 
 | Template | Writes |
 | --- | --- |
-| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
-| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`. Add the Gradle wrapper and the modules yourself |
+| `toolchain` | `.kit/package.json`, `.kit/kit.config.ts`, `fastlane/Fastfile`, `.env.example`, `.editorconfig` (ktlint, 2-space), `mise.toml` (bun + ktlint, no java), `lefthook.yml`, `.github/workflows/{ci,distribute}.yml`, `renovate.json`; adds `node_modules/` and `.env` to `.gitignore` and `app-android-version` / `app-ios-version` to `libs.versions.toml` |
+| `gradle` | root `package.json`, `kit.config.ts`, `apps/client/{settings.gradle.kts,gradle/libs.versions.toml,fastlane/Fastfile}`, `.env.example`, `mise.toml`, `lefthook.yml`, `.github/workflows/ci.yml`, `renovate.json`. Add the Gradle wrapper and the modules yourself |
 
 - `toolchain` layers kit over an existing project and never writes a root `package.json`. Create the project
   first (`kotlin init`). A plain `kit init` there offers the template (`--yes` accepts it).
@@ -51,18 +51,70 @@ kit init --template toolchain --dry-run
   `jvm/app` module for `kit dev`. An id it cannot find is `com.example.<name>`: replace it before a release.
   CI tests the non-Apple platforms the modules declare (`--platform jvm --platform android …`).
 - Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
-- A file that already exists is kept; `.gitignore` and the catalog only gain lines.
+- A file that already exists is kept; `.gitignore` and the catalog only gain lines. `renovate.json` is
+  skipped when the repo has a Renovate config anywhere (`.github/renovate.json`, `.renovaterc`, …).
 
-## Upgrading
+## Adding modules and targets
+
+`kit add` scaffolds into a repo that already has kit. Both commands show the plan first, write nothing
+with `--dry-run`, and print the plan or result as one document with `--json`.
+
+```sh
+kit add module core                              # KMP library: android, ios, jvm
+kit add module feature:login --compose           # <gradle root>/feature/login, plus kit.compose
+kit add module data --targets android,jvm --dir libs/data
+kit add target api --kind worker --dir apps/api  # worker | vite | astro | docker | custom
+```
+
+| | Gradle (`gradle.root`) | Kotlin toolchain (`toolchain.root`) |
+| --- | --- | --- |
+| `kit add module <name>` writes | `build.gradle.kts` on kit's plugins only (`io.github.jordond.kit.kmp.library`, `…kit.compose` with `--compose`) with `kit { targets { … } }`, and `src/commonMain/kotlin/<package>/Placeholder.kt` | `module.yaml` (`kmp/lib`, the platforms of `--targets`; `--compose` enables Compose) and `src/Placeholder.kt` |
+| and registers it in | `settings.gradle.kts`: one `include(":<name>")` after the last include (plus a `projectDir` line when `--dir` is not the path) | `project.yaml`: one entry in `modules:`, in the list's own style |
+| Package | catalog `app-name` + the module path, the same rule the plugin uses for the Android namespace (`:feature:login` → `<app-name>.feature.login`) | the Android `applicationId` (or iOS bundle id) + the module name |
+
+- Module names follow Gradle's project name rules (letters, digits, `-`, `_`, a letter first); `:` nests and
+  maps to directories. The Kotlin toolchain names a module after its directory, so names do not nest there.
+- A file that already exists is never overwritten: the command lists them and exits 2. `--force` overwrites.
+  A module that is already included or listed is left as it is.
+- Every edit keeps the file's line endings and is read back before it is written. A `settings.gradle` gets
+  Groovy syntax (`include ':core'`). A settings file or `project.yaml` kit cannot edit safely is left
+  untouched: the line to add goes to stdout and the exit code is 1.
+- `kit add target` appends to `targets: { … }` in `kit.config.ts` (or `.kit/kit.config.ts`) with a text edit
+  that keeps the file as written, then loads the config to prove it. A config it cannot edit safely
+  (`targets` from a variable, a spread, a wrapper) is left untouched: the line to paste goes to stdout and
+  the exit code is 1. The name cannot be an existing target, `workspace`, or a kit command.
+- `--kind worker` with a `--dir` that does not exist yet also writes a minimal worker: `wrangler.jsonc`
+  (placeholder name, no account id), `src/index.ts`, `package.json`, `tsconfig.json`. An existing directory
+  is only registered; other kinds get an empty directory when it is missing.
+
+## Keeping kit up to date
+
+A repo pins kit twice: the `@jordond/kit` range in `package.json` (or `.kit/package.json`) and the
+`jordond/kit/…@<sha> # vX.Y.Z` refs in `.github/workflows`. Both must name the same release;
+`kit doctor --ci` fails when they differ.
+
+By hand:
 
 ```sh
 kit upgrade            # the latest release on npm
 kit upgrade 0.6.0
 ```
 
-Moves the `@jordond/kit` range in `package.json` (or `.kit/package.json`), runs the install, and rewrites
-every `jordond/kit/…@<sha> # vX.Y.Z` in `.github/workflows` to that release's tag commit, which is what
-`kit doctor --ci` compares. Re-running it repairs workflow pins that lag the npm pin.
+Moves the range, runs the install, and rewrites every workflow ref to that release's tag commit.
+Re-running it repairs workflow pins that lag the npm pin (`kit doctor --fix` does that part too).
+
+With Renovate, extend kit's preset (the `kit init` templates write this `renovate.json`):
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "github>jordond/kit//renovate/default"]
+}
+```
+
+The preset puts the npm package and the workflow refs in one group, so a kit release arrives as one
+PR; moves the `package.json` range itself (`^0.6.0` to `^0.6.1`), never only the lockfile; and keeps
+the workflow refs pinned to a commit SHA with the `# vX.Y.Z` comment kit reads.
 
 ## Shell completion
 
@@ -77,6 +129,67 @@ works outside a repo too. `kit init` offers to install it for your `$SHELL` when
 never in CI: fish gets its completions file; zsh and bash get the script in `~/.config/kit/` and a line
 in `~/.zshrc` (`~/.bash_profile` on macOS, else `~/.bashrc`) that sources it. Sourcing a file means no
 kit process runs when a shell starts.
+
+## Affected targets
+
+```sh
+kit check --affected                        # what this branch changed since origin/<default branch>
+kit test --affected --base origin/develop
+kit lint api web --affected                 # named targets ∩ affected ones
+```
+
+`lint`, `format`, `typecheck`, `check`, `test` and `build` take `--affected [--base <ref>]`: only the
+targets changed since the merge base with `<ref>` run, counting commits on the branch plus staged,
+unstaged and untracked files. The default base is `origin/<default branch>` (from `origin/HEAD`), then
+`origin/main`, then `main`; a base that doesn't exist runs everything, with a warning.
+
+A target is affected by a change under its `dir`, or under one of its `paths` (dirs or globs, for shared
+code that lives elsewhere):
+
+```ts
+targets: {
+  api: { kind: 'worker', dir: 'apps/api', paths: ['packages/shared', 'schema/**/*.sql'] },
+}
+```
+
+A glob that matches a directory (`packages/*`) claims everything under it, and a `!` entry excludes:
+`paths: ['packages/shared', '!**/*.md']`. Exclusions apply after the other entries and never to `dir`;
+a file a target claims and then excludes is ignored (it does not count as unclaimed).
+
+When HEAD is the default base itself with a clean tree (a push build of `main`), there is nothing to
+compare: every target runs, with a warning, and `--json` adds `reason: "head-is-base"`. Pass
+`--base HEAD~1` or the previous release tag there. With an explicit `--base`, no difference means
+nothing runs. When `kit.config.ts` sits below the git root, a change outside it counts as unclaimed.
+
+A changed file that no target claims (the root lockfile, `kit.config.ts`, CI workflows) affects every
+target, and the workspace commands run whenever anything changed. Nothing changed exits 0. Unlike
+`--staged`, tools get no file list: `--affected` only picks targets, and the two can't be combined.
+`--staged` picks targets by the same `dir` and `paths` rule, but a staged file no target claims selects
+none (the workspace commands still get it), so pre-commit hooks stay fast.
+`--json` adds `affected` (the target names) and `base`.
+
+## Step timings
+
+After a verb runs more than one step, the summary lists the five slowest (`--verbose`: all of them).
+With `--json`, every step has `ms` and the document a total `ms`; `deploy`, `release` and `init` report
+the same fields.
+
+## Clean
+
+```sh
+kit clean --dry-run       # list what would go, with sizes
+kit clean client          # one target
+kit clean --deep --yes
+```
+
+`kit clean [targets...]` deletes build output: `.gradle/`, `.kotlin/` and each Gradle project's `build/`
+under the Gradle root (never `~/.gradle`), the Kotlin toolchain's `build/`, `dist/`, `.wrangler/tmp`,
+`.astro` and the bundler caches in `node_modules` for worker, vite and astro targets, and the
+`release.ios.output` .ipa with its dSYM zip (their dir too, only when it holds nothing else and git
+tracks nothing in it). `--deep` adds `node_modules` (root and `.kit/`), `.wrangler/state` (your local
+D1/KV data) and the configured iOS project's Xcode DerivedData. It lists every path with its size and asks
+first (`--yes` skips the question); `--json` reports `{ removed: [{ path, bytes }], bytes }`. Symlinks
+and anything that resolves outside the repo root are refused.
 
 ## Repo commands
 
@@ -126,6 +239,59 @@ export default defineCommand({
 a repo with `mise.toml` warns when mise isn't installed or a pinned version differs, and a repo with
 `lefthook.yml` warns when lefthook isn't installed or `lefthook install` hasn't been run in the clone.
 
+```sh
+kit doctor --fix             # list the fixes, confirm once, apply, check again
+kit doctor --fix --yes       # no question (needed without a terminal)
+kit doctor --fix --dry-run   # list them only
+```
+
+`--fix` repairs what is safe and local, runs the touched checks again, then reports (and exits on)
+the state after the fixes. A fix is "fixed" only when its check passes afterwards: a command that ran
+and left the check failing (tools `mise install` put somewhere this shell does not look yet) is
+reported as applied, with the next step.
+
+| Check | Fix |
+| --- | --- |
+| lefthook hook not installed | `lefthook install` |
+| mise tool missing or drifted | `mise install` |
+| wrangler not installed | the worker's install: the package manager of the nearest lockfile above the worker dir, run where that lockfile is |
+| iOS / Android version drift | writes the TOML version to the xcconfig's `MARKETING_VERSION` / the module.yaml's `versionName` |
+| Kotlin toolchain wrapper not executable | `chmod +x` |
+| workflow pins behind the npm pin | moves them to that release's tag commit, as `kit upgrade` does; skipped with a note when the tag cannot be resolved (offline) |
+
+Xcode, the JDK, the Android SDK, logins, `.env` values and secrets are never fixed: those checks keep
+their hint. Plain `kit doctor` ends with `N fixable with kit doctor --fix` when there is something to
+apply, and `--json` adds `fixes: [{ id, description, applied, ok, error?, hint? }]`, where `ok` is whether
+the check passes after the fix.
+
+## Changelog
+
+```sh
+kit changelog                              # Markdown since the last release tag
+kit changelog --platform ios               # since the last ios/v* tag
+kit changelog --from v0.5.0 --to v0.6.0 --json
+kit changelog --platform android --write   # add a section to CHANGELOG.md
+kit changelog --write docs/CHANGES.md
+```
+
+Groups the Conventional Commits in the range into Breaking (`!` or a `BREAKING CHANGE:` footer),
+Features, Fixes, Performance and Other. `chore(release)` and merge commits are always left out;
+`chore`, `test`, `ci` and `style` too unless `--all` is given. The range starts at the newest release
+tag reachable from `--to` (`<platform>/v*` with `--platform`, any `…v<version>` tag without); with no
+tag it is the whole history. `--to <tag>` lists that release: the range starts at the tag before it.
+
+`--write` puts a `## <version> (<date>)` section above the newest one in `CHANGELOG.md` (or the file
+named after it), creating the file when needed. The version is the `--to` tag's, else the platform's
+version in the catalog TOML, else the root `package.json` version, else `Unreleased`; with `--platform`
+the heading is `## ios 1.4.0 (…)`. A version that already has a section is not added again; the
+`Unreleased` section is rewritten in place on each run, so new commits keep landing in it.
+
+In a shallow clone with no release tag in it (CI's default checkout) the range would be whatever was
+fetched: `kit changelog` warns, and `--write` refuses (exit 4) until the history is there
+(`git fetch --unshallow --tags`, or `fetch-depth: 0`). Any other git failure (a ref that does not
+exist, not a repository) is an error, never an empty changelog.
+`--json` prints `{ from, to, sections: [{ title, commits }] }`.
+
 ## Kotlin toolchain
 
 Apps built with the [JetBrains Kotlin Toolchain](https://kotlin-toolchain.org/latest/) (formerly Amper)
@@ -174,6 +340,55 @@ it comes from kit's Gradle plugin.
 Give the Release configuration manual signing with the match profiles, a `DEVELOPMENT_TEAM`, and
 `MARKETING_VERSION` in `release.ios.xcconfig`.
 
+## Env
+
+One `.env` per repo; `env.schema` (a zod object, usually `.kit/env.ts`) declares each key, and
+`env.workerSecrets` / `env.githubSecrets` say which remotes hold it. Keys are secret unless marked
+`.meta({ secret: false })`. Values never reach output: only names and statuses are printed.
+
+| Command | Does |
+| --- | --- |
+| `kit env push` | Every worker in `env.workerSecrets` (`wrangler secret put`) and `env.githubSecrets` (`gh secret set`); lists names, confirms (`--yes` skips), `--dry-run` only lists |
+| `kit env push --workers` | Every worker, GitHub skipped. Exclusive with `--all`, `--target` and `--github` |
+| `kit env push --target <t>` / `--github` | One worker / GitHub only; both flags together push that worker and GitHub |
+| `kit env rotate <KEY...> [--push]` | New generated value in `.env`, outputs re-rendered as `kit env sync` does, then prints where the key lives and the `kit env push …` to run; `--push` runs it |
+
+`kit env rotate` only takes keys whose schema says how to make them:
+
+```ts
+INTERNAL_API_SECRET: z.string().min(32).meta({ generate: 'hex' }),             // 32 random bytes, hex
+SESSION_KEY: z.string().meta({ generate: 'base64url', length: 48 }),           // length is in bytes
+INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
+```
+
+- The new value is checked against the key's own rule before anything is written; only that line of
+  `.env` changes (comments, order, quotes and line endings stay), and a key `.env` lacks is added.
+- kit reads `.env` the way dotenv and Bun do: on an unquoted value ` #` starts a comment
+  (`KEY=value # note` is `value`, `KEY= # note` is empty), a `#` inside `'…'`, `"…"` or backticks is
+  part of the value, `"…"` turns `\n` / `\r` into line breaks, and `\$` is a literal `$`. kit itself
+  never expands `$NAME`, but Bun (which loads `.env` before kit starts) does, so write a literal
+  dollar as `\$`.
+- When kit writes a value (`env init`, `env rotate`, rendered outputs) it quotes one that holds a
+  `#`, has spaces at either end or starts with a quote, writes a multi-line value as `"…\n…"`, and in
+  `.env` writes `$` as `\$` (`.dev.vars` keeps `$` raw: wrangler does not expand there). It refuses
+  (exit 3, naming the key) a value no reader would get back intact: one that needs quotes and holds
+  `'`, `"` and a backtick or ends in a backslash, a multi-line value holding `"` or a literal `\n`,
+  and in `.env` one ending in `\$`. Base64-encode such a value.
+- `kit env check`, `kit env push` and `kit doctor` warn about hand-written `.env` lines that Bun, dotenv
+  and kit read differently (names and line numbers only): a `#` inside an unquoted value, an unescaped
+  `$`, a quote that does not close on its line. What runs locally and what `kit env push` sends could
+  differ there; the warning says how to write the line. `kit env check --json` lists them under
+  `ambiguous`.
+- It confirms first, since the old value stops working once the new one is pushed (`--yes` skips).
+  `--dry-run` writes nothing and lists what would rotate and where it would be pushed.
+- `--push` pushes every secret of the remotes that hold the key. The remotes are listed first (a
+  remote kit cannot list stops the run, with `--yes` too) and one confirm covers rotating and pushing,
+  so nothing is written until the push can go ahead.
+- `--json` reports `{ rotated: [{ key, destinations }], pushed }`, never a value. When `.env` holds
+  a new value that is not on its remotes yet, `pending` is the command that finishes the job; the
+  same note goes to stderr.
+- A key without `generate` belongs to a provider: rotate it there, update `.env`, then `kit env push`.
+
 ## Releases
 
 kit owns the release flow; one shared `fastlane/Fastfile` (shipped in this package) runs the lanes.
@@ -192,10 +407,55 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 | `kit version show` | Version names from `versions.file` and the last release tags |
 | `kit version bump <patch\|minor\|major> [--platform ios\|android\|all\|<service>]` | Edit the TOML value, commit `chore(release): …`, push (`--no-push`, `--pr`) |
 | `kit release ios\|android --track internal\|alpha\|beta\|prod` | Preflight → next build number from the store → confirm → build → upload → tag `<platform>/v<version>+<build>` |
-| `kit release <service>` | `release.services.<name>`: build, deploy, tag `<name>/v<version>` |
+| `kit release <service>` | `release.services.<name>`: build, deploy, tag `<name>/v<version>`. A service cannot be named after a release command (`ios`, `android`, `certs`, `status`, `promote`, `rollout`, `metadata`, `rollback`) |
+| `kit release rollback <service> [--to <version-id>]` | Worker services only: `wrangler rollback`; tags stay put (see [Cloudflare workers](#cloudflare-workers)) |
 | `kit release certs [--add]` | match `appstore`, readonly; `--add` creates only what this app is missing (never nuke) |
 | `kit fastlane …` | fastlane with kit's env and the ASC/Play key files |
+| `kit release status [ios\|android]` | The TOML version and the latest build per store track (`--json`) |
+| `kit release promote <ios\|android> --from alpha\|beta --to beta\|prod` | Move a build the store already has to a later track: no rebuild, no upload |
+| `kit release rollout <ios\|android> --percent <1-100>\|--halt\|--resume\|--complete` | Change the production rollout of the released build |
 
+- `kit release status`: Android lists every Play track (version codes and release names); iOS lists
+  `testflight` (one build list for every group) and `prod` (the live App Store build and its phased
+  release state; `unknown` with a warning and `phasedError` when it could not be read, which is not
+  the same as having none). A track the store will not answer for is `unknown` with a warning; the command fails
+  only when a platform has no readable track.
+- `kit release promote`: `--build` picks the build number / version code (default: the latest on the
+  source track). It runs the branch check, the store credentials, `release.preflight` and the same
+  confirmation as a release to `--to`. A promotion never tags: a tag names a build, not a track
+  (release notes are computed from the last `<platform>/v*` tag), so the tag from the build's first
+  release stands. When `<platform>/v<version>+<build>` is missing, kit warns and prints the `git tag`
+  command to run on the commit that built it (`tagExisted` and `tagCommand` in `--json`); HEAD is not
+  that commit.
+  `--dry-run` prints the plan and runs nothing.
+  - **Internal builds are never promoted** (`--from internal` exits 2): they are compiled with
+    `KIT_INTERNAL` set, so a later track needs `kit release <platform> --track <track>`.
+  - Android: `--rollout` (prod, default `release.android.prodRollout` or 0.1) and `--draft` work as in
+    `kit release android`; `--notes` sets the changelog except on production.
+  - iOS: `--app-version <x.y.z>` promotes a build from before a version bump (default: the TOML version);
+    it is the lane's app version and the tag's version. On Android it is a usage error (the version
+    code alone finds the release).
+  - iOS: the build must be in the source tester group (`release.ios.testflightGroups.<from>`, default
+    the track name). A build that never reached it, an internal build included, is refused with
+    exit 1, `--build` or not; so is a destination group the app does not have.
+  - iOS: the source group must receive its builds explicitly, as `kit release ios --track alpha|beta`
+    distributes them. A group with automatic distribution (App Store Connect's default for an
+    internal group) holds every upload, internal builds included, and kit cannot tell them apart
+    there: promoting from it is refused. Turn automatic distribution off for that group, or point
+    `release.ios.testflightGroups` at one without it.
+  - iOS: `alpha → beta` distributes the build to `release.ios.testflightGroups.beta`;
+    `→ prod` submits it for App Store review (phased, manual release) and requires `--notes`.
+- `kit release rollout` takes exactly one action. `--percent`, `--resume` and `--complete` widen
+  production exposure, so they use the `prod` confirmation: type `prod` locally (`--yes` doesn't skip),
+  the `production` environment's reviewers in CI. `--halt` is the emergency brake: a prompt that
+  `--yes` skips. `--dry-run` runs nothing.
+  Android changes the production staged rollout; `--percent 100` completes it, and a halted rollout
+  must be resumed before its percentage changes. Only a rollout in progress (or, for `--resume`, a
+  halted one) is touched, never a draft; `--build <version code>` names the release when the track
+  holds more than one, and the result names the version code that changed. A release halted at 100%
+  has no staged rollout to resume: `--resume` says so, use `--complete`. The App Store has no percentage (a phased release
+  follows Apple's 7-day schedule), so `--percent` is a usage error on iOS: `--halt` pauses the phased
+  release, `--resume` and `--complete` do what they say.
 - Build numbers are never committed: `max(store) + 1`, or `--build` / `--code`.
 - iOS: set `release.ios.xcconfig` to the xcconfig holding `MARKETING_VERSION` (what local Xcode builds
   show). `kit version bump` rewrites it in the same commit, and `kit release ios` / `kit doctor` fail
@@ -235,6 +495,37 @@ export default definePreflight({
 
 `release.android.gates` run Gradle tasks for the listed tracks (e.g. baseline-profile verification).
 
+### Store listing
+
+`kit release metadata` keeps the store listing in the repo, in fastlane's own layouts. Both keys are
+optional paths relative to the repo root:
+
+```ts
+release: {
+  ios: { /* … */ metadata: 'client/fastlane/metadata' }, // deliver: <locale>/name.txt, …; screenshots in ../screenshots
+  android: { /* … */ metadata: 'client/fastlane/metadata/android' }, // supply: <locale>/title.txt, <locale>/images/
+},
+```
+
+| Command | Does |
+| --- | --- |
+| `kit release metadata pull <ios\|android> [--screenshots] [--force]` | Download the listing text; `--screenshots` also downloads the screenshots (Play: and the feature graphic and icon) |
+| `kit release metadata push <ios\|android> [--screenshots]` | Upload the listing text; `--screenshots` also replaces the screenshots (Play: and the feature graphic and icon) |
+
+- `push` never uploads a binary, submits for review, or changes a rollout or phased release. It asks
+  before changing the public listing (`--yes` skips); `--dry-run` prints the files it would send and
+  runs nothing.
+- `pull` stops when what it would write has uncommitted changes (the text; with `--screenshots` the
+  screenshots too); `--force` overwrites them. Without `--screenshots` local screenshots are left alone.
+- iOS `review_information/` (the App Review contact and the demo account's user and password, which
+  deliver writes as plaintext) never stays in the repo: `pull` removes it, and `push` neither lists nor
+  uploads it. Edit those fields in App Store Connect.
+- Only the store key is needed: `ASC_*` for iOS, `PLAY_SERVICE_ACCOUNT_BASE64` for Android.
+- iOS edits the version being prepared in App Store Connect; with none, `push` fails at once: create
+  the next version there, or push after `kit release ios --track prod`. Android needs a
+  release on some Play track, and `changelogs/` is never sent: `kit release android` writes those.
+- A missing key or directory is a usage error (exit 2) naming `release.<platform>.metadata`.
+
 ### CI
 
 `.github/workflows/mobile-distribute.yml` is a reusable workflow. Pin it by SHA and pass named secrets:
@@ -258,3 +549,80 @@ jobs:
       MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
+
+The same workflow promotes and changes rollouts through `operation` (default `release`):
+
+| `operation` | Runs | Inputs |
+| --- | --- | --- |
+| `release` | `kit release <platform> --track <track>` | `track`, `build`, `notes`, `rollout`, `draft`, `skip` |
+| `promote` | `kit release promote <platform> --from <from> --to <track>` | `from`, `track` (the destination), `build`, `app-version`, `notes`, `rollout`, `draft`, `skip` |
+| `rollout` | `kit release rollout <platform> --<rollout-action>` | `rollout-action` (`percent`, `halt`, `resume`, `complete`), `percent`, `build` |
+
+```yaml
+  promote:
+    uses: jordond/kit/.github/workflows/mobile-distribute.yml@<sha> # vX.Y.Z
+    permissions: { contents: write }
+    with: { operation: promote, platform: android, from: beta, track: prod }
+    secrets:
+      PLAY_SERVICE_ACCOUNT_BASE64: ${{ secrets.PLAY_SERVICE_ACCOUNT_BASE64 }}
+```
+
+The job runs in the `production` environment for a release or promote to `prod` and for every
+rollout, so its required reviewers approve whatever widens production. That is the gate kit relies on
+when it skips the typed `prod` confirmation on GitHub Actions: run `kit release promote --to prod` and
+`kit release rollout` in CI through this workflow, or from a job that sets `environment: production`.
+
+### Lane tests
+
+The shared Fastfile's selection logic (which build a promotion moves, which Play release a rollout
+changes, tester-group resolution) has Ruby tests that run it against stubbed store objects:
+
+```sh
+ruby test/fastlane/run.rb
+```
+
+They need only Ruby and its bundled minitest, not kit's fastlane bundle. `bun test` runs them too
+(`test/e2e/fastlane-lanes.test.ts`), plus a `fastlane lanes` parse of the Fastfile when the bundle is
+installed; each part is skipped when its tool is missing.
+
+## Cloudflare workers
+
+For targets of kind `worker`. Every command runs wrangler from the target's directory with
+`CLOUDFLARE_ACCOUNT_ID` pinned from `cloudflare.accountId`.
+
+| Command | Does |
+| --- | --- |
+| `kit deploy <target> --preview [--comment]` | `wrangler versions upload`: a new version, production traffic untouched. The preview URL is the only thing on stdout (`--json`: `{ ok, target, url, version }`) |
+| `kit release rollback <service> [--to <version-id>]` | `wrangler rollback` to the last deployment with different code, for a service whose `deploy` is `kit deploy <worker target>`; confirms first (`--yes` skips) |
+| `kit logs <target> [-- <wrangler tail flags>]` | `wrangler tail`, attached to the terminal; Ctrl-C stops |
+| `kit open <target> [--print]` | The worker's Cloudflare dashboard page; `--print` or `--json` writes the URL instead |
+| `kit db backup [--remote] [--out <file>]` | `wrangler d1 export` to `backups/<db>-<UTC timestamp>.sql`; prints the path |
+| `kit db restore <file> [--remote]` | Load a backup: locally it replaces the database; remotely the database must be empty |
+| `kit db seed [--remote]` | Run the file named by `cloudflare.d1.<db>.seed` (relative to the repo root) |
+| `kit db reset` | Local only: delete the local database, re-apply migrations, then seed if configured |
+
+- `--preview` takes one worker target, honours `--env` and `deploy.before`, and aliases the preview
+  to the branch (`feat/login` → `feat-login-<worker>.<subdomain>.workers.dev`); with no usable branch
+  name the URL is the per-version one. A target with a custom `deploy` command runs its `build`
+  first (and needs one: exit 2 otherwise); `deploy: false` has no preview.
+- `--comment` posts the URL on the branch's pull request with `gh`, and on the next preview updates
+  that comment: only one the `gh` user wrote that opens with kit's marker. With no pull request it
+  warns; any other `gh` failure exits 1, after the URL is printed (`comment: 'failed'`, `ok: false`).
+- `kit release rollback` works out the version itself: every `wrangler secret put` (`kit env push`)
+  is a deployment, so "the previous deployment" would only undo the last secret. kit picks the last
+  deployment whose code differs from what is live, shows its id and date, and warns when secrets
+  changed since then: their values go back too, so run `kit env push` afterwards. `--to` names a
+  version outright, and is required while a gradual deployment is live (exit 4 lists the candidates). Git tags are never moved or deleted: it names the `<service>/v*` tag that no
+  longer matches production. A service whose deploy is not a worker exits 2.
+- `kit db restore`: a backup carries the schema and the applied-migrations table, so it loads into
+  an empty database only. Locally kit deletes the database first (after a confirm, like `reset`).
+  Remotely it checks the database has no tables and exits 4 naming them if it does; kit never drops
+  remote tables.
+- `kit db backup` warns when git does not ignore the file it wrote: a `--remote` dump is production
+  data. `kit init` adds `backups/` to `.gitignore`.
+- `kit db reset` and a local restore stop (exit 1, "layout not recognised") rather than report a
+  reset that deleted nothing, when wrangler's local state is not where kit expects it.
+- `kit db` commands take `--db`; `--remote` writes (`restore`, `seed`) confirm first, and
+  `kit db reset --remote` is a usage error.
+- `kit logs` has no `--json` document (exit 2): for JSON lines use `kit logs <target> -- --format json`.
+- `--dry-run` runs nothing in any of them.

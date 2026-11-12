@@ -1,9 +1,11 @@
 import { defineCommand } from '../cli/command'
+import { affectedArgs } from './_affected'
 
 export default defineCommand({
   description: 'Lint every target',
   group: 'Quality',
   args: {
+    ...affectedArgs,
     fix: { type: 'boolean', short: 'f', description: "Apply fixes (runs each target's format command)" },
     staged: {
       type: 'boolean',

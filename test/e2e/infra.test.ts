@@ -58,6 +58,7 @@ describe('env sync / check', () => {
       ok: true,
       invalid: [],
       drift: [],
+      ambiguous: [],
       github: {
         status: 'ok',
         expected: ['DEPLOY_TOKEN'],
@@ -100,6 +101,21 @@ esac`,
     const s = await fx.kit(['env', 'check', '--schema-only', '--json'])
     expect(s.code).toBe(0)
     expect(JSON.parse(s.stdout).github).toMatchObject({ status: 'skipped', reason: '--schema-only' })
+  })
+
+  test('check and push warn about .env lines Bun, dotenv and kit read differently, by name only', async () => {
+    writeFileSync(join(fx.dir, '.env'), `${read('.env').trimEnd()}\nEXTRA_TOKEN=abc#def\n`)
+    const r = await fx.kit(['env', 'check', '--schema-only', '--json'])
+    expect(r.code).toBe(0)
+    const doc = JSON.parse(r.stdout)
+    expect(doc.ok).toBe(true)
+    expect(doc.ambiguous.map((w: { key: string }) => w.key)).toEqual(['EXTRA_TOKEN'])
+    expect(r.stdout + r.stderr).not.toContain('abc#def')
+    const human = await fx.kit(['env', 'check', '--schema-only'])
+    expect(human.stderr).toContain('EXTRA_TOKEN has a # in an unquoted value')
+    const push = await fx.kit(['env', 'push', '--dry-run'])
+    expect(push.stderr).toContain('EXTRA_TOKEN has a # in an unquoted value')
+    expect(push.stderr).not.toContain('abc#def')
   })
 
   test('check: invalid env exits 3 naming the key', async () => {
@@ -174,6 +190,32 @@ describe('env push', () => {
     ])
     expect(JSON.parse(r.stdout).ok).toBe(true)
     expect((await fx.kit(['env', 'push', '--all', '--target', 'edge'])).code).toBe(2)
+  })
+
+  test('--workers pushes every worker and skips GitHub', async () => {
+    const r = await fx.kit(['env', 'push', '--workers', '--yes', '--json'])
+    expect(r.code).toBe(0)
+    expect(summary()).toEqual([
+      './apps/edge wrangler secret list --format json',
+      './apps/admin wrangler secret list --format json',
+      './apps/edge wrangler secret put API_SECRET',
+      './apps/admin wrangler secret put API_SECRET',
+    ])
+    expect(stdinLog()).toBe(`${SECRET}\n\n${SECRET}\n\n`)
+    expect(JSON.parse(r.stdout).outcomes.map((o: { destination: string }) => o.destination)).toEqual([
+      'edge',
+      'edge',
+      'admin',
+    ])
+  })
+
+  test('--workers is exclusive with --all, --target and --github (exit 2, nothing runs)', async () => {
+    for (const other of [['--all'], ['--target', 'edge'], ['--github']]) {
+      const r = await fx.kit(['env', 'push', '--workers', ...other, '--yes'])
+      expect(r.code).toBe(2)
+      expect(r.stderr).toContain(`--workers and ${other[0]} are exclusive`)
+    }
+    expect(fx.calls()).toEqual([])
   })
 
   test('--dry-run lists but pushes nothing', async () => {

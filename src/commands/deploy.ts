@@ -56,7 +56,9 @@ interface DeployResult {
   target: string
   env?: string
   ok: boolean
-  steps: { title: string; code: number }[]
+  /** Wall-clock time of this target's steps. */
+  ms: number
+  steps: { title: string; code: number; ms: number }[]
 }
 
 export default defineCommand({
@@ -64,6 +66,11 @@ export default defineCommand({
   group: 'Develop',
   args: {
     env: { type: 'string', short: 'e', description: 'Environment, for targets that declare envs' },
+    preview: {
+      type: 'boolean',
+      description: 'Worker targets: upload a preview version, leave production traffic; prints its URL',
+    },
+    comment: { type: 'boolean', description: "With --preview: post or update the URL on the branch's PR" },
   },
   examples: [
     'kit deploy api',
@@ -71,6 +78,8 @@ export default defineCommand({
     'kit deploy web --env staging',
     'kit deploy api web --env staging  # the env goes to the targets that declare it',
     'kit deploy api --dry-run --json',
+    'kit deploy api --preview          # wrangler versions upload; the preview URL on stdout',
+    'kit deploy api --preview --comment',
   ].join('\n'),
   async run(ctx) {
     const { requireProject } = await import('../cli/command')
@@ -87,7 +96,19 @@ export default defineCommand({
         ExitCode.usage,
       )
     }
+    if (ctx.args.comment && !ctx.args.preview) {
+      throw new KitError(
+        '--comment needs --preview',
+        'kit deploy <target> --preview --comment',
+        ExitCode.usage,
+      )
+    }
     if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
+    if (ctx.args.preview) {
+      const { runPreview } = await import('./_preview')
+      await runPreview(ctx, names, { env: ctx.args.env, comment: !!ctx.args.comment })
+      return
+    }
     const envs = envsFor(config, names, ctx.args.env)
     const self = [process.execPath, '--no-env-file', process.argv[1]!]
     const seen = new Set<string>()
@@ -130,18 +151,22 @@ export default defineCommand({
     // --json: children print to stderr and the one document comes last.
     const exec = ctx.flags.json ? runToStderr : run
     const results: DeployResult[] = []
+    const started = performance.now()
+    const since = (t: number) => Math.round(performance.now() - t)
     const report = () => {
-      if (ctx.flags.json) emitJson({ ok: results.every((r) => r.ok), deploys: results })
+      for (const r of results) r.ms = r.steps.reduce((sum, s) => sum + s.ms, 0)
+      if (ctx.flags.json) emitJson({ ok: results.every((r) => r.ok), ms: since(started), deploys: results })
     }
     for (const [i, d] of deploys.entries()) {
-      const result: DeployResult = { target: d.name, env: d.env, ok: false, steps: [] }
+      const result: DeployResult = { target: d.name, env: d.env, ok: false, ms: 0, steps: [] }
       results.push(result)
       const skipped = names.slice(i + 1)
       const and = skipped.length ? `; skipped ${skipped.join(', ')}` : ''
       for (const b of d.before) {
         ctx.log.step(b.title)
+        const t = performance.now()
         const code = await exec(b.cmd, { cwd: root, env: { KIT_ROOT: root } })
-        result.steps.push({ title: b.title, code })
+        result.steps.push({ title: b.title, code, ms: since(t) })
         if (code !== 0) {
           report()
           throw new KitError(
@@ -153,8 +178,9 @@ export default defineCommand({
       }
       for (const c of d.cmds) {
         ctx.log.step(`${d.name}: ${c.title}`)
+        const t = performance.now()
         const code = await exec(c.cmd, { cwd: c.cwd, env: c.env })
-        result.steps.push({ title: c.title, code })
+        result.steps.push({ title: c.title, code, ms: since(t) })
         if (code !== 0) {
           report()
           if (!ctx.flags.json) ctx.log.error(`deploy ${d.name} failed (exit ${code})${and}`)

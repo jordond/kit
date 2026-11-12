@@ -219,7 +219,7 @@ describe('planScaffold', () => {
       ...disk,
       '.kit/package.json': '{}',
       '.env.example': 'MINE=\n',
-      '.gitignore': 'node_modules/\n.env\n',
+      '.gitignore': 'node_modules/\n.env\nbackups/\n',
       'libs.versions.toml': '[versions]\napp-android-version = "1"\napp-ios-version = "1"\n',
     }
     expect(summary(planScaffold(input({ read: reader(files), list: lister(files) })))).toEqual([
@@ -229,6 +229,20 @@ describe('planScaffold', () => {
       'write .github/workflows/ci.yml',
       'write fastlane/Fastfile',
     ])
+  })
+
+  test('renovate.json is written unless the repo has a Renovate config somewhere', () => {
+    const files = { 'renovate.json': '{}\n' }
+    expect(summary(planScaffold(input({ files })))).toContain('write renovate.json')
+    for (const present of ['renovate.json', '.github/renovate.json5', '.renovaterc']) {
+      const on = { ...disk, [present]: '{}' }
+      const plan = planScaffold(input({ files, read: reader(on), list: lister(on) }))
+      expect(plan.find((a) => a.path === 'renovate.json')).toEqual({
+        kind: 'skip',
+        path: 'renovate.json',
+        reason: present === 'renovate.json' ? 'exists' : `${present} exists`,
+      })
+    }
   })
 
   test('an existing package.json without kit gains the dependency, and keeps the rest', () => {

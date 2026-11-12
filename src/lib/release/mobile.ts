@@ -12,7 +12,7 @@ import { emitJson, withStdoutOnStderr } from '../log'
 import { ProcError, runLines } from '../proc'
 import { confirm, text } from '../prompt'
 import { secretFile } from '../secrets'
-import { commandStep, runSteps, type Step, type StepResult, summarize } from '../steps'
+import { commandStep, runSteps, type Step, type StepResult, stepTimings, summarize } from '../steps'
 import {
   aabFromOutput,
   findAab,
@@ -148,7 +148,8 @@ export function laneConfigEnv(root: string, config: KitConfig): Record<string, s
   }
 }
 
-function laneStep(
+/** A step that runs one lane; a non-zero exit fails it with the lane's output. */
+export function laneStep(
   title: string,
   appRoot: string,
   platform: Platform,
@@ -174,7 +175,7 @@ function failed(results: StepResult[]): boolean {
 }
 
 /** Ask per §9.1. Returns false when the user declines. */
-async function confirmTrack(flags: Flags, track: Track, summary: string): Promise<boolean> {
+export async function confirmTrack(flags: Flags, track: Track, summary: string): Promise<boolean> {
   if (flags.dryRun || track === 'internal') return true
   if (track !== 'prod') return confirm(flags, `Release ${summary}?`)
   // prod: GitHub Actions runs it in the `production` environment, which needs reviewer approval (§9.6).
@@ -191,6 +192,7 @@ export async function releaseMobile(
   opts: MobileOptions,
 ): Promise<void> {
   const started = performance.now()
+  const elapsed = () => Math.round(performance.now() - started)
   const { root, config } = ctx as { root: string; config: KitConfig }
   const { platform, track } = opts
   const flags = ctx.flags
@@ -322,7 +324,7 @@ export async function releaseMobile(
     )
     if (failed(results)) {
       const code = summarize('preflight', results, started, `Pass --build/--code to skip the store lookup`)
-      if (flags.json) emitJson({ platform, track, ok: false, stage: 'preflight', results })
+      if (flags.json) emitJson({ platform, track, ok: false, stage: 'preflight', results, ms: elapsed() })
       process.exitCode = code === 130 ? 130 : ExitCode.precondition
       return
     }
@@ -479,7 +481,7 @@ export async function releaseMobile(
   }
   // Steps skipped by an interrupt record no result, so count them too.
   if (failed(results) || results.length !== steps.length || interrupted()) {
-    if (flags.json) emitJson({ ...result, ok: false, results })
+    if (flags.json) emitJson({ ...result, ok: false, results, ms: elapsed() })
     process.exitCode = summarize(`release ${platform}`, results, started)
     return
   }
@@ -512,7 +514,13 @@ export async function releaseMobile(
   }
 
   if (flags.json)
-    emitJson({ ...result, ok: true, post: postResults.map((p) => ({ title: p.title, ok: p.ok })) })
+    emitJson({
+      ...result,
+      ok: true,
+      post: postResults.map((p) => ({ title: p.title, ok: p.ok, ms: Math.round(p.ms) })),
+      steps: stepTimings(results),
+      ms: elapsed(),
+    })
   summarize(`release ${platform}`, results, started)
   if (!flags.json) {
     for (const [k, v] of Object.entries(artifacts)) ctx.log.dim(`  ${k}: ${v}`)

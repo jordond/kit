@@ -1,19 +1,77 @@
 import { relative } from 'node:path'
 import pc from 'picocolors'
 import { type KitContext, requireProject } from '../cli/command'
-import type { Verb } from '../config/schema'
+import type { KitConfig, Verb } from '../config/schema'
 import { ExitCode, KitError } from '../lib/errors'
 import { emitJson, log } from '../lib/log'
-import { commandStep, runSteps, type StepGroup, summarize } from '../lib/steps'
-import { type PlannedGroup, type PlanOptions, planVerbs } from '../lib/targets'
+import { commandStep, printTimings, runSteps, type StepGroup, summarize } from '../lib/steps'
+import {
+  affectedTargets,
+  type PlannedGroup,
+  type PlanOptions,
+  planVerbs,
+  selectTargets,
+} from '../lib/targets'
 
 export interface VerbRun {
   /** Name shown in the summary (`check`, `lint --fix`). */
   name: string
   verbs: Verb[]
-  plan?: Omit<PlanOptions, 'targets' | 'extra'>
+  plan?: Omit<PlanOptions, 'targets' | 'extra' | 'affected'>
   /** Shown under a failure. */
   hint?: string
+}
+
+/** What `--affected` resolved to. */
+interface Affected {
+  /** The ref compared against; null when none was found and every target runs. */
+  base: string | null
+  /** Changed files; undefined when the base was not found. */
+  files?: string[]
+  /** Affected targets among the selected ones, in config order. */
+  targets: string[]
+  /** Why every selected target runs although no changed file picked it. */
+  reason?: 'base-not-found' | 'head-is-base'
+}
+
+/** `--affected [--base <ref>]`: the changed files and the targets they select. Undefined without the flag. */
+async function resolveAffected(
+  ctx: KitContext,
+  root: string,
+  config: KitConfig,
+): Promise<Affected | undefined> {
+  const args = ctx.args as { affected?: boolean; base?: string; staged?: boolean }
+  if (!args.affected) {
+    if (args.base !== undefined) throw new KitError('--base needs --affected', undefined, ExitCode.usage)
+    return undefined
+  }
+  if (args.staged) {
+    throw new KitError(
+      '--affected and --staged select targets differently; pick one',
+      '--staged: what is in the index. --affected: everything changed since the base',
+      ExitCode.usage,
+    )
+  }
+  const selected = selectTargets(config, ctx.positionals).targets.map(([n]) => n)
+  const { changedFiles } = await import('../lib/git')
+  const changed = await changedFiles(root, args.base).catch(() => undefined)
+  if (!changed) {
+    // Never silently run nothing: without a base, everything counts as changed.
+    log.warn(
+      `--affected: ${args.base ? `base "${args.base}"` : 'no base (origin/HEAD, origin/main, main)'} not found; running every target`,
+    )
+    return { base: null, targets: selected, reason: 'base-not-found' }
+  }
+  if (!args.base && changed.headIsBase && !changed.files.length) {
+    // On the base itself (a push build of the default branch): there is nothing to compare, not nothing to do.
+    log.warn(
+      `--affected: HEAD is the base (${changed.base}) and nothing is uncommitted; running every target`,
+    )
+    log.dim('  › For push builds pass --base HEAD~1, or the previous release tag')
+    return { base: changed.base, targets: selected, reason: 'head-is-base' }
+  }
+  const hit = new Set(affectedTargets(root, config, changed.files))
+  return { base: changed.base, files: changed.files, targets: selected.filter((n) => hit.has(n)) }
 }
 
 /** Shared body of lint/format/typecheck/check/test/build: plan, run as a tree, summarize, exit code. */
@@ -29,14 +87,36 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
     }
   }
   const started = performance.now()
-  const groups = planVerbs(root, config, v.verbs, { ...v.plan, targets: ctx.positionals, extra: ctx.rest })
+  const affected = await resolveAffected(ctx, root, config)
+  /** `affected` and `base` in every `--json` document of an `--affected` run. */
+  const selection = affected
+    ? {
+        affected: affected.targets,
+        base: affected.base,
+        ...(affected.reason ? { reason: affected.reason } : {}),
+      }
+    : {}
+  const groups = planVerbs(root, config, v.verbs, {
+    ...v.plan,
+    targets: ctx.positionals,
+    extra: ctx.rest,
+    affected: affected?.files,
+  })
+  const unchanged = affected?.files?.length === 0
+  if (affected && !unchanged && !ctx.flags.json && !ctx.flags.quiet) {
+    log.step(
+      `affected: ${affected.targets.join(', ') || 'no target'}${affected.base ? ` (base ${affected.base})` : ''}`,
+    )
+  }
 
   if (ctx.flags.dryRun) {
-    printPlan(root, groups, ctx)
+    if (unchanged && !ctx.flags.json) log.info(`${v.name}: nothing affected since ${affected?.base}`)
+    else printPlan(root, groups, ctx, selection)
     return
   }
   if (!groups.length) {
-    if (ctx.flags.json) emitJson({ verb: v.name, ok: true, steps: [] })
+    if (ctx.flags.json) emitJson({ verb: v.name, ok: true, steps: [], ...selection })
+    else if (unchanged) log.info(`${v.name}: nothing affected since ${affected?.base}`)
     else log.warn(`Nothing to ${v.name}${ctx.positionals.length ? ` for ${ctx.positionals.join(', ')}` : ''}`)
     return
   }
@@ -51,10 +131,13 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
       ? 0
       : 1
     : summarize(v.name, results, started, v.hint)
+  if (!ctx.flags.json && code !== ExitCode.interrupted) printTimings(results, ctx.flags)
   if (ctx.flags.json) {
     emitJson({
       verb: v.name,
       ok: code === 0,
+      ms: Math.round(performance.now() - started),
+      ...selection,
       steps: results.map((r) => ({
         target: r.group,
         title: r.title,
@@ -69,9 +152,10 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
 
 const tail = (s: string | undefined, n = 50) => s?.split('\n').slice(-n).join('\n')
 
-function printPlan(root: string, groups: PlannedGroup[], ctx: KitContext): void {
+function printPlan(root: string, groups: PlannedGroup[], ctx: KitContext, selection: object): void {
   if (ctx.flags.json) {
     emitJson({
+      ...selection,
       plan: groups.map((g) => ({
         target: g.title,
         commands: g.commands.map((c) => ({ cmd: c.cmd, cwd: relative(root, c.cwd) || '.' })),

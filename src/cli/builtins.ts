@@ -72,6 +72,37 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/release/certs'),
   },
   {
+    path: ['release', 'status'],
+    description: 'Show the version and the latest build on each store track',
+    group: 'Release',
+    load: () => import('../commands/release/status'),
+  },
+  {
+    path: ['release', 'promote'],
+    description: 'Promote a build the store already has to a later track (no rebuild)',
+    group: 'Release',
+    load: () => import('../commands/release/promote'),
+  },
+  {
+    path: ['release', 'rollout'],
+    description: 'Change the production rollout: Play staged rollout, App Store phased release',
+    group: 'Release',
+    load: () => import('../commands/release/rollout'),
+  },
+  {
+    path: ['release', 'metadata', 'pull'],
+    description:
+      'Download the store listing text into release.<platform>.metadata; --screenshots adds images',
+    group: 'Release',
+    load: () => import('../commands/release/metadata/pull'),
+  },
+  {
+    path: ['release', 'metadata', 'push'],
+    description: 'Upload the store listing text; --screenshots adds images. Never a binary or a review',
+    group: 'Release',
+    load: () => import('../commands/release/metadata/push'),
+  },
+  {
     path: ['version', 'show'],
     description: 'Show version names and last release tags',
     group: 'Release',
@@ -88,6 +119,12 @@ export const builtins: BuiltinEntry[] = [
     description: "Run fastlane with kit's shared Fastfile",
     group: 'Release',
     load: () => import('../commands/fastlane'),
+  },
+  {
+    path: ['changelog'],
+    description: 'List the changes since the last release tag',
+    group: 'Release',
+    load: () => import('../commands/changelog'),
   },
   // infra: env + db
   {
@@ -115,6 +152,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/env/init'),
   },
   {
+    path: ['env', 'rotate'],
+    description: 'Generate a new value for a key and sync',
+    group: 'Infra',
+    load: () => import('../commands/env/rotate'),
+  },
+  {
     path: ['db', 'migrate'],
     description: 'Apply pending D1 migrations',
     group: 'Infra',
@@ -138,6 +181,50 @@ export const builtins: BuiltinEntry[] = [
     group: 'Infra',
     load: () => import('../commands/db/exec'),
   },
+  // cloudflare workers: db backup/restore/seed/reset, logs, open, release rollback
+  {
+    path: ['db', 'backup'],
+    description: 'Export a D1 database to a .sql file',
+    group: 'Infra',
+    load: () => import('../commands/db/backup'),
+  },
+  {
+    path: ['db', 'restore'],
+    description: 'Run a .sql backup against D1',
+    group: 'Infra',
+    load: () => import('../commands/db/restore'),
+  },
+  {
+    path: ['db', 'seed'],
+    description: "Run a D1 database's seed file",
+    group: 'Infra',
+    load: () => import('../commands/db/seed'),
+  },
+  {
+    path: ['db', 'reset'],
+    description: 'Recreate a local D1 database: migrate, then seed',
+    group: 'Infra',
+    load: () => import('../commands/db/reset'),
+  },
+  {
+    path: ['logs'],
+    description: "Tail a deployed worker's logs",
+    group: 'Infra',
+    load: () => import('../commands/logs'),
+  },
+  {
+    path: ['open'],
+    description: "Open a worker target's Cloudflare dashboard page",
+    group: 'Develop',
+    load: () => import('../commands/open'),
+  },
+  {
+    path: ['release', 'rollback'],
+    description: 'Roll a worker service back to an earlier version',
+    group: 'Release',
+    load: () => import('../commands/release/rollback'),
+  },
+  // end cloudflare workers
   // setup: passthroughs, doctor, init, deps
   {
     path: ['gradle'],
@@ -176,6 +263,18 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/init'),
   },
   {
+    path: ['add', 'module'],
+    description: 'Add a KMP library module (Gradle or Kotlin toolchain)',
+    group: 'Setup',
+    load: () => import('../commands/add/module'),
+  },
+  {
+    path: ['add', 'target'],
+    description: 'Add a target to kit.config.ts',
+    group: 'Setup',
+    load: () => import('../commands/add/target'),
+  },
+  {
     path: ['deps'],
     description: 'List or update npm dependencies (catalog-aware)',
     group: 'Setup',
@@ -186,6 +285,13 @@ export const builtins: BuiltinEntry[] = [
     description: 'Move the @jordond/kit pin and the workflow SHAs to a kit release',
     group: 'Setup',
     load: () => import('../commands/upgrade'),
+  },
+  // verb core
+  {
+    path: ['clean'],
+    description: 'Remove build output',
+    group: 'Develop',
+    load: () => import('../commands/clean'),
   },
   // end setup
   {
@@ -204,7 +310,9 @@ export const builtins: BuiltinEntry[] = [
 
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
+  metadata: 'Sync the store listing (text, screenshots)',
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
-  db: 'Cloudflare D1 migrations and queries',
+  db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
+  add: 'Scaffold a module or a target into this repo',
 }
