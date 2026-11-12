@@ -90,6 +90,19 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/release/rollout'),
   },
   {
+    path: ['release', 'metadata', 'pull'],
+    description:
+      'Download the store listing text into release.<platform>.metadata; --screenshots adds images',
+    group: 'Release',
+    load: () => import('../commands/release/metadata/pull'),
+  },
+  {
+    path: ['release', 'metadata', 'push'],
+    description: 'Upload the store listing text; --screenshots adds images. Never a binary or a review',
+    group: 'Release',
+    load: () => import('../commands/release/metadata/push'),
+  },
+  {
     path: ['version', 'show'],
     description: 'Show version names and last release tags',
     group: 'Release',
@@ -229,6 +242,7 @@ export const builtins: BuiltinEntry[] = [
 
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
+  metadata: 'Sync the store listing (text, screenshots)',
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations and queries',

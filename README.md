@@ -316,6 +316,33 @@ export default definePreflight({
 
 `release.android.gates` run Gradle tasks for the listed tracks (e.g. baseline-profile verification).
 
+### Store listing
+
+`kit release metadata` keeps the store listing in the repo, in fastlane's own layouts. Both keys are
+optional paths relative to the repo root:
+
+```ts
+release: {
+  ios: { /* … */ metadata: 'client/fastlane/metadata' }, // deliver: <locale>/name.txt, …; screenshots in ../screenshots
+  android: { /* … */ metadata: 'client/fastlane/metadata/android' }, // supply: <locale>/title.txt, <locale>/images/
+},
+```
+
+| Command | Does |
+| --- | --- |
+| `kit release metadata pull <ios\|android> [--screenshots] [--force]` | Download the listing text; `--screenshots` also downloads the screenshots (Play: and the feature graphic and icon) |
+| `kit release metadata push <ios\|android> [--screenshots]` | Upload the listing text; `--screenshots` also replaces the screenshots (Play: and the feature graphic and icon) |
+
+- `push` never uploads a binary, submits for review, or changes a rollout or phased release. It asks
+  before changing the public listing (`--yes` skips); `--dry-run` prints the files it would send and
+  runs nothing.
+- `pull` stops when what it would write has uncommitted changes (the text; with `--screenshots` the
+  screenshots too); `--force` overwrites them. Without `--screenshots` local screenshots are left alone.
+- Only the store key is needed: `ASC_*` for iOS, `PLAY_SERVICE_ACCOUNT_BASE64` for Android.
+- iOS edits the version being prepared in App Store Connect, so one must exist. Android needs a
+  release on some Play track, and `changelogs/` is never sent: `kit release android` writes those.
+- A missing key or directory is a usage error (exit 2) naming `release.<platform>.metadata`.
+
 ### CI
 
 `.github/workflows/mobile-distribute.yml` is a reusable workflow. Pin it by SHA and pass named secrets:

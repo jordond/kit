@@ -10,7 +10,11 @@ function lookup(ctx: Readonly<CommandContext>): { cmd?: AnyCommand; children: Ma
   let level = ctx.env.subCommands as Map<string, AnyCommand> | undefined
   let cmd: AnyCommand | undefined
   for (const seg of ctx.commandPath ?? []) {
-    cmd = level?.get(seg)
+    // release-metadata: below the first level gunshi's map starts at the resolved command's parent,
+    // not the root, so the leading segments are not in it. Skip those instead of losing the level.
+    const found = level?.get(seg)
+    if (!found && level) continue
+    cmd = found
     const next = cmd?.subCommands
     level = next ? new Map(Object.entries(next) as [string, AnyCommand][]) : undefined
   }

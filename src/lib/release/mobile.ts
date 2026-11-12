@@ -148,6 +148,7 @@ export function laneConfigEnv(root: string, config: KitConfig): Record<string, s
   }
 }
 
+/** A step that runs one lane; a non-zero exit fails it with the lane's output. */
 export function laneStep(
   title: string,
   appRoot: string,

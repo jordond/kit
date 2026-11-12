@@ -138,6 +138,8 @@ export const configSchema = z
             xcconfig: z.string().optional(),
             testflightGroups: z.object({ alpha: z.string(), beta: z.string() }).partial().optional(),
             sentry: z.object({ org: z.string(), project: z.string() }).strict().optional(),
+            /** Store listing dir (deliver layout), relative to the repo root; screenshots sit in `screenshots/` next to it. */
+            metadata: z.string().optional(),
           })
           .strict()
           .optional(),
@@ -156,6 +158,8 @@ export const configSchema = z
                 }),
               )
               .optional(),
+            /** Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`), relative to the repo root. */
+            metadata: z.string().optional(),
           })
           .strict()
           .optional(),
