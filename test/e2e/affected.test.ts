@@ -295,7 +295,12 @@ describe('step timings', () => {
     expect(r.stderr).toContain('✔ check passed (5 steps, ')
     const timings = r.stderr.split('\n').filter((l) => /^ {2}\d+\.\ds {2}\S/.test(l))
     expect(timings).toHaveLength(5)
-    expect(timings[0]).toMatch(/^ {2}\d+\.\ds {2}workspace › tsc --noEmit$/)
+    // Slowest first. Which step that is depends on the machine (a loaded one can take longer over
+    // another step than tsc's one-second sleep), so check the order, not the winner.
+    const secs = timings.map((l) => Number(/^ {2}(\d+\.\d)s/.exec(l)![1]))
+    expect(secs).toEqual([...secs].sort((a, b) => b - a))
+    const tsc = timings.find((l) => l.endsWith('workspace › tsc --noEmit'))
+    expect(Number(/^ {2}(\d+\.\d)s/.exec(tsc!)![1])).toBeGreaterThanOrEqual(1)
 
     const one = await fx.kit(['check', 'client'])
     expect(one.stderr).toContain('✔ check passed (1 steps, ')
