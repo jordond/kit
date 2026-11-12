@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import type { KitConfig } from '../../config/schema'
+import { dotenvValue } from '../dotenv'
 import type { EnvSchema, EnvValues } from './schema'
 
 /**
@@ -71,7 +72,7 @@ export function parseDotenv(text: string): Record<string, string> {
     }
     const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(raw)
     if (!m) continue
-    out[m[1]!] = m[2]!.replace(/^(['"])(.*)\1$/, '$2')
+    out[m[1]!] = dotenvValue(m[2]!)
   }
   return out
 }

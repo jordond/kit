@@ -314,3 +314,22 @@ describe('init', () => {
     expect(applyInit(root, plan, {}).NEW_KEY).toBe('default')
   })
 })
+
+describe('dotenv values', () => {
+  test('inline comments are not part of the value; a # inside quotes is', async () => {
+    const { parseDotenv } = await import('../../src/lib/env/render')
+    expect(
+      parseDotenv(
+        [
+          'A=plain # note',
+          'B="quoted # kept" # note',
+          "C='single' # note",
+          'D=no#space',
+          'E="a"b"',
+          'F=',
+          'G=value   ',
+        ].join('\n'),
+      ),
+    ).toEqual({ A: 'plain', B: 'quoted # kept', C: 'single', D: 'no#space', E: 'a"b', F: '', G: 'value' })
+  })
+})

@@ -352,6 +352,8 @@ INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
 
 - The new value is checked against the key's own rule before anything is written; only that line of
   `.env` changes (comments, order, quotes and line endings stay), and a key `.env` lacks is added.
+- kit reads `.env` the way dotenv does: on an unquoted value ` #` starts a comment (`KEY=value # note`
+  is `value`); quote a value that contains ` #`.
 - It confirms first, since the old value stops working once the new one is pushed (`--yes` skips).
   `--dry-run` writes nothing and lists what would rotate and where it would be pushed.
 - `--push` pushes every secret of the remotes that hold the key. The remotes are listed first (a
