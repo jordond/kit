@@ -123,7 +123,7 @@ describe('env push', () => {
     expect(summary().some((s) => s.includes('secret put'))).toBe(false)
   })
 
-  test('--yes pushes each worker secret via stdin from the target dir, account pinned', async () => {
+  test('--yes pushes every worker secret via stdin from the target dir (account pinned), then GitHub', async () => {
     const r = await fx.kit(['env', 'push', '--yes'], {
       env: { CLOUDFLARE_ACCOUNT_ID: 'deadbeefdeadbeefdeadbeefdeadbeef' },
     })
@@ -131,10 +131,12 @@ describe('env push', () => {
     expect(summary()).toEqual([
       './apps/edge wrangler secret list --format json',
       './apps/admin wrangler secret list --format json',
+      '. gh secret list --json name',
       './apps/edge wrangler secret put API_SECRET',
       './apps/admin wrangler secret put API_SECRET',
+      '. gh secret set DEPLOY_TOKEN',
     ])
-    expect(stdinLog()).toBe(`${SECRET}\n\n${SECRET}\n\n`)
+    expect(stdinLog()).toBe(`${SECRET}\n\n${SECRET}\n\n${TOKEN}\n`)
     expect(new Set(read('.account.log').trim().split('\n'))).toEqual(new Set([EDGE_ID]))
     expect(r.stderr).toContain('OPTIONAL_KEY  skipped-empty')
     expect(r.stderr + r.stdout).not.toContain(SECRET)
@@ -159,7 +161,7 @@ describe('env push', () => {
     ])
   })
 
-  test('--all pushes every worker and GitHub; --all with --target is a usage error', async () => {
+  test('--all is the same as no flags; --all with --target is a usage error', async () => {
     const r = await fx.kit(['env', 'push', '--all', '--yes', '--json'])
     expect(r.code).toBe(0)
     expect(summary()).toEqual([
@@ -198,6 +200,7 @@ describe('env push when a remote cannot be listed', () => {
 
   test('every list fails: exit 1 and ok:false, nothing pushed', async () => {
     fx.script('wrangler', failList('wrangler'))
+    fx.script('gh', failList('gh'))
     const r = await fx.kit(['env', 'push', '--json'])
     expect(r.code).toBe(1)
     const doc = JSON.parse(r.stdout)

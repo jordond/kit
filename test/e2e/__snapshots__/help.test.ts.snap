@@ -473,11 +473,11 @@ Usage
   kit env push [options]
 
 Examples
-  kit env push                    # every target in env.workerSecrets (not GitHub)
+  kit env push                    # every worker in env.workerSecrets and env.githubSecrets
   kit env push --target edge
   kit env push --github           # GitHub Actions secrets only
   kit env push --target edge --github
-  kit env push --all --yes        # every worker and GitHub, no prompt (CI)
+  kit env push --yes              # everything, no prompt (CI)
   kit env push --dry-run
 
 Options
@@ -491,7 +491,7 @@ Options
       --bail             Stop at the first failure
   -t, --target <string>  Only this worker target (env.workerSecrets)
       --github           Push env.githubSecrets with gh
-      --all              Every worker in env.workerSecrets and env.githubSecrets
+      --all              Every worker and GitHub; the default, kept for scripts
 
 "
 `;
