@@ -219,7 +219,7 @@ describe('planScaffold', () => {
       ...disk,
       '.kit/package.json': '{}',
       '.env.example': 'MINE=\n',
-      '.gitignore': 'node_modules/\n.env\n',
+      '.gitignore': 'node_modules/\n.env\nbackups/\n',
       'libs.versions.toml': '[versions]\napp-android-version = "1"\napp-ios-version = "1"\n',
     }
     expect(summary(planScaffold(input({ read: reader(files), list: lister(files) })))).toEqual([

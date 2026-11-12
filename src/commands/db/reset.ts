@@ -10,18 +10,16 @@ export default defineCommand({
   },
   examples: 'kit db reset\nkit db reset --db analytics --yes\nkit db reset --dry-run',
   async run(ctx) {
-    const { existsSync, rmSync } = await import('node:fs')
-    const { relative, resolve } = await import('node:path')
+    const { relative } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
     const { d1Args, pinCloudflareAccount, resolveD1, seedFile, wrangler } = await import(
       '../../lib/cloudflare'
     )
+    const { locateLocalD1, removeLocalD1, requireLocalD1 } = await import('../../lib/d1-local')
     const { ExitCode, KitError } = await import('../../lib/errors')
     const { emitJson } = await import('../../lib/log')
     const { run, runToStderr } = await import('../../lib/proc')
     const { confirm } = await import('../../lib/prompt')
-    const { localD1Files, localD1Id, localD1Ids, localD1Sqlite, localD1StateDir, readWranglerConfig } =
-      await import('../../lib/worker')
     if (ctx.args.remote) {
       throw new KitError(
         'kit db reset is local only',
@@ -31,32 +29,10 @@ export default defineCommand({
     }
     const { root, config } = requireProject(ctx)
     const db = resolveD1(config, ctx.args.db)
-    const dir = resolve(root, config.targets[db.target]!.dir)
     const rel = (p: string) => relative(root, p) || '.'
-    const wranglerConfig = readWranglerConfig(dir)
-    const id = wranglerConfig && localD1Id(wranglerConfig.data, db.name)
-    if (!id) {
-      const where = wranglerConfig ? rel(wranglerConfig.file) : `${rel(dir)}/wrangler.jsonc`
-      throw new KitError(
-        `No d1_databases entry for ${db.name} in ${where}`,
-        'kit finds the local database file through its database_id or binding',
-        ExitCode.config,
-      )
-    }
-    const files = localD1Files(dir, id).filter((f) => existsSync(f))
-    // Databases exist locally but none is where kit expects any of this worker's: wrangler's layout
-    // has changed, and migrating now would report a reset that deleted nothing. A file of another
-    // database the worker binds proves the layout, so this one is just fresh, as with no sqlite at all.
-    // Every cloudflare.d1 entry of this target resolves through the same d1_databases list.
-    const known = new Set(localD1Ids(wranglerConfig.data).map((k) => localD1Files(dir, k)[0]!))
-    const present = localD1Sqlite(dir)
-    if (present.length && !present.some((f) => known.has(f))) {
-      const state = rel(localD1StateDir(dir))
-      throw new KitError(
-        `Local D1 layout not recognised: ${state} holds databases, none of them one this worker binds`,
-        `Nothing was deleted or migrated. Run \`kit clean --deep\` or remove ${rel(dir)}/.wrangler/state by hand`,
-      )
-    }
+    // Stops here when wrangler's local state is not laid out the way kit knows.
+    const local = locateLocalD1(root, config, db)
+    const files = local.files
     // Resolved before anything is deleted: a missing seed file must not leave an empty database.
     const seed = db.seed ? seedFile(root, db) : undefined
     const steps = [
@@ -98,7 +74,7 @@ export default defineCommand({
       throw new KitError('Cancelled', undefined, ExitCode.interrupted)
     }
     pinCloudflareAccount(root, config)
-    for (const f of files) rmSync(f, { force: true })
+    removeLocalD1(local)
     if (!ctx.flags.json)
       ctx.log.step(files.length ? `removed local ${db.name}` : `no local ${db.name} to remove`)
 
@@ -110,6 +86,8 @@ export default defineCommand({
       const code = await exec(s.w.cmd, { cwd: s.w.cwd })
       results.push({ title: s.title, code })
       if (code !== 0) break
+      // The migrated database must be where kit just deleted from; otherwise nothing was reset.
+      if (s.title === 'migrate') requireLocalD1(root, db, local)
     }
     const ok = results.every((r) => r.code === 0)
     if (ctx.flags.json) emitJson({ db: db.name, ok, removed: files.map(rel), steps: results })

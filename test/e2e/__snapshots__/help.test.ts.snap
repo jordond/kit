@@ -518,14 +518,14 @@ Options
 `;
 
 exports[`help kit db restore --help 1`] = `
-"Run a .sql backup against a D1 database (local by default)
+"Restore a D1 database from a .sql backup (local: replaces it; remote: must be empty)
 
 Usage
   kit db restore [options]
 
 Examples
-  kit db restore backups/my-db-20260102T030405Z.sql
-  kit db restore prod.sql --remote     # asks first; --yes skips
+  kit db restore backups/my-db-20260102T030405Z.sql   # deletes the local database first
+  kit db restore prod.sql --remote                    # only into an empty database; asks first
 
 Options
   -h, --help         Show help
@@ -1186,7 +1186,7 @@ Options
   -v, --verbose      Stream all child output
   -q, --quiet        Errors and summary only
       --bail         Stop at the first failure
-      --to <string>  Version id to roll back to (default: the version before the latest)
+      --to <string>  Version id to roll back to (default: the last deployment with different code)
 
 "
 `;
