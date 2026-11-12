@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -274,6 +275,31 @@ test('a standalone worker: the install runs in its own dir with its own package 
       'api pnpm exec wrangler whoami',
     ])
     expect(readFileSync(log, 'utf8')).not.toContain(' bun ')
+  } finally {
+    w.cleanup()
+  }
+})
+
+test('a lockfile between the root and the worker: the install there is found by the re-check', async () => {
+  const w = fixture('standalone-worker', [])
+  const log = join(w.dir, '.pm.log')
+  try {
+    // The lockfile moves up one level: services/ is the install root, not the worker and not the repo root.
+    renameSync(join(w.dir, 'services/api/pnpm-lock.yaml'), join(w.dir, 'services/pnpm-lock.yaml'))
+    writeFileSync(join(w.dir, 'services/package.json'), '{ "name": "services", "private": true }\n')
+    w.script(
+      'pnpm',
+      `echo "$(basename "$PWD") pnpm $*" >> "${log}"\nif [ "$1" = install ]; then mkdir -p node_modules/.bin; : > node_modules/.bin/wrangler; fi`,
+    )
+    const r = await w.kit(['doctor', '--fix', '--yes', '--json'])
+    const doc = JSON.parse(r.stdout) as Doc
+    expect(doc.fixes).toEqual([{ id: 'wrangler', description: 'pnpm install', applied: true, ok: true }])
+    expect(doc.checks.find((c) => c.id === 'wrangler')?.status).toBe('ok')
+    expect(existsSync(join(w.dir, 'services/node_modules/.bin/wrangler'))).toBe(true)
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toEqual([
+      'services pnpm install',
+      'api pnpm exec wrangler whoami',
+    ])
   } finally {
     w.cleanup()
   }

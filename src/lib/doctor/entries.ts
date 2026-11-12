@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
 import { detectPackageManager, installRoot, pmExec } from '../pm'
@@ -59,6 +59,18 @@ export function workerInstall(root: string, workerDir: string): { cmd: string[];
 }
 
 /**
+ * Whether `bin` is installed for `dir` (repo-relative): in its node_modules or in any ancestor's up
+ * to the repo root, as Node resolves it. Every place `workerInstall` can install into is covered.
+ */
+export function hasBin(root: string, dir: string, bin: string): boolean {
+  const stop = resolve(root)
+  for (let d = resolve(root, dir); ; d = dirname(d)) {
+    if (existsSync(join(d, 'node_modules/.bin', bin))) return true
+    if (d === stop || dirname(d) === d) return false
+  }
+}
+
+/**
  * The checks for `root`. Probes run once per pass and are shared between checks; `refresh` drops
  * them, so entries run again after a fix see the machine as it is now.
  */
@@ -101,8 +113,7 @@ export function doctorEntries(
     if (!worker) return 'skip'
     const dir = join(root, worker.dir)
     // Never let `bun x` download wrangler just to ask who is logged in.
-    const bin = 'node_modules/.bin/wrangler'
-    if (!existsSync(join(dir, bin)) && !existsSync(join(root, bin))) return undefined
+    if (!hasBin(root, worker.dir, 'wrangler')) return undefined
     return await runQuiet(pmExec(detectPackageManager(dir, root), 'wrangler', 'whoami'), {
       cwd: dir,
     }).catch(() => undefined)
