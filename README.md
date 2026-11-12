@@ -153,7 +153,8 @@ targets: {
 ```
 
 A glob that matches a directory (`packages/*`) claims everything under it, and a `!` entry excludes:
-`paths: ['packages/shared', '!**/*.md']`. Exclusions apply after the other entries and never to `dir`.
+`paths: ['packages/shared', '!**/*.md']`. Exclusions apply after the other entries and never to `dir`;
+a file a target claims and then excludes is ignored (it does not count as unclaimed).
 
 When HEAD is the default base itself with a clean tree (a push build of `main`), there is nothing to
 compare: every target runs, with a warning, and `--json` adds `reason: "head-is-base"`. Pass

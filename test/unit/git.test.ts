@@ -219,6 +219,20 @@ group('changedFiles (--affected)', () => {
     })
   })
 
+  test('stagedFiles below the git toplevel: relative to the kit root, outside files left out', async () => {
+    mkdirSync(join(dir, 'tools/kit/apps/api'), { recursive: true })
+    writeFileSync(join(dir, 'tools/kit/apps/api/a.ts'), 'x')
+    writeFileSync(join(dir, 'tools/kit/b é.ts'), 'x')
+    writeFileSync(join(dir, 'root.lock'), 'x')
+    git('add', '-A')
+    expect((await stagedFiles(join(dir, 'tools/kit'))).sort()).toEqual(['apps/api/a.ts', 'b é.ts'])
+    expect((await stagedFiles(dir)).sort()).toEqual([
+      'root.lock',
+      'tools/kit/apps/api/a.ts',
+      'tools/kit/b é.ts',
+    ])
+  })
+
   test('an unknown base, or no repo at all, is undefined (callers run everything)', async () => {
     expect(await changedFiles(dir, 'origin/nope')).toBeUndefined()
     const bare = mkdtempSync(join(tmpdir(), 'kit-nogit-'))
