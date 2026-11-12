@@ -190,7 +190,7 @@ describe('serveShots', () => {
       expect((await fetch(`${origin}/done`, { method: 'POST', body: '{"ok":true}' })).status).toBe(404)
 
       const png = encodePng(4, 4, new Uint8Array(48))
-      expect((await fetch(at('out/ios-en-US-02'), { method: 'POST', body: png })).ok).toBe(true)
+      expect((await fetch(at('out/ios-en-US-02'), { method: 'POST', body: png as BodyInit })).ok).toBe(true)
       expect(server.images.get('ios-en-US-02')).toEqual(png)
 
       await fetch(at('done'), { method: 'POST', body: JSON.stringify({ ok: false, error: 'boom' }) })

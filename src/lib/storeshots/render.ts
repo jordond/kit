@@ -55,7 +55,9 @@ function checked(job: Job, bytes: Uint8Array | undefined): Uint8Array {
   } catch (e) {
     throw new KitError(`The page sent a bad PNG for ${job.id}: ${reason(e)}`)
   }
-  if (info.format !== 'png') throw new KitError(`The page sent a ${info.format} image for ${job.id}, not a PNG`)
+  if (info.format !== 'png') {
+    throw new KitError(`The page sent a ${info.format} image for ${job.id}, not a PNG`)
+  }
   if (info.width !== job.width || info.height !== job.height) {
     throw new KitError(
       `The PNG for ${job.id} is ${info.width}x${info.height}`,

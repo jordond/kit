@@ -77,7 +77,7 @@ function png(width: number, height: number, rgba: boolean): Uint8Array {
 }
 
 async function post(url: string, body: Uint8Array | string): Promise<void> {
-  const res = await fetch(url, { method: 'POST', body })
+  const res = await fetch(url, { method: 'POST', body: body as BodyInit })
   if (!res.ok) throw new Error(`POST ${url} answered ${res.status}`)
 }
 
