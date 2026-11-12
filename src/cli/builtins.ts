@@ -250,5 +250,5 @@ export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
-  db: 'Cloudflare D1 migrations and queries',
+  db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
 }

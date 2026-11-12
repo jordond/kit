@@ -20,7 +20,9 @@ export default defineCommand({
     const { emitJson } = await import('../../lib/log')
     const { run, runToStderr } = await import('../../lib/proc')
     const { confirm } = await import('../../lib/prompt')
-    const { localD1Files, localD1Id, readWranglerConfig } = await import('../../lib/worker')
+    const { localD1Files, localD1Id, localD1Sqlite, localD1StateDir, readWranglerConfig } = await import(
+      '../../lib/worker'
+    )
     if (ctx.args.remote) {
       throw new KitError(
         'kit db reset is local only',
@@ -43,6 +45,15 @@ export default defineCommand({
       )
     }
     const files = localD1Files(dir, id).filter((f) => existsSync(f))
+    // Databases exist locally but none is where kit expects this one: wrangler's layout has changed.
+    // Migrating now would report a reset that deleted nothing. No sqlite at all is a fresh checkout.
+    if (!files.length && localD1Sqlite(dir).length) {
+      const state = rel(localD1StateDir(dir))
+      throw new KitError(
+        `Local D1 layout not recognised: ${state} holds databases, none of them ${db.name}`,
+        `Nothing was deleted or migrated. Run \`kit clean --deep\` or remove ${rel(dir)}/.wrangler/state by hand`,
+      )
+    }
     // Resolved before anything is deleted: a missing seed file must not leave an empty database.
     const seed = db.seed ? seedFile(root, db) : undefined
     const steps = [
@@ -85,7 +96,7 @@ export default defineCommand({
     }
     pinCloudflareAccount(root, config)
     for (const f of files) rmSync(f, { force: true })
-    if (!ctx.flags.json) ctx.log.step(files.length ? `removed local ${db.name}` : `no local ${db.name} yet`)
+    if (!ctx.flags.json) ctx.log.step(files.length ? `removed local ${db.name}` : `no local ${db.name} to remove`)
 
     // --json: children print to stderr and the one document comes last.
     const exec = ctx.flags.json ? runToStderr : run

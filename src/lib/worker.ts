@@ -220,8 +220,20 @@ export function localD1Id(data: Record<string, unknown>, database: string): stri
   return undefined
 }
 
+/** Where wrangler keeps a worker's local D1 databases. */
+export const localD1StateDir = (dir: string): string => join(dir, '.wrangler/state/v3/d1')
+
+/** Every `.sqlite` file under the local D1 state dir, whichever database it belongs to; none when the dir is absent. */
+export function localD1Sqlite(dir: string): string[] {
+  const state = localD1StateDir(dir)
+  if (!existsSync(state)) return []
+  return [...new Bun.Glob('**/*.sqlite').scanSync({ cwd: state, onlyFiles: true, dot: true })].map((f) =>
+    join(state, f),
+  )
+}
+
 /** The SQLite files (with WAL sidecars) of one local database under a worker dir. */
 export function localD1Files(dir: string, id: string): string[] {
-  const base = join(dir, '.wrangler/state/v3/d1', D1_OBJECT, `${localD1Hash(id)}.sqlite`)
+  const base = join(localD1StateDir(dir), D1_OBJECT, `${localD1Hash(id)}.sqlite`)
   return [base, `${base}-shm`, `${base}-wal`]
 }

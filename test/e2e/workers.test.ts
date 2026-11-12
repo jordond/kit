@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { localD1Files, previewMarker } from '../../src/lib/worker'
 import { type Fixture, fixture } from '../helpers/fixture'
@@ -484,6 +492,44 @@ describe('db backup / restore / seed / reset', () => {
       expect(r.code).toBe(1)
       expect(JSON.parse(r.stdout)).toMatchObject({ ok: false, steps: [{ title: 'migrate', code: 1 }] })
       expect(fx.calls()).toHaveLength(1)
+    })
+
+    test('removed files are in the --json document', async () => {
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes', '--json'])
+      expect(r.code).toBe(0)
+      const doc = JSON.parse(r.stdout)
+      expect(doc.ok).toBe(true)
+      expect(doc.removed).toEqual(mine().map((f) => f.slice(fx.dir.length + 1)))
+    })
+
+    test('sqlite files but none for this database: exit 1 before migrating, nothing deleted', async () => {
+      for (const f of mine()) rmSync(f)
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes'])
+      expect(r.code).toBe(1)
+      expect(r.stderr).toContain('Local D1 layout not recognised: apps/edge/.wrangler/state/v3/d1')
+      expect(r.stderr).toContain('kit clean --deep')
+      expect(existsSync(other())).toBe(true)
+      expect(fx.calls()).toEqual([])
+      const j = await fx.kit(['db', 'reset', '--db', 'db', '--yes', '--json'])
+      expect(j.code).toBe(1)
+      expect(JSON.parse(j.stdout).ok).toBe(false)
+      expect(fx.calls()).toEqual([])
+    })
+
+    test('no state directory: a fresh checkout migrates and seeds, saying nothing was removed', async () => {
+      rmSync(join(fx.dir, 'apps/edge/.wrangler'), { recursive: true })
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes'])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toContain('no local infra-db to remove')
+      expect(fx.calls()).toHaveLength(2)
+    })
+
+    test('a state directory without sqlite files is fresh too; --json reports removed: []', async () => {
+      for (const f of [...mine(), other()]) rmSync(f)
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toMatchObject({ ok: true, removed: [] })
+      expect(fx.calls()).toHaveLength(2)
     })
 
     test('a database missing from the wrangler config exits 3 before deleting anything', async () => {
