@@ -323,7 +323,7 @@ kit shots ios && kit shots ipad && kit shots android   # capture the raw shots
 kit shots export                                       # compose them, for both stores and every locale
 kit shots export --store apple --locale en-US
 kit shots export --out build/store-shots --dry-run --json
-kit release metadata push ios --screenshots            # upload (see Store listing)
+kit release metadata push ios --only-screenshots       # upload the images, leave the text (see Store listing)
 ```
 
 ```ts
@@ -705,7 +705,7 @@ release: {
 | Command | Does |
 | --- | --- |
 | `kit release metadata pull <ios\|android> [--screenshots] [--force]` | Download the listing text; `--screenshots` also downloads the screenshots (Play: and the feature graphic and icon) |
-| `kit release metadata push <ios\|android> [--screenshots]` | Upload the listing text; `--screenshots` also replaces the screenshots (Play: and the feature graphic and icon) |
+| `kit release metadata push <ios\|android> [--screenshots] [--only-screenshots]` | Upload the listing text; `--screenshots` also replaces the screenshots (Play: and the feature graphic and icon); `--only-screenshots` sends the images and no text |
 
 - `push` never uploads a binary, submits for review, or changes a rollout or phased release. It asks
   before changing the public listing (`--yes` skips); `--dry-run` prints the files it would send and
@@ -720,6 +720,38 @@ release: {
   the next version there, or push after `kit release ios --track prod`. Android needs a
   release on some Play track, and `changelogs/` is never sent: `kit release android` writes those.
 - A missing key or directory is a usage error (exit 2) naming `release.<platform>.metadata`.
+
+#### Screenshots
+
+`kit release metadata push <ios|android> --screenshots` uploads the listing text and the images.
+`--only-screenshots` uploads the images alone: no text is sent, none has to exist in the repo, and the
+store keeps the text it has. Use it after `kit shots export`.
+
+```sh
+kit release metadata push ios --only-screenshots --dry-run   # check the images, upload nothing
+kit release metadata push ios --only-screenshots
+kit release metadata push android --screenshots --yes
+```
+
+Before the confirmation (and in `--dry-run`) kit reads every image it is about to upload. If the store
+would refuse any of them, the push stops with exit 4 and lists each file with its reason; nothing is
+uploaded and kit never rewrites the files.
+
+| Store | Rule |
+| --- | --- |
+| Both | The file is a PNG or JPEG and its content matches its extension; no alpha channel |
+| App Store | The pixel size is one App Store Connect takes; at most 10 screenshots per locale and display type |
+| Google Play screenshots | Each side 320 to 3840 px; the long side at most twice the short side; at most 8 per type and locale. Fewer than 2 phone screenshots is a warning |
+| Google Play images | `featureGraphic` is exactly 1024x500 with no alpha; `icon` is 512x512 and at most 1024 KB (alpha allowed) |
+
+The confirmation shows, per locale and class, how many images go up and at what size. With `--json`
+the document carries `images` (`file`, `locale`, `class`, `width`, `height`) and `problems`.
+
+**An iOS screenshot push replaces whole locales.** For each locale that has local screenshots, every
+screenshot set of that locale is deleted from the App Store before the new ones upload, including
+sets you have no local files for: a locale with only iPhone screenshots in the repo loses its iPad
+set. The confirmation names the locales ("replaces every screenshot set of: en-US, fr-FR"). Google
+Play replaces only the screenshot types that have local files, and applies the change in one commit.
 
 ### CI
 
