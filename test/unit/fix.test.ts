@@ -16,6 +16,7 @@ import {
   checkWranglerLogin,
   checkXcode,
 } from '../../src/commands/doctor'
+import { workerInstall } from '../../src/lib/doctor/entries'
 import {
   androidVersionFix,
   applyFix,
@@ -25,7 +26,8 @@ import {
   fixable,
   iosVersionFix,
   pinVersion,
-} from '../../src/lib/fix'
+} from '../../src/lib/doctor/fixes'
+import { installRoot } from '../../src/lib/pm'
 
 // `kit doctor --fix`: which checks carry a fix, and what each fix does (temp dirs, fakes on PATH).
 
@@ -70,6 +72,7 @@ describe('which checks carry a fix', () => {
       description: 'mise install',
       action: { cmd: ['mise', 'install'] },
       rechecks: ['java', 'ruby', 'ktlint'],
+      after: 'Open a new shell (or activate mise in this one) so the installed tools are on PATH',
     })
     expect(checkMise({ java: '21' }, { java: '17.0.1' }, false).fix).toBeUndefined()
     expect(checkMise({ java: '21' }, { java: '21.0.2' }).fix).toBeUndefined()
@@ -145,6 +148,38 @@ describe('which checks carry a fix', () => {
       cwd: '.',
     })
     expect(describeFix(ciPinFix(dir, '1.2.3'))).toEqual({ description: 'move the workflow pins to v1.2.3' })
+  })
+})
+
+describe('the wrangler install is resolved like the probe', () => {
+  const touch = (p: string) => {
+    mkdirSync(join(dir, p, '..'), { recursive: true })
+    writeFileSync(join(dir, p), '')
+  }
+
+  test('a standalone worker with its own lockfile: its package manager, in its dir', () => {
+    for (const p of ['package.json', 'bun.lock', 'services/api/package.json', 'services/api/pnpm-lock.yaml'])
+      touch(p)
+    expect(workerInstall(dir, 'services/api')).toEqual({ cmd: ['pnpm', 'install'], cwd: 'services/api' })
+    expect(installRoot(join(dir, 'services/api'), dir)).toBe(join(dir, 'services/api'))
+  })
+
+  test('a workspace member: the root lockfile decides both', () => {
+    for (const p of ['package.json', 'pnpm-lock.yaml', 'apps/api/package.json']) touch(p)
+    expect(workerInstall(dir, 'apps/api')).toEqual({ cmd: ['pnpm', 'install'], cwd: '.' })
+  })
+
+  test('no lockfile anywhere: bun, where the nearest package.json is', () => {
+    for (const p of ['package.json', 'apps/api/package.json']) touch(p)
+    expect(workerInstall(dir, 'apps/api')).toEqual({ cmd: ['bun', 'install'], cwd: 'apps/api' })
+    expect(workerInstall(dir, 'apps/api/src')).toEqual({ cmd: ['bun', 'install'], cwd: 'apps/api' })
+  })
+
+  test('nothing at all: the worker dir, never above the repo root', () => {
+    mkdirSync(join(dir, 'repo/api'), { recursive: true })
+    touch('package.json')
+    touch('yarn.lock')
+    expect(workerInstall(join(dir, 'repo'), 'api')).toEqual({ cmd: ['bun', 'install'], cwd: 'api' })
   })
 })
 

@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isVersion, repinWorkflow, tagSha } from './kitref'
-import { runQuiet } from './proc'
-import { readXcconfig, setModuleVersion, setXcconfigVersion } from './release/version'
+import { isVersion, repinWorkflow, tagSha } from '../kitref'
+import { runQuiet } from '../proc'
+import { readXcconfig, setModuleVersion, setXcconfigVersion } from '../release/version'
 
 /**
- * `kit doctor --fix`: what a check can repair by itself. Only safe, local repairs: a command in
+ * `kit doctor --fix`: what a check can repair by itself (./repair.ts runs them). Only safe, local repairs: a command in
  * the repo (`lefthook install`, `mise install`, the package manager's install, `chmod +x`) or a
  * small in-process edit (the version files, the workflow pins). Tools, logins, `.env` values and
  * secrets are never fixed; their checks keep a hint.
@@ -21,6 +21,8 @@ export interface Fix {
   action: FixAction
   /** Other check ids to run again after the fix; the fixed check always is. */
   rechecks?: string[]
+  /** What to do when the fix ran and the check still does not pass (default: the check's hint). */
+  after?: string
 }
 
 export interface FixResult {
@@ -28,8 +30,11 @@ export interface FixResult {
   description: string
   /** False when nothing was changed: a dry run, no confirmation, or the fix skipped itself. */
   applied: boolean
+  /** The check passes after the fix (a dry run: nothing went wrong). */
   ok: boolean
   error?: string
+  /** The next step when the fix was applied and the check still does not pass. */
+  hint?: string
 }
 
 /** What `--json` shows of a fix: its description, and the command when it is one. */
