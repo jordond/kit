@@ -59,9 +59,13 @@ export interface ListingImageFile {
 
 export interface ListingImageFiles {
   files: ListingImageFile[]
-  /** iOS: directories deliver stops at, or loads with no locale. `path` is absolute. */
+  /** iOS: directories deliver stops at, or loads images from with no locale. `path` is absolute. */
   refused: { path: string; reason: string }[]
 }
+
+/** The reason for an entry the uploader's glob returns that is not a file it can read. */
+export const NOT_A_FILE =
+  'not a regular file (a directory, or a link to nothing); fastlane would still try to upload it'
 
 /** The class of an iOS image whose pixel size App Store Connect does not take. */
 export const UNKNOWN_CLASS = 'unknown'
@@ -127,6 +131,10 @@ function entries(dir: string): string[] {
 const isDir = (path: string) => statSync(path, { throwIfNoEntry: false })?.isDirectory() === true
 const isFile = (path: string) => statSync(path, { throwIfNoEntry: false })?.isFile() === true
 
+/** Where a name falls in the brace `{png,jpg,jpeg}`: Dir.glob returns the matches of each in turn. */
+const BRACE_ORDER = ['.png', '.jpg', '.jpeg']
+const braceRank = (name: string) => BRACE_ORDER.indexOf(extname(name).toLowerCase())
+
 /** deliver's `Loader.load_app_screenshots`: `<locale>/*` and `appleTV|iMessage/<locale>/*`. */
 function deliverFiles(base: string): ListingImageFiles {
   const files: ListingImageFile[] = []
@@ -155,9 +163,12 @@ function deliverFiles(base: string): ListingImageFiles {
 
   for (const dir of folders) {
     const locale = language(basename(dir))
+    let names = entries(dir).filter((e) => GLOB_IMAGE.test(e))
     if (!locale) {
-      // `default`, or appleTV|iMessage inside one of them. deliver loads its files with a nil
-      // language, deletes the screenshot sets of the real locales, then fails creating a nil one.
+      // `default`, or appleTV|iMessage inside one of them. With no image there deliver loads
+      // nothing from it. With one, it loads the files with a nil language, deletes the screenshot
+      // sets of the real locales, then fails creating a nil one.
+      if (!names.length) continue
       refused.push({
         path: dir,
         reason:
@@ -165,12 +176,12 @@ function deliverFiles(base: string): ListingImageFiles {
       })
       continue
     }
-    let names = entries(dir).filter((e) => GLOB_IMAGE.test(e))
     // Framed mode: with one `*_framed` file, only the paths naming "framed" or "watch" go up.
     if (names.some((e) => GLOB_FRAMED.test(e))) {
       names = names.filter((e) => /framed|watch/.test(join(dir, e).toLowerCase()))
     }
-    for (const e of names) if (isFile(join(dir, e))) files.push({ path: join(dir, e), locale, type: '' })
+    // Whatever the glob matches, a directory or a dangling link too: deliver loads those as well.
+    for (const e of names) files.push({ path: join(dir, e), locale, type: '' })
   }
   return { files, refused }
 }
@@ -183,17 +194,20 @@ function supplyFiles(base: string): ListingImageFiles {
     const images = join(base, locale, 'images')
     const found = entries(images)
     for (const type of PLAY_IMAGE_TYPES) {
-      // `<type>.{png,jpg,jpeg}`, whatever the case; of several, supply uploads the last.
+      // `Dir.glob("<type>.{png,jpg,jpeg}").last`, whatever the case: the matches come in brace
+      // order (png, then jpg, then jpeg), sorted within one extension, and supply uploads the last,
+      // a directory or a dangling link too.
       const name = found
         .filter((e) => GLOB_IMAGE.test(e) && basename(e, extname(e)).toLowerCase() === type.toLowerCase())
+        .sort((a, b) => braceRank(a) - braceRank(b) || byBytes(a, b))
         .at(-1)
-      if (name && isFile(join(images, name))) files.push({ path: join(images, name), locale, type })
+      if (name) files.push({ path: join(images, name), locale, type })
     }
     for (const type of PLAY_SCREENSHOT_TYPES) {
       for (const dir of found.filter((e) => e.toLowerCase() === type.toLowerCase())) {
         for (const e of entries(join(images, dir))) {
           const path = join(images, dir, e)
-          if (GLOB_IMAGE.test(e) && isFile(path)) files.push({ path, locale, type })
+          if (GLOB_IMAGE.test(e)) files.push({ path, locale, type })
         }
       }
     }
@@ -209,7 +223,8 @@ function supplyFiles(base: string): ListingImageFiles {
  * the root, in deeper directories, and in `fonts/`, `android/` and deliver's own metadata
  * directories are not uploaded. A locale directory with a `*_framed` file sends only its framed
  * (and watch) files. Android (supply): `<locale>/images/<type>.<ext>` for the image types and
- * `<locale>/images/<type>/*` for the screenshot types, nothing else.
+ * `<locale>/images/<type>/*` for the screenshot types, nothing else. An entry with an image name
+ * that is not a regular file is in the list: the uploader's glob returns it too.
  */
 export function listingImageFiles(platform: 'ios' | 'android', base: string): ListingImageFiles {
   return platform === 'ios' ? deliverFiles(base) : supplyFiles(base)
@@ -230,6 +245,11 @@ export function checkListingImages(platform: 'ios' | 'android', root: string, ba
 
   for (const [index, { path, locale, type }] of found.files.entries()) {
     const file = files[index]!
+    // The glob returns a directory or a dangling link with an image name, and the lane fails on it.
+    if (!isFile(path)) {
+      problems.push(`${file}: ${NOT_A_FILE}`)
+      continue
+    }
     let bytes: Uint8Array
     let info: ImageInfo
     try {
@@ -319,4 +339,16 @@ export function imageSummary(images: ListingImage[]): string[] {
 /** The locales whose images are in the push, in first-seen order. */
 export function imageLocales(images: ListingImage[]): string[] {
   return [...new Set(images.map((i) => i.locale))]
+}
+
+/** The characters `Dir.glob` reads as part of a pattern, not of a name. */
+const GLOB_CHARS = ['[', ']', '{', '}', '*', '?', '\\']
+
+/**
+ * The glob characters in `path`, once each, in the order found. deliver and supply find the images
+ * with `Dir.glob(File.join(<path>, …))` and do not escape the path: with one of these in it the
+ * pattern matches nothing (or other directories), the lane uploads nothing and still succeeds.
+ */
+export function globChars(path: string): string[] {
+  return [...new Set(path)].filter((c) => GLOB_CHARS.includes(c))
 }

@@ -13,6 +13,7 @@ import { runSteps, type StepResult, summarize } from '../steps'
 import { appleCreds, onGitHubActions, playCreds } from './creds'
 import {
   checkListingImages,
+  globChars,
   type ImagePreflight,
   imageLocales,
   imageSummary,
@@ -335,9 +336,19 @@ export async function pushMetadata(
       ExitCode.precondition,
     )
   }
+  // The uploader globs under this path without escaping it; kit's listing would not be its listing.
+  const imagesDir = dirs.screenshotsDir ?? dirs.dir
+  const unreadable = screenshots ? globChars(imagesDir) : []
+  if (unreadable.length) {
+    throw new KitError(
+      `fastlane cannot read a path with ${unreadable.join(' ')} in it: ${relative(root, imagesDir)} (${imagesDir})`,
+      `${platform === 'ios' ? 'deliver' : 'supply'} finds the images with a glob, where [ ] { } * ? \\ are a pattern: it would upload none of them and report success. Rename the directory, or move the repo, so the path has none of these characters`,
+      ExitCode.precondition,
+    )
+  }
   // One enumeration, the uploader's: the file list, the card, the JSON and the counts all read it.
   const preflight: ImagePreflight = screenshots
-    ? checkListingImages(platform, root, dirs.screenshotsDir ?? dirs.dir)
+    ? checkListingImages(platform, root, imagesDir)
     : { files: [], images: [], problems: [], warnings: [] }
   const { images, problems, warnings } = preflight
   const plan = { text, images: preflight.files, files: [...text, ...preflight.files] }

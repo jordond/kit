@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { encodePng } from '../../src/lib/image/png'
 import { type Fixture, fixture } from '../helpers/fixture'
@@ -493,6 +493,55 @@ describe('kit release metadata push', () => {
     expect(alone.code).toBe(4)
     expect(alone.stderr).toContain(`${IOS_SHOTS}/en: deliver does not take this directory name`)
     expect(lanes()).toEqual([])
+  })
+
+  test('a screenshots path with glob characters stops an image push (exit 4): fastlane would upload nothing and succeed', async () => {
+    const file = join(f.dir, 'kit.config.ts')
+    const config = readFileSync(file, 'utf8')
+    writeFileSync(
+      file,
+      config
+        .replace(`metadata: '${IOS_DIR}'`, "metadata: 'client/store [v2]/metadata'")
+        .replace(`metadata: '${ANDROID_DIR}'`, "metadata: 'client/play{1}/android'"),
+    )
+    put('client/store [v2]/metadata/en-US/name.txt', 'App')
+    put('client/store [v2]/screenshots/en-US/01.png', IPHONE())
+    put('client/play{1}/android/en-US/title.txt', 'App')
+    put('client/play{1}/android/en-US/images/phoneScreenshots/1.png', PHONE())
+    put('client/play{1}/android/en-US/images/phoneScreenshots/2.png', PHONE())
+
+    const ios = await run(['release', 'metadata', 'push', 'ios', '--screenshots', '--yes'])
+    expect(ios.code).toBe(4)
+    expect(ios.stderr).toContain('fastlane cannot read a path with [ ] in it: client/store [v2]/screenshots')
+    const android = await run(['release', 'metadata', 'push', 'android', '--only-screenshots', '--dry-run'])
+    expect(android.code).toBe(4)
+    expect(android.stderr).toContain('fastlane cannot read a path with { } in it: client/play{1}/android')
+    expect(lanes()).toEqual([])
+    // a text push does not go through the image glob
+    const text = await run(['release', 'metadata', 'push', 'android', '--yes'])
+    expect(text.code).toBe(0)
+    expect(lanes().map(lane)).toEqual(['android metadata_push'])
+  })
+
+  test('a dangling link with an image name stops the push (exit 4), named: the uploader would still take it', async () => {
+    symlinkSync('nowhere.png', join(f.dir, `${IOS_SHOTS}/en-US/02.png`))
+    const r = await run(['release', 'metadata', 'push', 'ios', '--screenshots', '--yes'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain(`${IOS_SHOTS}/en-US/02.png: not a regular file`)
+    mkdirSync(join(f.dir, `${ANDROID_DIR}/en-US/images/phoneScreenshots/3.png`))
+    const j = await run(['release', 'metadata', 'push', 'android', '--screenshots', '--yes', '--json'])
+    expect(j.code).toBe(4)
+    expect(JSON.parse(j.stdout).problems).toEqual([
+      expect.stringContaining(`${ANDROID_DIR}/en-US/images/phoneScreenshots/3.png: not a regular file`),
+    ])
+    expect(lanes()).toEqual([])
+  })
+
+  test('an empty default/ beside the locales does not stop the push', async () => {
+    put(`${IOS_SHOTS}/default/notes.txt`)
+    const r = await run(['release', 'metadata', 'push', 'ios', '--screenshots', '--yes'])
+    expect(r.code).toBe(0)
+    expect(lanes().map(lane)).toEqual(['ios metadata_push'])
   })
 
   test('a Play tvBanner of another size is refused', async () => {

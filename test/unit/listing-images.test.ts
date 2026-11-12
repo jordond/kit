@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { encodePng } from '../../src/lib/image/png'
 import {
   checkListingImages,
   DELIVER_LANGUAGES,
+  globChars,
   imageLocales,
   imageSummary,
   listingImageFiles,
@@ -56,6 +57,7 @@ const ios = () => checkListingImages('ios', root, join(root, SHOTS))
 const android = () => checkListingImages('android', root, join(root, PLAY))
 
 const IPHONE = () => png(1320, 2868)
+const NOT_A_FILE = 'not a regular file (a directory, or a link to nothing); fastlane would still try to upload it'
 
 describe('checkListingImages: both stores', () => {
   test('a clean set has no problems and reports each file', () => {
@@ -175,6 +177,31 @@ describe('checkListingImages: iOS', () => {
       `${SHOTS}/appleTV/iMessage`,
       `${SHOTS}/iMessage/default`,
     ])
+  })
+
+  test('default/ without an image is not refused: deliver loads nothing from it', () => {
+    const shot = put(`${SHOTS}/en-US/01.png`, IPHONE())
+    put(`${SHOTS}/default/notes.txt`, 'x')
+    put(`${SHOTS}/default/.hidden.png`, 'x')
+    put(`${SHOTS}/default/raw/01.png`, 'x')
+    mkdirSync(join(root, `${SHOTS}/iMessage/default`), { recursive: true })
+    put(`${SHOTS}/appleTV/default/readme.md`, 'x')
+    expect(ios()).toMatchObject({ files: [shot], problems: [] })
+    // one image there and deliver loads it with no language
+    put(`${SHOTS}/default/01.JPG`, 'x')
+    expect(ios().problems).toEqual([expect.stringContaining(`${SHOTS}/default: deliver gives this directory no locale`)])
+  })
+
+  test('a dangling link or a directory with an image name is a problem: deliver would still load it', () => {
+    const shot = put(`${SHOTS}/en-US/01.png`, IPHONE())
+    const link = `${SHOTS}/en-US/02.png`
+    symlinkSync('nowhere.png', join(root, link))
+    const dir = `${SHOTS}/en-US/03.jpg`
+    mkdirSync(join(root, dir))
+    const r = ios()
+    expect(r.files).toEqual([shot, link, dir])
+    expect(r.images.map((i) => i.file)).toEqual([shot])
+    expect(r.problems).toEqual([`${link}: ${NOT_A_FILE}`, `${dir}: ${NOT_A_FILE}`])
   })
 
   test('a directory name deliver does not take is refused', () => {
@@ -345,12 +372,49 @@ describe('checkListingImages: Play', () => {
     const phone = shot('1.png', 1440, 2560)
     const banner = put(`${PLAY}/en-US/images/tvBanner.png`, png(1280, 720))
     const icon = put(`${PLAY}/en-US/images/icon.png`, png(512, 512))
-    // of icon.jpg and icon.png, supply uploads the last
-    put(`${PLAY}/en-US/images/icon.jpg`, 'x')
     const feature = put(`${PLAY}/en-US/images/featureGraphic.png`, png(1024, 500))
     const r = android()
     expect(r.files).toEqual([feature, icon, banner, phone, wear])
     expect(r.problems).toEqual([])
+  })
+
+  test('of several files for one image type supply uploads the last of png, jpg, jpeg: that one is checked', () => {
+    // Dir.glob("icon.{png,jpg,jpeg}").last: brace order, not name order
+    put(`${PLAY}/en-US/images/icon.png`, png(512, 512))
+    const jpg = put(`${PLAY}/en-US/images/icon.jpg`, 'x')
+    expect(android().files).toEqual([jpg])
+    expect(android().problems).toEqual([expect.stringContaining(`${jpg}: `)])
+    const jpegFile = put(`${PLAY}/en-US/images/icon.jpeg`, jpeg(512, 512))
+    expect(android()).toMatchObject({ files: [jpegFile], problems: [] })
+    // png is the last only when it is alone
+    put(`${PLAY}/de-DE/images/tvBanner.png`, png(1280, 720))
+    const banner = put(`${PLAY}/de-DE/images/tvBanner.jpeg`, jpeg(1280, 720))
+    expect(android().files).toEqual([banner, jpegFile])
+  })
+
+  test('a dangling link or a directory with an image name is a problem: supply would still upload it', () => {
+    const one = shot('1.png', 1440, 2560)
+    const two = shot('2.png', 1440, 2560)
+    const link = `${PLAY}/en-US/images/phoneScreenshots/3.png`
+    symlinkSync('nowhere.png', join(root, link))
+    const dir = `${PLAY}/en-US/images/phoneScreenshots/4.png`
+    mkdirSync(join(root, dir))
+    // the last match of an image type, as the glob returns it
+    put(`${PLAY}/en-US/images/icon.png`, png(512, 512))
+    const icon = `${PLAY}/en-US/images/icon.jpeg`
+    symlinkSync('nowhere.jpeg', join(root, icon))
+    const r = android()
+    expect(r.files).toEqual([icon, one, two, link, dir])
+    expect(r.images.map((i) => i.file)).toEqual([one, two])
+    expect(r.problems).toEqual([icon, link, dir].map((file) => `${file}: ${NOT_A_FILE}`))
+  })
+})
+
+describe('globChars', () => {
+  test('the characters Dir.glob reads as a pattern, once each, in the order found', () => {
+    expect(globChars('/repo/app/fastlane/screenshots')).toEqual([])
+    expect(globChars('/repo/app [v2]/fastlane/screenshots')).toEqual(['[', ']'])
+    expect(globChars('/a{b}/c*d/e?f\\g*')).toEqual(['{', '}', '*', '?', '\\'])
   })
 })
 
