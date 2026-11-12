@@ -163,6 +163,22 @@ describe('--affected', () => {
     expect(fx.calls()).toEqual([])
   })
 
+  test('--staged honours paths too, and a staged root file does not fan out', async () => {
+    const cfg = join(fx.dir, 'kit.config.ts')
+    writeFileSync(cfg, readFileSync(cfg, 'utf8').replace("envs: ['staging'] }", "paths: ['packages/ui'] }"))
+    write('packages/ui/Button.tsx')
+    git('add', 'packages/ui/Button.tsx')
+    expect((await fx.kit(['lint', '--staged'])).code).toBe(0)
+    // web is selected through its paths; only the workspace command gets the staged file.
+    expect(summary()).toEqual(['. prep', '. biome check . packages/ui/Button.tsx', './apps/web astro check'])
+
+    git('reset', '-q')
+    write('bun.lock', 'changed')
+    git('add', 'bun.lock')
+    expect((await fx.kit(['lint', '--staged'])).code).toBe(0)
+    expect(summary().slice(3)).toEqual(['. prep', '. biome check . bun.lock'])
+  })
+
   test.each(['lint', 'format', 'typecheck', 'check', 'test', 'build'])(
     '%s takes --affected',
     async (verb) => {

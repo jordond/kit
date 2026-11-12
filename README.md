@@ -103,6 +103,8 @@ targets: {
 A changed file that no target claims (the root lockfile, `kit.config.ts`, CI workflows) affects every
 target, and the workspace commands run whenever anything changed. Nothing changed exits 0. Unlike
 `--staged`, tools get no file list: `--affected` only picks targets, and the two can't be combined.
+`--staged` picks targets by the same `dir` and `paths` rule, but a staged file no target claims selects
+none (the workspace commands still get it), so pre-commit hooks stay fast.
 `--json` adds `affected` (the target names) and `base`.
 
 ## Step timings

@@ -34,7 +34,10 @@ export interface PlanOptions {
   extra?: string[]
   /** `--env` for dev and deploy. */
   env?: string
-  /** Staged files (repo-relative). Workspace commands get them appended; targets without one are skipped. */
+  /**
+   * Staged files (repo-relative). Workspace commands get them appended; targets with none under
+   * their `dir` or `paths` are skipped. A staged file no target owns selects no target.
+   */
   staged?: string[]
   /**
    * `--affected`: changed files (repo-relative). Only selects: targets no changed file affects are
@@ -275,18 +278,12 @@ function matchesPath(root: string, entry: string, file: string): boolean {
 }
 
 /**
- * Whether any of `files` (repo-relative) belongs to the target: under its `dir`, or, with
- * `paths: true` (`--affected`), matching one of its `paths`. `--staged` looks at `dir` only.
+ * Whether any of `files` (repo-relative) belongs to the target: under its `dir`, or matching one of
+ * its `paths`. The one selection rule for `--staged` and `--affected`.
  */
-export function touches(
-  root: string,
-  t: Pick<TargetConfig, 'dir' | 'paths'>,
-  files: string[],
-  opts: { paths?: boolean } = {},
-): boolean {
+export function touches(root: string, t: Pick<TargetConfig, 'dir' | 'paths'>, files: string[]): boolean {
   const dir = relative(root, resolve(root, t.dir))
-  const extra = opts.paths ? (t.paths ?? []) : []
-  return files.some((f) => under(dir, f) || extra.some((p) => matchesPath(root, p, f)))
+  return files.some((f) => under(dir, f) || (t.paths ?? []).some((p) => matchesPath(root, p, f)))
 }
 
 /**
@@ -298,8 +295,8 @@ export function affectedTargets(root: string, config: KitConfig, files: string[]
   const all = Object.entries(config.targets)
   if (!files.length) return []
   const owned = all.filter(([, t]) => relative(root, resolve(root, t.dir)) !== '')
-  const orphan = files.some((f) => !owned.some(([, t]) => touches(root, t, [f], { paths: true })))
-  return all.filter(([, t]) => orphan || touches(root, t, files, { paths: true })).map(([n]) => n)
+  const orphan = files.some((f) => !owned.some(([, t]) => touches(root, t, [f])))
+  return all.filter(([, t]) => orphan || touches(root, t, files)).map(([n]) => n)
 }
 
 /**

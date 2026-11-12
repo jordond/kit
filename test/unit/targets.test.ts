@@ -129,11 +129,39 @@ describe('affected', () => {
     expect(names(['apps/api/a.ts'], c)).toEqual(['root', 'api'])
     expect(names(['bun.lock'], c)).toEqual(['root', 'api'])
   })
-  test('touches: paths count only when asked (--staged looks at dir alone)', () => {
+  test('touches: dir or paths; no files touch nothing', () => {
     const t = shared.targets.api!
-    expect(touches(root, t, ['packages/shared/x.ts'])).toBe(false)
-    expect(touches(root, t, ['packages/shared/x.ts'], { paths: true })).toBe(true)
-    expect(touches(root, t, [], { paths: true })).toBe(false)
+    expect(touches(root, t, ['apps/api/a.ts'])).toBe(true)
+    expect(touches(root, t, ['packages/shared/x.ts'])).toBe(true)
+    expect(touches(root, t, ['packages/other/x.ts'])).toBe(false)
+    expect(touches(root, t, [])).toBe(false)
+  })
+  test('staged: paths select the target too; the file list the tools get is unchanged', () => {
+    const c = configSchema.parse({
+      name: 'x',
+      workspace: { lint: 'biome check' },
+      toolchain: { root: 'apps/client' },
+      targets: {
+        web: { kind: 'astro', dir: 'apps/web', paths: ['packages/ui'] },
+        client: { kind: 'kotlin', dir: 'apps/client', paths: ['shared-kt/**'] },
+      },
+    })
+    const groups = planVerbs(root, c, ['lint'], { staged: ['packages/ui/Button.tsx'] })
+    expect(groups.map((g) => g.title)).toEqual(['workspace', 'web'])
+    expect(groups[0]!.commands[0]!.cmd.slice(-1)).toEqual(['packages/ui/Button.tsx'])
+    expect(groups[1]!.commands[0]!.cmd).toEqual(['bun', 'x', 'astro', 'check'])
+    // ktlint runs in the toolchain root: a staged file outside it selects the target but is not passed.
+    const kt = planVerbs(root, c, ['lint'], { staged: ['shared-kt/A.kt', 'apps/client/B.kt'] })
+    expect(kt.find((g) => g.title === 'client')!.commands[0]!.cmd).toEqual(['ktlint', '--relative', 'B.kt'])
+    expect(planVerbs(root, c, ['lint'], { staged: ['shared-kt/A.kt'] }).map((g) => g.title)).toEqual([
+      'workspace',
+    ])
+  })
+  test('staged: a file no target owns does not fan out to every target', () => {
+    expect(planVerbs(root, shared, ['lint'], { staged: ['bun.lock'] }).map((g) => g.title)).toEqual([])
+    expect(planVerbs(root, config, ['lint'], { staged: ['bun.lock'] }).map((g) => g.title)).toEqual([
+      'workspace',
+    ])
   })
 
   test('planVerbs: only affected targets, workspace whenever anything changed', () => {
