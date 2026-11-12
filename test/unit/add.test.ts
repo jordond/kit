@@ -66,9 +66,6 @@ describe('withInclude (settings.gradle.kts)', () => {
     expect(withInclude('include(\n    ":a",\n    ":b",\n) // apps\nrootProject.name = "x"', 'c')).toBe(
       'include(\n    ":a",\n    ":b",\n) // apps\ninclude(":c")\nrootProject.name = "x"',
     )
-    expect(withInclude('if (ci) {\n    include(":a")\n}', 'b')).toBe(
-      'if (ci) {\n    include(":a")\n    include(":b")\n}',
-    )
     expect(withInclude('rootProject.name = "x"', 'a')).toBe('rootProject.name = "x"\n\ninclude(":a")\n')
     expect(withInclude('', 'a')).toBe('include(":a")\n')
   })
@@ -161,6 +158,54 @@ describe('withInclude: statements are scanned, the edit is read back, line endin
     ]) {
       expect(out).not.toContain('\r')
     }
+  })
+})
+
+describe('withInclude: placement', () => {
+  test('a file whose only includes are nested is manual', () => {
+    expect(withInclude('if (ci) {\n    include(":bench")\n}\n', 'core')).toBe('manual')
+    expect(withInclude('if (ci) include(":bench")\n', 'core')).toBe('manual')
+    expect(withInclude('listOf("a").forEach {\n    include(":$it")\n}\n', 'core')).toBe('manual')
+    // Still a no-op when the nested include is the project itself.
+    expect(withInclude('if (ci) {\n    include(":bench")\n}\n', 'bench')).toBeUndefined()
+  })
+
+  test('anchors on the last top-level include, not on a later nested one', () => {
+    const text = [
+      'include(":shared")',
+      'include(":android")',
+      'if (System.getenv("CI") == null) {',
+      '    include(":bench")',
+      '}',
+      'dependencyResolutionManagement {',
+      '    repositories { mavenCentral() }',
+      '    include(":odd")',
+      '}',
+      '',
+    ].join('\n')
+    expect(withInclude(text, 'core')).toBe(
+      text.replace('include(":android")\n', 'include(":android")\ninclude(":core")\n'),
+    )
+    expect(includedProjects(withInclude(text, 'core') as string)).toEqual([
+      'shared',
+      'android',
+      'core',
+      'bench',
+      'odd',
+    ])
+  })
+
+  test('an include whose expression continues is not an anchor', () => {
+    const plus = "include ':a' +\n        suffix\n"
+    expect(withInclude(plus, 'core', undefined, true)).toBe('manual')
+    expect(withInclude(`include ':top'\n${plus}`, 'core', undefined, true)).toBe(
+      `include ':top'\ninclude ':core'\n${plus}`,
+    )
+    expect(withInclude('include(":a").also {\n    println(it)\n}\n', 'core')).toBe('manual')
+    expect(withInclude('include(":a")\n    .also { println(it) }\n', 'core')).toBe('manual')
+    expect(withInclude('include(":a") // done\n\nrootProject.name = "x"\n', 'core')).toBe(
+      'include(":a") // done\ninclude(":core")\n\nrootProject.name = "x"\n',
+    )
   })
 })
 
