@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, relative } from 'node:path'
 import { type Fixture, fixture } from '../helpers/fixture'
 
 // `kit changelog` in the release-toolchain fixture (versions.keys.android, TOML 1.4.0) with a
@@ -188,6 +189,96 @@ test('--write <file>: a section for an older release goes above the existing one
     ].join('\n'),
   )
   expect(existsSync(join(f.dir, 'CHANGELOG.md'))).toBe(false)
+})
+
+test('no version to name (the .kit layout): one Unreleased section, rewritten as commits land', async () => {
+  // No --platform and no root package.json: nothing names a version.
+  const first = await f.kit(['changelog', '--write'])
+  expect(first.code).toBe(0)
+  expect(first.stderr).toContain('CHANGELOG.md: added ## Unreleased (')
+  const date = dated(first.stderr)
+  const text = read('CHANGELOG.md')
+  expect(text).toStartWith(`# Changelog\n\n## Unreleased (${date})\n\n### Breaking\n`)
+  expect(text).not.toContain('offline support')
+
+  // Nothing new: the file stays as it is.
+  const same = await f.kit(['changelog', '--write'])
+  expect(same.stderr).toContain('## Unreleased is up to date')
+  expect(read('CHANGELOG.md')).toBe(text)
+
+  // A new commit lands in the same section; there is still one.
+  const offline = add('feat: offline support')
+  const dry = await f.kit(['changelog', '--write', '--dry-run'])
+  expect(dry.stderr).toContain('would update ## Unreleased (')
+  expect(read('CHANGELOG.md')).toBe(text)
+  const again = await f.kit(['changelog', '--write', '--json'])
+  expect(JSON.parse(again.stdout)).toMatchObject({ heading: `## Unreleased (${date})`, written: true })
+  const next = read('CHANGELOG.md')
+  expect(next).toContain(`### Features\n\n- offline support (${offline})\n`)
+  expect(next.match(/^## /gm)).toEqual(['## '])
+  expect(next).toContain(`- **auth:** passkeys only (${sha.auth})`)
+
+  // A released section below it is kept.
+  writeFileSync(join(f.dir, 'CHANGELOG.md'), `${next}\n## android 1.3.0 (2026-01-01)\n\n- older\n`)
+  add('fix: sync retry')
+  expect((await f.kit(['changelog', '--write'])).stderr).toContain('CHANGELOG.md: updated ## Unreleased (')
+  const last = read('CHANGELOG.md')
+  expect(last.match(/^## .*/gm)).toEqual([`## Unreleased (${date})`, '## android 1.3.0 (2026-01-01)'])
+  expect(last).toContain('- sync retry (')
+  expect(last).toEndWith('## android 1.3.0 (2026-01-01)\n\n- older\n')
+})
+
+test('a shallow clone without the tag: a warning on stderr, and --write refuses (exit 4)', async () => {
+  const clone = mkdtempSync(join(tmpdir(), 'kit-shallow-'))
+  try {
+    git('clone', '-q', '--depth', '1', `file://${f.dir}`, clone)
+    const cwd = relative(f.dir, clone)
+    const r = await f.kit(['changelog'], { cwd })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toBe(`### Breaking\n\n- widget refresh (${sha.widgets})\n`)
+    expect(r.stderr).toContain('Shallow clone and no *v[0-9]* tag in it: this lists only the fetched commits')
+    expect(r.stderr).toContain('git fetch --unshallow --tags')
+    const json = await f.kit(['changelog', '--platform', 'android', '--json'], { cwd })
+    expect(json.stderr).toBe('')
+    expect(JSON.parse(json.stdout)).toMatchObject({ from: null, shallow: true })
+
+    for (const args of [['--write'], ['--write', '--dry-run'], ['--write', '--json']]) {
+      const w = await f.kit(['changelog', ...args], { cwd })
+      expect(w.code).toBe(4)
+      expect(`${w.stderr}${w.stdout}`).toContain('git fetch --unshallow --tags')
+    }
+    expect(existsSync(join(clone, 'CHANGELOG.md'))).toBe(false)
+
+    // With the history and tags fetched it is an ordinary repo again.
+    git('-C', clone, 'fetch', '-q', '--unshallow', '--tags')
+    const full = JSON.parse((await f.kit(['changelog', '--json'], { cwd })).stdout)
+    expect(full.from).toBe('api/v0.3.0')
+    expect(full.shallow).toBeUndefined()
+  } finally {
+    rmSync(clone, { recursive: true, force: true })
+  }
+})
+
+test('a git failure is an error, never an empty or whole-history changelog', async () => {
+  for (const args of [
+    ['--to', 'no-such-ref'],
+    ['--from', 'no-such-ref'],
+    ['--to', 'no-such-ref', '--write'],
+  ]) {
+    const r = await f.kit(['changelog', ...args])
+    expect(r.code).not.toBe(0)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('no-such-ref')
+  }
+  expect(existsSync(join(f.dir, 'CHANGELOG.md'))).toBe(false)
+  const outside = mkdtempSync(join(tmpdir(), 'kit-nogit-'))
+  try {
+    const r = await f.kit(['changelog'], { cwd: relative(f.dir, outside) })
+    expect(r.code).not.toBe(0)
+    expect(r.stdout).toBe('')
+  } finally {
+    rmSync(outside, { recursive: true, force: true })
+  }
 })
 
 test('usage errors: an unknown platform, a stray argument', async () => {

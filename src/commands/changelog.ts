@@ -3,7 +3,8 @@ import { defineCommand } from '../cli/command'
 /**
  * `kit changelog`: the Conventional Commits since the last release tag, grouped into Breaking,
  * Features, Fixes, Performance and Other. Markdown on stdout, or `--write` puts a dated
- * `## <version>` section at the top of CHANGELOG.md (once per version). No external tool: it reads
+ * `## <version>` section at the top of CHANGELOG.md (once per version; an Unreleased section is
+ * rewritten in place). No external tool: it reads
  * `git log` and the release tags kit creates (`ios/v1.4.0+12`, `api/v0.3.0`).
  */
 export default defineCommand({
@@ -26,10 +27,10 @@ export default defineCommand({
   async run(ctx) {
     const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import('node:fs')
     const { dirname, isAbsolute, join } = await import('node:path')
-    const { ANY_RELEASE_TAG, groupCommits, heading, prependSection, renderMarkdown, tagVersion } =
+    const { ANY_RELEASE_TAG, groupCommits, heading, prependSection, renderMarkdown, tagVersion, UNRELEASED } =
       await import('../lib/changelog')
     const { ExitCode, KitError } = await import('../lib/errors')
-    const { describe, logRange } = await import('../lib/git')
+    const { describe, hasCommit, isShallow, logRange } = await import('../lib/git')
     const { emitJson } = await import('../lib/log')
 
     const root = ctx.root ?? process.cwd()
@@ -57,19 +58,36 @@ export default defineCommand({
     }
 
     const to = str(ctx.args.to) ?? 'HEAD'
-    // A tag given as --to describes itself: look for the release before it.
+    // A tag given as --to describes itself: look for the release before it. A first commit has
+    // nothing before it; any other git failure (a bad ref, not a repository) stops the command.
     const tagFrom = str(ctx.args.to) ? `${to}~1` : to
+    const match = platform ? `${platform}/v*` : ANY_RELEASE_TAG
     const from =
       str(ctx.args.from) ??
-      (await describe(platform ? `${platform}/v*` : ANY_RELEASE_TAG, { cwd: root, ref: tagFrom }).catch(
-        () => undefined,
-      ))
+      (tagFrom === to || (await hasCommit(tagFrom, root))
+        ? await describe(match, { cwd: root, ref: tagFrom })
+        : undefined)
+    // A shallow clone (CI's default checkout) has neither the tags nor the history: without a
+    // tag, what `git log` returns is the fetched depth, not a release.
+    const shallow = from === undefined && (await isShallow(root))
+    const unshallow = 'Fetch the full history first: `git fetch --unshallow --tags`'
+    if (shallow && write) {
+      throw new KitError(
+        `Shallow clone and no ${match} tag in it: the changes since the last release are unknown`,
+        unshallow,
+        ExitCode.precondition,
+      )
+    }
     const groups = groupCommits(await logRange(from, to, { cwd: root }), { all: ctx.args.all === true })
     const markdown = renderMarkdown(groups)
-    const doc = { from: from ?? null, to, sections: groups }
+    const doc = { from: from ?? null, to, ...(shallow ? { shallow: true } : {}), sections: groups }
     const since = from ? `since ${from}` : 'in the history'
 
     if (!write) {
+      if (shallow && !ctx.flags.json) {
+        ctx.log.warn(`Shallow clone and no ${match} tag in it: this lists only the fetched commits`)
+        ctx.log.dim(`  › ${unshallow}`)
+      }
       if (ctx.flags.json) emitJson(doc)
       else if (markdown) process.stdout.write(markdown)
       else ctx.log.dim(`No changes ${since}`)
@@ -92,9 +110,12 @@ export default defineCommand({
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-    const head = heading(version ?? 'Unreleased', date, platform)
+    // No version to file the changes under: one Unreleased section, rewritten on every run.
+    const head = heading(version ?? UNRELEASED, date, platform)
+    const label = head.replace(/\s*\([^)]*\)$/, '')
     const before = existsSync(path) ? readFileSync(path, 'utf8') : undefined
-    const after = markdown ? prependSection(before, head, markdown) : undefined
+    const replaces = !version && !!before?.split('\n').some((l) => l === label || l.startsWith(`${label} `))
+    const after = markdown ? prependSection(before, head, markdown, { replace: !version }) : undefined
     const written = after !== undefined && !ctx.flags.dryRun
     if (written) {
       mkdirSync(dirname(path), { recursive: true })
@@ -102,8 +123,10 @@ export default defineCommand({
     }
     if (ctx.flags.json) emitJson({ ...doc, file, heading: head, written })
     else if (!markdown) ctx.log.dim(`No changes ${since}: ${file} left as it is`)
-    else if (after === undefined) ctx.log.dim(`- ${file}  already has ${head.replace(/\s*\([^)]*\)$/, '')}`)
-    else if (ctx.flags.dryRun) ctx.log.step(`would add ${head} to ${file}`)
-    else ctx.log.success(`${file}: added ${head}`)
+    else if (after === undefined)
+      ctx.log.dim(`- ${file}  ${replaces ? `${label} is up to date` : `already has ${label}`}`)
+    else if (ctx.flags.dryRun)
+      ctx.log.step(`would ${replaces ? 'update' : 'add'} ${head} ${replaces ? 'in' : 'to'} ${file}`)
+    else ctx.log.success(`${file}: ${replaces ? 'updated' : 'added'} ${head}`)
   },
 })

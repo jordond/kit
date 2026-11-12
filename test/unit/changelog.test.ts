@@ -12,7 +12,7 @@ import {
   renderMarkdown,
   tagVersion,
 } from '../../src/lib/changelog'
-import { type CommitDetail, describe as gitDescribe, logRange } from '../../src/lib/git'
+import { type CommitDetail, describe as gitDescribe, hasCommit, isShallow, logRange } from '../../src/lib/git'
 
 const commit = (subject: string, over: Partial<CommitDetail> = {}): CommitDetail => ({
   sha: 'abcdef0123456789',
@@ -147,6 +147,28 @@ describe('headings and --write', () => {
     expect(prependSection(first, '## ios 1.0.0 (2026-03-03)', body)).toBeDefined()
   })
 
+  test('replace: an Unreleased section is rewritten in place, and only when it changes', () => {
+    const released = '## 1.0.0 (2026-01-01)\n\n- first\n'
+    const first = prependSection(`# Changelog\n\n${released}`, '## Unreleased (2026-02-01)', body, {
+      replace: true,
+    })!
+    expect(first).toBe(`# Changelog\n\n## Unreleased (2026-02-01)\n\n${body}\n${released}`)
+    // The same changes on the same day: nothing to write.
+    expect(prependSection(first, '## Unreleased (2026-02-01)', body, { replace: true })).toBeUndefined()
+    // More commits later: the one section is replaced, the release below it stays.
+    const more = '### Features\n\n- widgets (1234567)\n\n### Fixes\n\n- crash (abcdef0)\n'
+    const second = prependSection(first, '## Unreleased (2026-02-03)', more, { replace: true })
+    expect(second).toBe(`# Changelog\n\n## Unreleased (2026-02-03)\n\n${more}\n${released}`)
+    expect(second!.match(/^## Unreleased/gm)).toHaveLength(1)
+    // As the only section, and for a platform.
+    const only = prependSection(undefined, '## ios Unreleased (2026-02-01)', body, { replace: true })!
+    expect(prependSection(only, '## ios Unreleased (2026-02-02)', more, { replace: true })).toBe(
+      `# Changelog\n\n## ios Unreleased (2026-02-02)\n\n${more}`,
+    )
+    // Without replace (a version) the rule stays: never twice.
+    expect(prependSection(first, '## Unreleased (2026-02-03)', more)).toBeUndefined()
+  })
+
   test('a file without sections gains one at the end', () => {
     expect(prependSection('# Changes\n\nIntro.\n', '## 1.0.0 (2026-01-01)', body)).toBe(
       `# Changes\n\nIntro.\n\n## 1.0.0 (2026-01-01)\n\n${body}`,
@@ -208,6 +230,14 @@ describe('ranges in a git repo', () => {
     expect(await gitDescribe(ANY_RELEASE_TAG, { cwd: repo })).toBe('api/v0.3.0')
     expect(await gitDescribe('ios/v*', { cwd: repo })).toBe('ios/v1.0.0+1')
     expect(await gitDescribe(ANY_RELEASE_TAG, { cwd: repo, ref: 'api/v0.3.0~1' })).toBe('ios/v1.0.0+1')
+  })
+
+  test('hasCommit and isShallow', async () => {
+    expect(await hasCommit('ios/v1.0.0+1', repo)).toBe(true)
+    // The first commit has nothing before it; a ref that does not exist is not a commit.
+    expect(await hasCommit('ios/v1.0.0+1~1', repo)).toBe(false)
+    expect(await hasCommit('no-such-ref', repo)).toBe(false)
+    expect(await isShallow(repo)).toBe(false)
   })
 
   test('grouped from the tag: the footer makes it breaking, the merge is dropped', async () => {

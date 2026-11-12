@@ -169,3 +169,14 @@ export async function logRange(
       return { sha, subject, body: body.trim(), merge: parents.trim().split(/\s+/).length > 1 }
     })
 }
+
+/** Whether `ref` names a commit (`HEAD~1` of a root or shallow-boundary commit does not). */
+export async function hasCommit(ref: string, cwd = '.'): Promise<boolean> {
+  const cmd = ['git', 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`]
+  return (await runPiped(cmd, { cwd })).code === 0
+}
+
+/** A shallow clone (`fetch-depth: 1`): history, and usually the tags, are cut off. */
+export async function isShallow(cwd = '.'): Promise<boolean> {
+  return (await read(['rev-parse', '--is-shallow-repository'], cwd)).trim() === 'true'
+}
