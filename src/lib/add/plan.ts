@@ -224,9 +224,16 @@ export function planToolchainModule(input: ModuleInput): AddPlan {
 
 /**
  * A target name: a letter first, then letters, digits, `-` and `_`. It is typed after a verb
- * (`kit build api`), so it cannot be `workspace`, an existing target, or a kit command.
+ * (`kit build api`), so it cannot be `workspace`, an existing target, a kit command, or a repo
+ * command.
  */
-export function validateTargetName(name: string, existing: string[], commands: string[]): void {
+export function validateTargetName(
+  name: string,
+  existing: string[],
+  commands: string[],
+  /** Repo commands (`.kit/commands`): the first token of each path, and its file for the error. */
+  repoCommands: { path: string[]; file: string }[] = [],
+): void {
   const fail = (message: string, hint?: string) => {
     throw new KitError(message, hint, ExitCode.usage)
   }
@@ -238,6 +245,8 @@ export function validateTargetName(name: string, existing: string[], commands: s
   }
   if (name === 'workspace') fail('"workspace" is reserved', 'It names the repo-wide steps')
   if (existing.includes(name)) fail(`Target "${name}" already exists`, `Targets: ${existing.join(', ')}`)
+  const repo = repoCommands.find((c) => c.path[0] === name)
+  if (repo) fail(`"${name}" is a repo command (${repo.file})`, 'Pick a name that is not a command')
   if (commands.includes(name)) fail(`"${name}" is a kit command`, 'Pick a name that is not a command')
 }
 

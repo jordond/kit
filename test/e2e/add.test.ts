@@ -321,6 +321,22 @@ describe('kit add target', () => {
     expect(has('apps/jobs')).toBe(false)
   })
 
+  test('a name that is a repo command is refused, naming its file', async () => {
+    f = fixture('override', [])
+    put('.kit/commands/whale/sfx.ts', read('.kit/commands/test.ts'))
+    const before = read('kit.config.ts')
+    for (const [name, file] of [
+      ['whale', '.kit/commands/whale/sfx.ts'],
+      ['test', '.kit/commands/test.ts'],
+    ] as const) {
+      const r = await f.kit(['add', 'target', name, '--kind', 'custom', '--dir', 'tools/x'])
+      expect(r.code).toBe(2)
+      expect(r.stderr).toContain(`"${name}" is a repo command (${file})`)
+    }
+    expect(read('kit.config.ts')).toBe(before)
+    expect(has('tools/x')).toBe(false)
+  })
+
   test('outside a project: exit 3', async () => {
     workers()
     rmSync(join(f.dir, 'kit.config.ts'))

@@ -251,6 +251,24 @@ describe('names', () => {
       expect(check(bad)).toBe(2)
   })
 
+  test('target names: a repo command is refused by its first token, naming the file', () => {
+    const repo = [
+      { path: ['whale', 'sfx'], file: '.kit/commands/whale/sfx.ts' },
+      { path: ['test'], file: '.kit/commands/test.ts' },
+    ]
+    const check = (n: string) => {
+      try {
+        validateTargetName(n, [], ['test'], repo)
+      } catch (e) {
+        return e instanceof KitError ? `${e.exitCode} ${e.message}` : String(e)
+      }
+      return 'no error'
+    }
+    expect(check('whale')).toBe('2 "whale" is a repo command (.kit/commands/whale/sfx.ts)')
+    expect(check('test')).toBe('2 "test" is a repo command (.kit/commands/test.ts)')
+    expect(check('sfx')).toBe('no error')
+  })
+
   test('dirs stay inside the repo', () => {
     expect(parseDir('./apps/api/')).toBe('apps/api')
     for (const bad of ['', '/abs', '..', '../x', 'a/../../x']) expect(usage(() => parseDir(bad))).toBe(2)

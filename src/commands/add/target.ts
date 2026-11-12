@@ -20,8 +20,9 @@ export default defineCommand({
   ].join('\n'),
   async run(ctx) {
     const { existsSync, readFileSync, statSync } = await import('node:fs')
-    const { join } = await import('node:path')
+    const { join, relative } = await import('node:path')
     const { builtins } = await import('../../cli/builtins')
+    const { listRepoCommands } = await import('../../cli/discover')
     const { requireProject } = await import('../../cli/command')
     const { CONFIG_FILE, configFile } = await import('../../config/load')
     const { ExitCode, KitError } = await import('../../lib/errors')
@@ -52,10 +53,12 @@ export default defineCommand({
     }
     if (ctx.args.dir === undefined) throw new KitError('kit add target needs --dir', example, ExitCode.usage)
     const dir = parseDir(ctx.args.dir)
-    validateTargetName(name, Object.keys(config.targets), [
-      ...new Set(builtins.map((b) => b.path[0]!)),
-      'help',
-    ])
+    validateTargetName(
+      name,
+      Object.keys(config.targets),
+      [...new Set(builtins.map((b) => b.path[0]!)), 'help'],
+      listRepoCommands(root).map((c) => ({ path: c.path, file: relative(root, c.file) })),
+    )
     if (existsSync(join(root, dir)) && !statSync(join(root, dir)).isDirectory()) {
       throw new KitError(`--dir "${dir}" is a file`, undefined, ExitCode.usage)
     }
