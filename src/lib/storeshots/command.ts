@@ -169,8 +169,7 @@ function listRaw(dir: string): Set<string> {
  */
 function checkFonts(shots: Shots, plan: ExportPlan): void {
   const declared = new Set((shots.fonts ?? []).map((font) => font.family))
-  const known = (family: string): boolean =>
-    declared.has(family) || isGenericFamily(family)
+  const known = (family: string): boolean => declared.has(family) || isGenericFamily(family)
   const problems = new Set<string>()
   const families = new Set<string>()
   const undeclared = (what: string, family: string): void => {
@@ -244,7 +243,6 @@ function requireChrome(): string {
   }
   return chrome
 }
-
 
 /** Per store and locale: how many screenshots of each set and their size; then what was removed and skipped. */
 function report(log: Logger, result: ExportResult): void {

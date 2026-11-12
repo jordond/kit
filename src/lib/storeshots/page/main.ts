@@ -110,7 +110,9 @@ async function run(): Promise<void> {
   await Promise.all(plan.fonts.map(loadFont))
   // Loaded once and only when a slide draws it; a mark that does not load ends the run.
   const mark =
-    plan.brand && plan.jobs.some((job) => job.slide.showMascot) ? await loadImage(url(plan.brand.mark), 'The brand mark') : null
+    plan.brand && plan.jobs.some((job) => job.slide.showMascot)
+      ? await loadImage(url(plan.brand.mark), 'The brand mark')
+      : null
 
   const canvas = document.createElement('canvas')
   for (const job of plan.jobs) {

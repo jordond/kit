@@ -32,8 +32,12 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      # KIT_CHROME_TEST=1 runs the `kit shots export` page in the runner image's Google Chrome
+      # (`google-chrome` on PATH, which kit finds itself), so the page and the render host cannot drift.
       - name: Test
         run: bun test
+        env:
+          KIT_CHROME_TEST: '1'
 
       - name: Build
         run: bun run build

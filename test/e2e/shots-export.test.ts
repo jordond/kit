@@ -448,7 +448,9 @@ describe('kit shots export', () => {
     const r = await run()
     expect(r.code).toBe(3)
     expect(r.stderr).toContain('1 font family is not declared in shots.fonts')
-    expect(r.stderr).toContain('slide "1 - Home" (slide-1) badge (drawn in the headline family) uses "Nunito"')
+    expect(r.stderr).toContain(
+      'slide "1 - Home" (slide-1) badge (drawn in the headline family) uses "Nunito"',
+    )
     expect(r.stderr).toContain(
       'slide "1 - Home" (slide-1) brand wordmark (drawn in the headline family) uses "Nunito"',
     )
@@ -603,7 +605,9 @@ describe.skipIf(process.env.KIT_CHROME_TEST !== '1')('kit shots export with a re
     writeFileSync(path('maestro/screenshots/android/journal.png'), 'not a png')
     const r = await kit(['--store', 'google', '--locale', 'en-US'])
     expect(r.code).toBe(1)
-    expect(r.stderr).toContain('The shots page failed on android-en-US-02: The raw shot does not load as an image')
+    expect(r.stderr).toContain(
+      'The shots page failed on android-en-US-02: The raw shot does not load as an image',
+    )
     expect(r.stderr).toContain('Its raw shot is maestro/screenshots/android/journal.png')
     expect(r.stderr).not.toContain('http://')
     expect(pngs()).toEqual([])

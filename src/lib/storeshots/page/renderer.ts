@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
-import type { PageBrand, Slide } from '../types'
+
 import { fontStack } from '../fonts'
+import type { PageBrand, Slide } from '../types'
 import { drawBackground } from './background'
 import { drawDeviceFrame, roundedRectPath } from './device-frames'
 

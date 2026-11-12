@@ -128,9 +128,11 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
   // as long as it keeps moving.
   let timer: ReturnType<typeof setTimeout> | undefined
   const { promise: idle, resolve: timeUp } = Promise.withResolvers<'timeout'>()
+  let settled = false
   const restartClock = (): void => {
     clearTimeout(timer)
-    timer = setTimeout(() => timeUp('timeout'), timeoutMs)
+    // An image posted while the run is being torn down must not leave a timer holding kit open.
+    if (!settled) timer = setTimeout(() => timeUp('timeout'), timeoutMs)
   }
   const server = serveShots(plan, { page: opts.page, onImage: restartClock })
 
@@ -216,6 +218,7 @@ export const renderJobs: RenderJobs = async (plan, opts) => {
     for (const job of plan.jobs) images.set(job.id, checked(job, server.images.get(job.id)))
     return images
   } finally {
+    settled = true
     clearTimeout(timer)
     for (const signal of STOP_SIGNALS) process.off(signal, onSignal)
     off()
