@@ -6,7 +6,9 @@ import { checkCiPin } from '../../src/commands/doctor'
 import { bumpPin, KIT_PACKAGE, repinWorkflow } from '../../src/lib/kitref'
 
 // renovate/default.json: the shared preset (`github>jordond/kit//renovate/default`). Renovate itself
-// is not run here; these pin the rules kit relies on and the ref format both sides read and write.
+// is not run here (no network in `bun test`): these pin the rules kit relies on and the ref format
+// both sides read and write. The `renovate` job in .github/workflows/ci.yml runs Renovate's
+// renovate-config-validator on the preset and the template configs.
 const KIT = resolve(import.meta.dir, '../..')
 
 interface Rule {
@@ -66,6 +68,20 @@ describe('renovate/default.json', () => {
       text: renovated,
       count: 2,
     })
+  })
+
+  test('CI validates the preset and both templates with a pinned Renovate', () => {
+    const ci = readFileSync(join(KIT, '.github/workflows/ci.yml'), 'utf8')
+    const job = ci.slice(ci.indexOf('\n  renovate:'))
+    expect(job).toMatch(/renovate@\d+\.\d+\.\d+ -- renovate-config-validator --strict/)
+    for (const file of [
+      'renovate/default.json',
+      'templates/gradle/renovate.json',
+      'templates/toolchain/renovate.json',
+    ])
+      expect(job).toContain(file)
+    // Actions stay pinned to a commit with a version comment, like the rest of the workflow.
+    for (const uses of job.match(/uses: .*/g) ?? []) expect(uses).toMatch(/@[0-9a-f]{40} # v\d+/)
   })
 
   test('stays out of the npm tarball: Renovate reads it from the GitHub repo', () => {
