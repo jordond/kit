@@ -363,8 +363,17 @@ INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
 
 - The new value is checked against the key's own rule before anything is written; only that line of
   `.env` changes (comments, order, quotes and line endings stay), and a key `.env` lacks is added.
-- kit reads `.env` the way dotenv does: on an unquoted value ` #` starts a comment (`KEY=value # note`
-  is `value`); quote a value that contains ` #`.
+- kit reads `.env` the way dotenv and Bun do: on an unquoted value ` #` starts a comment
+  (`KEY=value # note` is `value`, `KEY= # note` is empty), a `#` inside `'…'`, `"…"` or backticks is
+  part of the value, `"…"` turns `\n` / `\r` into line breaks, and `\$` is a literal `$`. kit itself
+  never expands `$NAME`, but Bun (which loads `.env` before kit starts) does, so write a literal
+  dollar as `\$`.
+- When kit writes a value (`env init`, `env rotate`, rendered outputs) it quotes one that holds a
+  `#`, has spaces at either end or starts with a quote, writes a multi-line value as `"…\n…"`, and in
+  `.env` writes `$` as `\$` (`.dev.vars` keeps `$` raw: wrangler does not expand there). It refuses
+  (exit 3, naming the key) a value no reader would get back intact: one that needs quotes and holds
+  `'`, `"` and a backtick or ends in a backslash, a multi-line value holding `"` or a literal `\n`,
+  and in `.env` one ending in `\$`. Base64-encode such a value.
 - It confirms first, since the old value stops working once the new one is pushed (`--yes` skips).
   `--dry-run` writes nothing and lists what would rotate and where it would be pushed.
 - `--push` pushes every secret of the remotes that hold the key. The remotes are listed first (a
