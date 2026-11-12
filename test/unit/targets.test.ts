@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { resolve } from 'node:path'
 import { configSchema } from '../../src/config/schema'
-import { isGradleTask, planVerbs, selectTargets, targetCommands } from '../../src/lib/targets'
+import {
+  affectedTargets,
+  isGradleTask,
+  planVerbs,
+  selectTargets,
+  targetCommands,
+  touches,
+} from '../../src/lib/targets'
 
 const root = resolve(import.meta.dir, '../fixtures/bun-workers')
 const config = configSchema.parse((await import(`${root}/kit.config.ts`)).default)
@@ -83,7 +90,83 @@ describe('planVerbs', () => {
   })
 })
 
+describe('affected', () => {
+  const shared = configSchema.parse({
+    name: 'x',
+    targets: {
+      api: { kind: 'worker', dir: 'apps/api', paths: ['packages/shared', 'schema/**/*.sql'] },
+      web: { kind: 'astro', dir: 'apps/web', paths: ['./packages/ui/'] },
+      client: { kind: 'gradle', dir: 'apps/client' },
+    },
+  })
+  const names = (files: string[], c = shared) => affectedTargets(root, c, files)
+
+  test('a file under a target dir affects that target only', () => {
+    expect(names(['apps/web/src/a.astro'])).toEqual(['web'])
+    expect(names(['apps/api/src/a.ts', 'apps/client/shared/A.kt'])).toEqual(['api', 'client'])
+    // A sibling dir sharing the prefix is not under the target.
+    expect(names(['apps/api/a.ts', 'apps/api-old/a.ts'])).toEqual(['api', 'web', 'client'])
+  })
+  test('paths: a dir, a dir with ./ and a trailing slash, and a glob', () => {
+    expect(names(['packages/shared/src/x.ts'])).toEqual(['api'])
+    expect(names(['packages/ui/Button.tsx'])).toEqual(['web'])
+    expect(names(['schema/v2/0001_init.sql'])).toEqual(['api'])
+    expect(names(['schema/v2/readme.md'])).toEqual(['api', 'web', 'client'])
+  })
+  test('a file no target owns (lockfile, CI, root config) affects every target', () => {
+    expect(names(['bun.lock'])).toEqual(['api', 'web', 'client'])
+    expect(names(['.github/workflows/ci.yml'])).toEqual(['api', 'web', 'client'])
+    expect(names(['apps/web/a.astro', 'kit.config.ts'])).toEqual(['api', 'web', 'client'])
+  })
+  test('nothing changed affects nothing', () => {
+    expect(names([])).toEqual([])
+  })
+  test('a target at the repo root is always affected but owns no file', () => {
+    const c = configSchema.parse({
+      name: 'x',
+      targets: { root: { kind: 'custom', dir: '.' }, api: { kind: 'worker', dir: 'apps/api' } },
+    })
+    expect(names(['apps/api/a.ts'], c)).toEqual(['root', 'api'])
+    expect(names(['bun.lock'], c)).toEqual(['root', 'api'])
+  })
+  test('touches: paths count only when asked (--staged looks at dir alone)', () => {
+    const t = shared.targets.api!
+    expect(touches(root, t, ['packages/shared/x.ts'])).toBe(false)
+    expect(touches(root, t, ['packages/shared/x.ts'], { paths: true })).toBe(true)
+    expect(touches(root, t, [], { paths: true })).toBe(false)
+  })
+
+  test('planVerbs: only affected targets, workspace whenever anything changed', () => {
+    const titles = (affected: string[], targets?: string[]) =>
+      planVerbs(root, config, ['lint'], { affected, targets }).map((g) => g.title)
+    expect(titles(['apps/web/src/a.astro'])).toEqual(['workspace', 'web'])
+    expect(titles(['apps/client/a.kt'])).toEqual(['workspace', 'client'])
+    expect(titles(['bun.lock'])).toEqual(['workspace', 'web', 'client'])
+    expect(titles([])).toEqual([])
+  })
+  test('planVerbs: named targets and affected intersect', () => {
+    const titles = (affected: string[], targets: string[]) =>
+      planVerbs(root, config, ['lint'], { affected, targets }).map((g) => g.title)
+    expect(titles(['apps/web/a.astro', 'apps/client/a.kt'], ['client'])).toEqual(['client'])
+    expect(titles(['apps/web/a.astro'], ['client'])).toEqual([])
+    expect(titles(['apps/client/a.kt'], ['web'])).toEqual(['workspace'])
+  })
+  test('planVerbs: no file list reaches the tools', () => {
+    const [workspace] = planVerbs(root, config, ['lint'], { affected: ['apps/web/a.astro'] })
+    expect(workspace!.commands.at(-1)!.cmd).toEqual(['sh', '-c', 'biome check .'])
+  })
+})
+
 describe('config', () => {
+  test('paths is a list of strings', () => {
+    const t = { kind: 'worker', dir: 'apps/api' }
+    expect(
+      configSchema.safeParse({ name: 'x', targets: { a: { ...t, paths: ['packages/x'] } } }).success,
+    ).toBe(true)
+    expect(configSchema.safeParse({ name: 'x', targets: { a: { ...t, paths: 'packages/x' } } }).success).toBe(
+      false,
+    )
+  })
   test('d1 target must exist', () => {
     const r = configSchema.safeParse({ name: 'x', cloudflare: { d1: { db: { name: 'd', target: 'nope' } } } })
     expect(r.success).toBe(false)
