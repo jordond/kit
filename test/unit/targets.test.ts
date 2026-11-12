@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { resolve } from 'node:path'
-import { configSchema } from '../../src/config/schema'
+import { builtins } from '../../src/cli/builtins'
+import { configSchema, RESERVED_SERVICE_NAMES } from '../../src/config/schema'
 import {
   affectedTargets,
   isGradleTask,
@@ -212,5 +213,9 @@ describe('config', () => {
       )
     }
     expect(configSchema.safeParse({ name: 'x', release: { services: { api: svc } } }).success).toBe(true)
+  })
+  test('every `kit release <name>` built-in is a reserved service name', () => {
+    const names = new Set(builtins.filter((b) => b.path[0] === 'release').map((b) => b.path[1]))
+    expect([...names].sort()).toEqual([...RESERVED_SERVICE_NAMES].sort())
   })
 })
