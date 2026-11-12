@@ -496,6 +496,19 @@ jobs:
       SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 ```
 
+### Lane tests
+
+The shared Fastfile's selection logic (which build a promotion moves, which Play release a rollout
+changes, tester-group resolution) has Ruby tests that run it against stubbed store objects:
+
+```sh
+ruby test/fastlane/run.rb
+```
+
+They need only Ruby and its bundled minitest, not kit's fastlane bundle. `bun test` runs them too
+(`test/e2e/fastlane-lanes.test.ts`), plus a `fastlane lanes` parse of the Fastfile when the bundle is
+installed; each part is skipped when its tool is missing.
+
 ## Cloudflare workers
 
 For targets of kind `worker`. Every command runs wrangler from the target's directory with
