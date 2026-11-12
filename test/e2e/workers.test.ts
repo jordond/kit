@@ -282,15 +282,14 @@ describe('release rollback', () => {
     expect(fx.calls()).toEqual([])
   })
 
-  test('a service named rollback wins, with a warning', async () => {
+  test('a service cannot be named after a kit release command (config error)', async () => {
     writeFileSync(
       join(fx.dir, 'kit.config.ts'),
       CONFIG.replace('/*ROLLBACK*/', "rollback: { versionKey: 'rollback', deploy: 'kit deploy edge' },"),
     )
-    const r = await fx.kit(['release', 'rollback', '--dry-run', '--json'])
-    expect(r.code).toBe(0)
-    expect(r.stderr).toContain('release.services.rollback takes `kit release rollback`')
-    expect(JSON.parse(r.stdout)).toMatchObject({ service: 'rollback', tag: 'rollback/v1.2.3', dryRun: true })
+    const r = await fx.kit(['release', 'rollback', 'edge', '--dry-run'])
+    expect(r.code).toBe(3)
+    expect(r.stderr).toContain('"rollback" is a kit release command; rename the service')
     expect(fx.calls()).toEqual([])
   })
 })

@@ -364,7 +364,7 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 | `kit version show` | Version names from `versions.file` and the last release tags |
 | `kit version bump <patch\|minor\|major> [--platform ios\|android\|all\|<service>]` | Edit the TOML value, commit `chore(release): …`, push (`--no-push`, `--pr`) |
 | `kit release ios\|android --track internal\|alpha\|beta\|prod` | Preflight → next build number from the store → confirm → build → upload → tag `<platform>/v<version>+<build>` |
-| `kit release <service>` | `release.services.<name>`: build, deploy, tag `<name>/v<version>` |
+| `kit release <service>` | `release.services.<name>`: build, deploy, tag `<name>/v<version>`. A service cannot be named after a release command (`ios`, `android`, `certs`, `status`, `promote`, `rollout`, `metadata`, `rollback`) |
 | `kit release rollback <service> [--to <version-id>]` | Worker services only: `wrangler rollback`; tags stay put (see [Cloudflare workers](#cloudflare-workers)) |
 | `kit release certs [--add]` | match `appstore`, readonly; `--add` creates only what this app is missing (never nuke) |
 | `kit fastlane …` | fastlane with kit's env and the ASC/Play key files |

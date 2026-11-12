@@ -204,4 +204,13 @@ describe('config', () => {
       configSchema.safeParse({ name: 'x', targets: { workspace: { kind: 'custom', dir: '.' } } }).success,
     ).toBe(false)
   })
+  test('a service cannot take the name of a kit release command', () => {
+    const svc = { versionKey: 'k', deploy: 'kit deploy api' }
+    for (const name of ['ios', 'android', 'certs', 'status', 'promote', 'rollout', 'metadata', 'rollback']) {
+      expect(configSchema.safeParse({ name: 'x', release: { services: { [name]: svc } } }).success).toBe(
+        false,
+      )
+    }
+    expect(configSchema.safeParse({ name: 'x', release: { services: { api: svc } } }).success).toBe(true)
+  })
 })

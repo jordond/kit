@@ -3,6 +3,18 @@ import { z } from 'zod'
 export const verbs = ['lint', 'format', 'typecheck', 'test', 'build', 'dev', 'deploy'] as const
 export type Verb = (typeof verbs)[number]
 
+/** `kit release <name>` built-ins: a service cannot take one of these names. */
+export const RESERVED_SERVICE_NAMES = [
+  'ios',
+  'android',
+  'certs',
+  'status',
+  'promote',
+  'rollout',
+  'metadata',
+  'rollback',
+] as const
+
 export const kinds = ['gradle', 'kotlin', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
 
@@ -203,6 +215,15 @@ export const configSchema = z
     }
     if (c.targets.workspace) {
       ctx.addIssue({ code: 'custom', path: ['targets', 'workspace'], message: '"workspace" is reserved' })
+    }
+    for (const name of Object.keys(c.release?.services ?? {})) {
+      if ((RESERVED_SERVICE_NAMES as readonly string[]).includes(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['release', 'services', name],
+          message: `"${name}" is a kit release command; rename the service`,
+        })
+      }
     }
   })
 

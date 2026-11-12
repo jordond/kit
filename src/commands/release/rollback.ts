@@ -26,15 +26,6 @@ export default defineCommand({
     const { rollbackArgs, serviceDeployTarget } = await import('../../lib/worker')
     const { root, config } = requireProject(ctx)
     const services = config.release?.services ?? {}
-    // A service literally named `rollback` keeps `kit release rollback` as its release command.
-    if (services.rollback) {
-      ctx.log.warn(
-        'release.services.rollback takes `kit release rollback`: releasing that service. Rename it to roll services back',
-      )
-      const { serviceCommand } = await import('./service')
-      await serviceCommand('rollback').run(ctx)
-      return
-    }
     const [name, ...more] = ctx.positionals
     const known = Object.keys(services)
     const svc = name ? services[name] : undefined

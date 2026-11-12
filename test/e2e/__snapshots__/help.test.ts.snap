@@ -15,6 +15,7 @@ Develop
   kotlin      Run the Kotlin toolchain wrapper in toolchain.root
   wrangler    Run wrangler in a worker target's directory
   xcode       Open the iOS project in Xcode
+  clean       Remove build output
 
 Quality
   lint        Lint every target
@@ -27,6 +28,7 @@ Release
   release     Ship to the stores …
   version     Version names in the catalog TOML …
   fastlane    Run fastlane with kit's shared Fastfile
+  changelog   List the changes since the last release tag
 
 Infra
   env         Render, check and push env from .env …
@@ -36,10 +38,28 @@ Infra
 Setup
   doctor      Check tools, versions and .env
   init        Set up a fresh clone, or add kit to a new repo
+  add         Scaffold a module or a target into this repo …
   deps        List or update npm dependencies (catalog-aware)
   upgrade     Move the @jordond/kit pin and the workflow SHAs to a kit release
   config      Print the resolved kit.config.ts
   completion  Print a shell completion script
+
+"
+`;
+
+exports[`help kit add --help 1`] = `
+"Scaffold a module or a target into this repo
+
+Usage
+  kit add <command> [options]
+
+Commands
+  module  Add a KMP library module (Gradle or Kotlin toolchain)
+  target  Add a target to kit.config.ts
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
 
 "
 `;
@@ -74,10 +94,11 @@ Usage
   kit env <command> [options]
 
 Commands
-  sync   Render env outputs (.dev.vars) from .env
-  check  Validate .env and check outputs for drift
-  push   Push secrets with wrangler and gh
-  init   Create .env and ask for missing keys
+  sync    Render env outputs (.dev.vars) from .env
+  check   Validate .env and check outputs for drift
+  push    Push secrets with wrangler and gh
+  init    Create .env and ask for missing keys
+  rotate  Generate a new value for a key and sync
 
 Options
   -h, --help     Show help
@@ -96,6 +117,10 @@ Commands
   ios       Build and upload iOS to a track
   android   Build and upload Android to a track
   certs     Install App Store signing with match; --add creates what is missing
+  status    Show the version and the latest build on each store track
+  promote   Promote a build the store already has to a later track (no rebuild)
+  rollout   Change the production rollout: Play staged rollout, App Store phased release
+  metadata  Sync the store listing (text, screenshots) …
   rollback  Roll a worker service back to an earlier version
 
 Options
@@ -122,6 +147,61 @@ Options
 "
 `;
 
+exports[`help kit add module --help 1`] = `
+"Add a KMP library module to the Gradle build or the Kotlin toolchain project
+
+Usage
+  kit add module [options]
+
+Examples
+  kit add module core
+  kit add module feature:login --compose   # <gradle root>/feature/login
+  kit add module data --targets android,jvm --dry-run
+  kit add module ui --dir libs/ui
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --compose           Compose Multiplatform module (applies kit.compose)
+      --targets <string>  Comma-separated: android, ios, jvm, js (default android,ios,jvm)
+      --dir <string>      Module directory, relative to the Gradle or toolchain root (default: the name)
+      --force             Overwrite files that already exist
+
+"
+`;
+
+exports[`help kit add target --help 1`] = `
+"Add a target to kit.config.ts; a new worker also gets a minimal scaffold
+
+Usage
+  kit add target [options]
+
+Examples
+  kit add target api --kind worker --dir apps/api
+  kit add target web --kind astro --dir apps/web
+  kit add target api --kind worker --dir apps/api --dry-run
+
+Options
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --kind <string>  worker | vite | astro | docker | custom
+      --dir <string>   Target directory, relative to the repo root
+
+"
+`;
+
 exports[`help kit build --help 1`] = `
 "Build every target
 
@@ -134,16 +214,49 @@ Examples
   kit build client --release
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --release  Gradle or Kotlin toolchain: the signed release bundle (AAB)
-      --apk      Gradle: the signed release APK
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+      --release        Gradle or Kotlin toolchain: the signed release bundle (AAB)
+      --apk            Gradle: the signed release APK
+
+"
+`;
+
+exports[`help kit changelog --help 1`] = `
+"List the changes since the last release tag
+
+Usage
+  kit changelog [options]
+
+Examples
+  kit changelog
+  kit changelog --platform ios
+  kit changelog --from v0.5.0 --to v0.6.0 --json
+  kit changelog --write
+  kit changelog --platform api --write docs/api-changes.md
+
+Options
+  -h, --help               Show help
+  -V, --version            Show kit version
+      --json               Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run            Plan and run read-only steps; skip mutations
+  -y, --yes                Accept confirmations (never skips prod)
+  -v, --verbose            Stream all child output
+  -q, --quiet              Errors and summary only
+      --bail               Stop at the first failure
+      --from <string>      Start after this tag or ref (default: the last release tag)
+      --to <string>        End at this ref (default: HEAD)
+      --platform <string>  ios, android or a service: use its <name>/v* tags
+      --all                Include chore, test, ci and style commits
+      --write              Add the section to CHANGELOG.md, or to the file named after it
 
 "
 `;
@@ -158,6 +271,35 @@ Examples
   kit check
   kit check api admin web
   kit check --fix
+  kit check --affected
+
+Options
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+  -f, --fix            Format instead of lint, then typecheck
+
+"
+`;
+
+exports[`help kit clean --help 1`] = `
+"Remove build output
+
+Usage
+  kit clean [options]
+
+Examples
+  kit clean
+  kit clean client
+  kit clean --dry-run
+  kit clean --deep --yes
 
 Options
   -h, --help     Show help
@@ -168,7 +310,7 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
-  -f, --fix      Format instead of lint, then typecheck
+      --deep     Also node_modules, .wrangler/state (local D1/KV data) and Xcode DerivedData
 
 "
 `;
@@ -517,6 +659,8 @@ Examples
   kit doctor
   kit doctor --json
   kit doctor --ci
+  kit doctor --fix
+  kit doctor --fix --dry-run
 
 Options
   -h, --help     Show help
@@ -528,6 +672,7 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --ci       Fail when CI workflow pins drift from the package.json pin
+      --fix      Apply the safe, local fixes, then check again
 
 "
 `;
@@ -588,6 +733,7 @@ Usage
 
 Examples
   kit env push                    # every worker in env.workerSecrets and env.githubSecrets
+  kit env push --workers          # every worker, GitHub skipped
   kit env push --target edge
   kit env push --github           # GitHub Actions secrets only
   kit env push --target edge --github
@@ -606,6 +752,33 @@ Options
   -t, --target <string>  Only this worker target (env.workerSecrets)
       --github           Push env.githubSecrets with gh
       --all              Every worker and GitHub; the default, kept for scripts
+      --workers          Every worker in env.workerSecrets; GitHub skipped
+
+"
+`;
+
+exports[`help kit env rotate --help 1`] = `
+"Generate a new value for keys the env schema marks \`generate\`, then sync
+
+Usage
+  kit env rotate [options]
+
+Examples
+  kit env rotate INTERNAL_API_SECRET           # new value in .env, outputs re-rendered
+  kit env rotate INTERNAL_API_SECRET --push    # and push it to its workers and GitHub
+  kit env rotate KEY_A KEY_B --yes
+  kit env rotate INTERNAL_API_SECRET --dry-run
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --push     Push to the remotes that hold the key (as \`kit env push\`)
 
 "
 `;
@@ -663,16 +836,18 @@ Examples
   kit format --check
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --check    Check only (runs each target's lint command)
-      --staged   Only targets with staged files; workspace commands get the files
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+      --check          Check only (runs each target's lint command)
+      --staged         Only targets with staged files; workspace commands get the files
 
 "
 `;
@@ -753,16 +928,18 @@ Examples
   kit lint --staged --fix
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-  -f, --fix      Apply fixes (runs each target's format command)
-      --staged   Only targets with staged files; workspace commands get the files
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+  -f, --fix            Apply fixes (runs each target's format command)
+      --staged         Only targets with staged files; workspace commands get the files
 
 "
 `;
@@ -903,6 +1080,92 @@ Options
 "
 `;
 
+exports[`help kit release metadata pull --help 1`] = `
+"Download the store listing text into release.<platform>.metadata; --screenshots adds images
+
+Usage
+  kit release metadata pull [options]
+
+Examples
+  kit release metadata pull ios
+  kit release metadata pull android --screenshots
+  kit release metadata pull ios --force
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --screenshots  Also download the screenshots (Play: and the feature graphic and icon)
+      --force        Overwrite uncommitted changes in what the pull writes
+
+"
+`;
+
+exports[`help kit release metadata push --help 1`] = `
+"Upload the store listing text; --screenshots adds images. Never a binary or a review
+
+Usage
+  kit release metadata push [options]
+
+Examples
+  kit release metadata push ios
+  kit release metadata push android --screenshots
+  kit release metadata push ios --dry-run
+  kit release metadata push android --yes
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --screenshots  Also replace the screenshots (Play: and the feature graphic and icon)
+
+"
+`;
+
+exports[`help kit release promote --help 1`] = `
+"Promote a build the store already has to a later track (no rebuild)
+
+Usage
+  kit release promote [options]
+
+Examples
+  kit release promote android --from alpha --to beta --yes
+  kit release promote android --from beta --to prod --rollout 0.2
+  kit release promote ios --from beta --to prod --build 42 --notes "Bug fixes"
+  kit release promote ios --from beta --to prod --app-version 1.3.0 --build 40 --notes "Hotfix"
+  kit release promote ios --from alpha --to beta --dry-run
+
+Options
+  -h, --help                  Show help
+  -V, --version               Show kit version
+      --json                  Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run               Plan and run read-only steps; skip mutations
+  -y, --yes                   Accept confirmations (never skips prod)
+  -v, --verbose               Stream all child output
+  -q, --quiet                 Errors and summary only
+      --bail                  Stop at the first failure
+      --from <string>         Source track: alpha | beta (internal builds are never promoted)
+      --to <string>           Destination track, later than --from: beta | prod
+      --build <number>        Build number (iOS) or version code (Android); default: the latest on the source track
+      --app-version <string>  iOS: version name of the build, when it predates a version bump (default: the TOML version)
+      --rollout <number>      Android prod staged-rollout fraction, 0 < r <= 1 (default release.android.prodRollout or 0.1)
+      --notes <string>        Release notes; iOS prod: What's New, required (default: the build keeps its notes)
+      --draft                 Android: promote as a draft release
+      --skip <string>         Skip release.preflight checks by skipFlag (comma-separated)
+
+"
+`;
+
 exports[`help kit release rollback --help 1`] = `
 "Roll a worker service back to an earlier version (wrangler rollback); tags stay put
 
@@ -928,16 +1191,45 @@ Options
 "
 `;
 
-exports[`help kit test --help 1`] = `
-"Run the test suites
+exports[`help kit release rollout --help 1`] = `
+"Change the production rollout: Play staged rollout, App Store phased release
 
 Usage
-  kit test [options]
+  kit release rollout [options]
 
 Examples
-  kit test
-  kit test api
-  kit test client -- --rerun
+  kit release rollout android --percent 25
+  kit release rollout android --halt --yes
+  kit release rollout ios --resume
+  kit release rollout ios --complete --dry-run
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --percent <number>  Android: staged-rollout percentage, 1-100 (100 completes it); prod confirmation
+      --halt              Halt the Play rollout, or pause the App Store phased release (--yes skips the confirm)
+      --resume            Resume a halted rollout or a paused phased release; prod confirmation
+      --complete          Release to everyone now; prod confirmation
+
+"
+`;
+
+exports[`help kit release status --help 1`] = `
+"Show the version and the latest build on each store track
+
+Usage
+  kit release status [options]
+
+Examples
+  kit release status
+  kit release status android
+  kit release status ios --json
 
 Options
   -h, --help     Show help
@@ -952,6 +1244,33 @@ Options
 "
 `;
 
+exports[`help kit test --help 1`] = `
+"Run the test suites
+
+Usage
+  kit test [options]
+
+Examples
+  kit test
+  kit test api
+  kit test client -- --rerun
+  kit test --affected --base origin/develop
+
+Options
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+
+"
+`;
+
 exports[`help kit typecheck --help 1`] = `
 "Typecheck every target
 
@@ -962,14 +1281,16 @@ Examples
   kit typecheck
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
 
 "
 `;
