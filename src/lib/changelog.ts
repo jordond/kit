@@ -91,11 +91,31 @@ export const CHANGELOG_HEADER = '# Changelog\n'
 /** The heading version when nothing names one: its section is rewritten, not kept, on each write. */
 export const UNRELEASED = 'Unreleased'
 
+const THEMATIC_BREAK = /^ {0,3}([-*_])( *\1){2,} *$/
+const LINK_REFERENCE = /^ {0,3}\[[^\]]+\]:\s*\S/
+
+/**
+ * Where the content after a file's last section starts, from line `from` on: a thematic break
+ * (`---`) and all that follows it, else the link reference definitions (`[1.2.0]: https://…`) the
+ * file ends with. -1 when the section runs to the end of the file.
+ */
+function trailerStart(lines: string[], from: number): number {
+  const rule = lines.findIndex((l, i) => i >= from && THEMATIC_BREAK.test(l))
+  if (rule >= 0) return rule
+  let start = -1
+  for (let i = lines.length - 1; i >= from; i--) {
+    if (LINK_REFERENCE.test(lines[i]!)) start = i
+    else if (lines[i]!.trim() !== '') break
+  }
+  return start
+}
+
 /**
  * `text` (undefined: no file yet) with the section put above the newest one. A section with the
  * same heading, whatever its date, is never added twice: the result is undefined. With `replace`
  * (the Unreleased section, which keeps growing) the existing one is rewritten in place instead,
- * keeping whatever follows its entries, and the result is undefined only when that changes nothing.
+ * whole up to the next `## ` heading (as the last section: up to trailing link references or a
+ * `---` rule), and the result is undefined only when that changes nothing.
  */
 export function prependSection(
   text: string | undefined,
@@ -110,12 +130,11 @@ export function prependSection(
   const existing = lines.findIndex((l) => l === label || l.startsWith(`${label} `))
   if (existing >= 0) {
     if (!opts.replace) return undefined
-    // The section is what kit writes: `### <group>` headings, list items and blank lines. It ends
-    // at the next `## ` heading or at anything else (link reference definitions, a `---` rule,
-    // prose), all of which stays below it.
-    const next = lines.findIndex(
-      (l, i) => i > existing && (l.startsWith('## ') || !(l.trim() === '' || /^(### |[-*] |\s+\S)/.test(l))),
-    )
+    // The section runs to the next `## ` heading and is replaced whole, hand edits included.
+    // As the last section it runs to the end of the file, less a trailing block that is clearly
+    // not its content.
+    const heading = lines.findIndex((l, i) => i > existing && l.startsWith('## '))
+    const next = heading >= 0 ? heading : trailerStart(lines, existing + 1)
     const tail = next < 0 ? [] : ['', ...lines.slice(next)]
     const out = [...lines.slice(0, existing), ...section.trimEnd().split('\n'), ...tail].join('\n')
     const done = next < 0 ? `${out}\n` : out
