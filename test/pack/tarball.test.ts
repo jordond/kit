@@ -103,6 +103,8 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(files).toContain('dist')
     expect(files).toContain('fastlane')
     expect(readdirSync(join(installed, 'dist'))).toContain('cli.js')
+    // The page headless Chrome runs for `kit shots export`, built for the browser.
+    expect(readdirSync(join(installed, 'dist'))).toContain('shots-page.js')
     // zod is a peer: kit's bundle must use the app's copy, never a nested one.
     expect(readdirSync(installed)).not.toContain('node_modules')
   })
