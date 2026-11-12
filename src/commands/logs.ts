@@ -38,6 +38,14 @@ export default defineCommand({
       else ctx.log.step(`${cwd} $ ${w.cmd.join(' ')}`)
       return
     }
+    // A tail is an endless stream of wrangler's lines, never one document.
+    if (ctx.flags.json) {
+      throw new KitError(
+        'kit logs has no --json document',
+        `For JSON lines: kit logs ${name} -- --format json`,
+        ExitCode.usage,
+      )
+    }
     if (config.cloudflare?.accountId) pinCloudflareAccount(root, config)
     // Attached to the terminal; the log lines are the result, so they stay on stdout. A Ctrl-C is the
     // way out of a tail: wrangler closes the session and kit exits 130.
