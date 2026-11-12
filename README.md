@@ -53,6 +53,36 @@ kit init --template toolchain --dry-run
 - Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
 - A file that already exists is kept; `.gitignore` and the catalog only gain lines.
 
+## Adding modules and targets
+
+`kit add` scaffolds into a repo that already has kit. Both commands show the plan first, write nothing
+with `--dry-run`, and print the plan or result as one document with `--json`.
+
+```sh
+kit add module core                              # KMP library: android, ios, jvm
+kit add module feature:login --compose           # <gradle root>/feature/login, plus kit.compose
+kit add module data --targets android,jvm --dir libs/data
+kit add target api --kind worker --dir apps/api  # worker | vite | astro | docker | custom
+```
+
+| | Gradle (`gradle.root`) | Kotlin toolchain (`toolchain.root`) |
+| --- | --- | --- |
+| `kit add module <name>` writes | `build.gradle.kts` on kit's plugins only (`io.github.jordond.kit.kmp.library`, `…kit.compose` with `--compose`) with `kit { targets { … } }`, and `src/commonMain/kotlin/<package>/Placeholder.kt` | `module.yaml` (`kmp/lib`, the platforms of `--targets`; `--compose` enables Compose) and `src/Placeholder.kt` |
+| and registers it in | `settings.gradle.kts`: one `include(":<name>")` after the last include (plus a `projectDir` line when `--dir` is not the path) | `project.yaml`: one entry in `modules:`, in the list's own style |
+| Package | catalog `app-name` + the module path, the same rule the plugin uses for the Android namespace (`:feature:login` → `<app-name>.feature.login`) | the Android `applicationId` (or iOS bundle id) + the module name |
+
+- Module names follow Gradle's project name rules (letters, digits, `-`, `_`, a letter first); `:` nests and
+  maps to directories. The Kotlin toolchain names a module after its directory, so names do not nest there.
+- A file that already exists is never overwritten: the command lists them and exits 2. `--force` overwrites.
+  A module that is already included or listed is left as it is.
+- `kit add target` appends to `targets: { … }` in `kit.config.ts` (or `.kit/kit.config.ts`) with a text edit
+  that keeps the file as written, then loads the config to prove it. A config it cannot edit safely
+  (`targets` from a variable, a spread, a wrapper) is left untouched: the line to paste goes to stdout and
+  the exit code is 1. The name cannot be an existing target, `workspace`, or a kit command.
+- `--kind worker` with a `--dir` that does not exist yet also writes a minimal worker: `wrangler.jsonc`
+  (placeholder name, no account id), `src/index.ts`, `package.json`, `tsconfig.json`. An existing directory
+  is only registered; other kinds get an empty directory when it is missing.
+
 ## Upgrading
 
 ```sh
