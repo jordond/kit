@@ -33,7 +33,9 @@ describe('loadProject', () => {
     const project = await loadProject(FIXTURE)
     expect(project).toEqual(fixture() as unknown as StudioProject)
     expect(project.slides.map((s) => s.id)).toEqual(['slide-1', 'slide-2'])
-    expect(project.locales?.['fr-FR']?.['slide-2']).toEqual({ headline: 'Souvenez-vous de vos coups de cœur' })
+    expect(project.locales?.['fr-FR']?.['slide-2']).toEqual({
+      headline: 'Souvenez-vous de vos coups de cœur',
+    })
   })
 
   test('keeps keys the editor adds later', async () => {
@@ -46,7 +48,9 @@ describe('loadProject', () => {
 
   test('a project without locales, imageSrc, dimensionId or savedAt is valid', async () => {
     const { locales: _locales, dimensionId: _dimensionId, savedAt: _savedAt, ...saved } = fixture()
-    const slides = (saved.slides as Record<string, unknown>[]).map(({ imageSrc: _imageSrc, ...slide }) => slide)
+    const slides = (saved.slides as Record<string, unknown>[]).map(
+      ({ imageSrc: _imageSrc, ...slide }) => slide,
+    )
     const project = await loadProject(save('bare.json', { ...saved, slides }))
     expect(project.locales).toBeUndefined()
     expect(project.slides[0]?.imageSrc).toBeUndefined()
@@ -94,7 +98,9 @@ describe('loadProject', () => {
     const saved = fixture()
     const slides = saved.slides as Record<string, unknown>[]
     slides[1] = { ...slides[1], id: 'slide-1' }
-    expect(() => parseProject({ ...saved, locales: undefined })).toThrow('slides.1.id: Duplicate slide id "slide-1"')
+    expect(() => parseProject({ ...saved, locales: undefined })).toThrow(
+      'slides.1.id: Duplicate slide id "slide-1"',
+    )
   })
 
   test('locales are strict: an unknown slide or field is refused', () => {
@@ -153,7 +159,12 @@ describe('locale text', () => {
     expect(slide.headline).toEqual({ ...first.headline, text: 'Bonjour' })
     expect(slide.subheadline).toEqual({ ...first.subheadline, text: 'Sous-titre' })
     expect(slide.badge).toEqual({ ...first.badge, text: 'NOUVEAU' })
-    expect({ ...slide, headline: first.headline, subheadline: first.subheadline, badge: first.badge }).toEqual(first)
+    expect({
+      ...slide,
+      headline: first.headline,
+      subheadline: first.subheadline,
+      badge: first.badge,
+    }).toEqual(first)
     expect(first.headline.text).toBe('Everything in one place')
   })
 

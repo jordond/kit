@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { basename, dirname, join, relative, sep } from 'node:path'
 import type { DeviceTarget } from '../devices'
 import { ExitCode, KitError } from '../errors'
@@ -27,7 +36,13 @@ const PLAY_SET_DIR = ['images', 'phoneScreenshots'] as const
 
 /** The target a set id is the export size of. */
 const targetOfSet = (set: string): DeviceTarget | undefined =>
-  set === 'phone' ? 'android' : set.startsWith('iphone-') ? 'ios' : set.startsWith('ipad-') ? 'ipad' : undefined
+  set === 'phone'
+    ? 'android'
+    : set.startsWith('iphone-')
+      ? 'ios'
+      : set.startsWith('ipad-')
+        ? 'ipad'
+        : undefined
 
 /** What one store's export does to its dir. Paths in the sets are relative to the dir, `/`-separated. */
 interface DestinationChange {
@@ -43,11 +58,17 @@ interface DestinationChange {
   interim?: ShotsManifest
 }
 
-const manifestOf = (files: Iterable<string>): ShotsManifest => ({ version: 1, files: [...new Set(files)].sort() })
+const manifestOf = (files: Iterable<string>): ShotsManifest => ({
+  version: 1,
+  files: [...new Set(files)].sort(),
+})
 
 /** A manifest entry kit may act on: a plain relative path that stays inside the dir. */
 const isSafeEntry = (entry: string): boolean =>
-  entry !== '' && !entry.startsWith('/') && !entry.includes('\\') && entry.split('/').every((s) => s !== '' && s !== '.' && s !== '..')
+  entry !== '' &&
+  !entry.startsWith('/') &&
+  !entry.includes('\\') &&
+  entry.split('/').every((s) => s !== '' && s !== '.' && s !== '..')
 
 /** The files the last export wrote in `dir`; none when there is no manifest. */
 function readManifest(dir: string, force: boolean): string[] {
@@ -55,7 +76,11 @@ function readManifest(dir: string, force: boolean): string[] {
   if (!existsSync(file)) return []
   try {
     const value = JSON.parse(readFileSync(file, 'utf8')) as Partial<ShotsManifest>
-    if (value.version !== 1 || !Array.isArray(value.files) || value.files.some((f) => typeof f !== 'string')) {
+    if (
+      value.version !== 1 ||
+      !Array.isArray(value.files) ||
+      value.files.some((f) => typeof f !== 'string')
+    ) {
       throw new Error('not a version 1 manifest')
     }
     return value.files.filter(isSafeEntry)
@@ -109,7 +134,13 @@ function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): 
   const listed = readManifest(dir, force)
   const hasManifest = existsSync(join(dir, MANIFEST_FILE))
   if (jobs.length === 0) {
-    return { destination, jobs, remove: [], unowned: [], manifest: hasManifest ? manifestOf(listed) : undefined }
+    return {
+      destination,
+      jobs,
+      remove: [],
+      unowned: [],
+      manifest: hasManifest ? manifestOf(listed) : undefined,
+    }
   }
 
   const owned = new Set(listed)
@@ -152,7 +183,10 @@ function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): 
     }
   }
 
-  const remove = [...stale.filter((entry) => existsSync(join(dir, entry))), ...unowned.filter((e) => !writing.has(e))]
+  const remove = [
+    ...stale.filter((entry) => existsSync(join(dir, entry))),
+    ...unowned.filter((e) => !writing.has(e)),
+  ]
   const gone = new Set([...stale, ...unowned])
   return {
     destination,
@@ -195,7 +229,9 @@ export const writeExport: WriteExport = async (plan, opts) => {
     ),
   )
 
-  const inTheWay = changes.flatMap((c) => c.unowned.map((entry) => repoPath(root, join(c.destination.dir, entry))))
+  const inTheWay = changes.flatMap((c) =>
+    c.unowned.map((entry) => repoPath(root, join(c.destination.dir, entry))),
+  )
   if (inTheWay.length > 0 && !force) {
     throw new KitError(
       `${inTheWay.length} image${inTheWay.length === 1 ? '' : 's'} kit shots export did not write ${inTheWay.length === 1 ? 'is' : 'are'} in the way:\n${inTheWay.map((f) => `  ${f}`).join('\n')}`,

@@ -24,8 +24,16 @@ const listing = (): Set<string> =>
       .map((e) => relative(RAW, join(e.parentPath, e.name)).split('\\').join('/')),
   )
 
-const apple = (locales = ['en-US', 'fr-FR'], dir = APPLE): StoreDestination => ({ store: 'apple', dir, locales })
-const google = (locales = ['en-US', 'fr-FR'], dir = GOOGLE): StoreDestination => ({ store: 'google', dir, locales })
+const apple = (locales = ['en-US', 'fr-FR'], dir = APPLE): StoreDestination => ({
+  store: 'apple',
+  dir,
+  locales,
+})
+const google = (locales = ['en-US', 'fr-FR'], dir = GOOGLE): StoreDestination => ({
+  store: 'google',
+  dir,
+  locales,
+})
 
 const input = (over: Partial<PlanInput> = {}): PlanInput => ({
   root: ROOT,
@@ -93,7 +101,9 @@ describe('planExport', () => {
   })
 
   test('files land in the store listing dirs', () => {
-    const files = planExport(input({ destinations: [apple(['en-US']), google(['en-US'])] })).jobs.map((j) => j.file)
+    const files = planExport(input({ destinations: [apple(['en-US']), google(['en-US'])] })).jobs.map(
+      (j) => j.file,
+    )
     expect(files).toEqual([
       join(APPLE, 'en-US', '01_iphone-6.9_1-home.png'),
       join(APPLE, 'en-US', '02_iphone-6.9_2-journal.png'),
@@ -154,7 +164,11 @@ describe('planExport', () => {
       return [slide.headline.text, slide.subheadline.text, slide.badge.text]
     }
     expect(text('android-en-US-01')).toEqual(['Everything in one place', 'Your day at a glance', 'NEW'])
-    expect(text('android-fr-FR-01')).toEqual(['Tout au même endroit', "Votre journée en un coup d'œil", 'NOUVEAU'])
+    expect(text('android-fr-FR-01')).toEqual([
+      'Tout au même endroit',
+      "Votre journée en un coup d'œil",
+      'NOUVEAU',
+    ])
     expect(text('android-fr-FR-02')).toEqual(['Souvenez-vous de vos coups de cœur', '', 'NEW'])
   })
 
@@ -249,7 +263,10 @@ describe('planExport', () => {
 
   test('fonts and the brand mark become assets, fonts first', () => {
     const plan = planExport(input())
-    expect(plan.assets).toEqual([join(ROOT, 'brand', 'fonts', 'fixture.ttf'), join(ROOT, 'brand', 'mark.svg')])
+    expect(plan.assets).toEqual([
+      join(ROOT, 'brand', 'fonts', 'fixture.ttf'),
+      join(ROOT, 'brand', 'mark.svg'),
+    ])
     expect(plan.fonts).toEqual([{ family: 'Kit Fixture', url: 'asset/0', weight: '400 800' }])
     expect(plan.brand).toEqual({ mark: 'asset/1', wordmark: 'shots', color: '#2c1e14', font: 'Kit Fixture' })
   })

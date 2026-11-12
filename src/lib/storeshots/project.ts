@@ -116,7 +116,11 @@ export const projectSchema = z
     for (const [locale, slides] of Object.entries(p.locales ?? {})) {
       for (const id of Object.keys(slides)) {
         if (!seen.has(id)) {
-          ctx.addIssue({ code: 'custom', path: ['locales', locale, id], message: `No slide has the id "${id}"` })
+          ctx.addIssue({
+            code: 'custom',
+            path: ['locales', locale, id],
+            message: `No slide has the id "${id}"`,
+          })
         }
       }
     }
@@ -192,7 +196,8 @@ export function localizeSlide(project: StudioProject, slide: Slide, locale: stri
   return {
     ...slide,
     headline: t.headline === undefined ? slide.headline : { ...slide.headline, text: t.headline },
-    subheadline: t.subheadline === undefined ? slide.subheadline : { ...slide.subheadline, text: t.subheadline },
+    subheadline:
+      t.subheadline === undefined ? slide.subheadline : { ...slide.subheadline, text: t.subheadline },
     badge: t.badge === undefined ? slide.badge : { ...slide.badge, text: t.badge },
   }
 }

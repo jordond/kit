@@ -45,7 +45,7 @@ const put = (path: string, body: Uint8Array | string = 'x') => {
   mkdirSync(dirname(join(root, path)), { recursive: true })
   writeFileSync(join(root, path), body)
 }
-const read = (path: string) => new Uint8Array(readFileSync(join(root, path)))
+const read = (path: string): Uint8Array => new Uint8Array(readFileSync(join(root, path)))
 
 /** Every file under the root, relative, sorted. */
 const tree = (): string[] =>
@@ -125,7 +125,7 @@ describe('writeExport', () => {
         `fastlane/metadata/android/${MANIFEST_FILE}`,
       ].sort(),
     )
-    for (const job of p.jobs) expect(new Uint8Array(readFileSync(job.file))).toEqual(images.get(job.id)!)
+    for (const job of p.jobs) expect(read(relative(root, job.file))).toEqual(images.get(job.id)!)
     expect(manifest(appleDir)).toEqual({
       version: 1,
       files: [
@@ -137,7 +137,10 @@ describe('writeExport', () => {
     })
     expect(manifest(googleDir)).toEqual({
       version: 1,
-      files: ['en-US/images/phoneScreenshots/01_1-home.png', 'en-US/images/phoneScreenshots/02_2-journal.png'],
+      files: [
+        'en-US/images/phoneScreenshots/01_1-home.png',
+        'en-US/images/phoneScreenshots/02_2-journal.png',
+      ],
     })
   })
 
@@ -164,7 +167,10 @@ describe('writeExport', () => {
       'fastlane/screenshots/en-US/01_ipad-13_welcome.png',
       'fastlane/screenshots/en-US/01_iphone-6.9_welcome.png',
     ])
-    expect(manifest(appleDir).files).toEqual(['en-US/01_ipad-13_welcome.png', 'en-US/01_iphone-6.9_welcome.png'])
+    expect(manifest(appleDir).files).toEqual([
+      'en-US/01_ipad-13_welcome.png',
+      'en-US/01_iphone-6.9_welcome.png',
+    ])
     expect(manifest(googleDir).files).toEqual(['en-US/images/phoneScreenshots/01_welcome.png'])
   })
 

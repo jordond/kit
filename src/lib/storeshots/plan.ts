@@ -69,7 +69,12 @@ export function repoPath(root: string, file: string): string {
 }
 
 /** The PNG a job writes: see `Job.file`. */
-function outputFile(destination: StoreDestination, locale: string, job: Pick<Job, 'set' | 'index'>, slug: string) {
+function outputFile(
+  destination: StoreDestination,
+  locale: string,
+  job: Pick<Job, 'set' | 'index'>,
+  slug: string,
+) {
   return destination.store === 'apple'
     ? join(destination.dir, locale, `${nn(job.index)}_${job.set}_${slug}.png`)
     : join(destination.dir, locale, 'images', 'phoneScreenshots', `${nn(job.index)}_${slug}.png`)
