@@ -194,7 +194,9 @@ describe('checkListingImages: Play', () => {
       `${PLAY}/fr-FR/images/icon.png`,
       Buffer.concat([png(512, 512), new Uint8Array(1024 * 1024)]),
     )
-    expect(android([heavy]).problems).toEqual([expect.stringMatching(/icon\.png: \d+ KB; the icon must be at most 1024 KB$/)])
+    expect(android([heavy]).problems).toEqual([
+      expect.stringMatching(/icon\.png: \d+ KB; the icon must be at most 1024 KB$/),
+    ])
   })
 
   test('the size rules of screenshots do not apply to other images', () => {
