@@ -220,6 +220,20 @@ export function localD1Id(data: Record<string, unknown>, database: string): stri
   return undefined
 }
 
+/** The local id of every `d1_databases` entry in a wrangler config (see `localD1Id`). */
+export function localD1Ids(data: Record<string, unknown>): string[] {
+  const list: unknown[] = Array.isArray(data.d1_databases) ? data.d1_databases : []
+  const ids: string[] = []
+  for (const entry of list) {
+    if (!isRecord(entry)) continue
+    const id = [entry.preview_database_id, entry.database_id, entry.binding].find(
+      (v): v is string => typeof v === 'string' && v !== '',
+    )
+    if (id) ids.push(id)
+  }
+  return ids
+}
+
 /** Where wrangler keeps a worker's local D1 databases. */
 export const localD1StateDir = (dir: string): string => join(dir, '.wrangler/state/v3/d1')
 

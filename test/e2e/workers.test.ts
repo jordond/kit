@@ -516,6 +516,36 @@ describe('db backup / restore / seed / reset', () => {
       expect(fx.calls()).toEqual([])
     })
 
+    test("only the worker's other database exists locally: this one is fresh, the other untouched", async () => {
+      writeFileSync(
+        join(fx.dir, 'apps/edge/wrangler.jsonc'),
+        JSON.stringify({
+          name: 'edge',
+          account_id: EDGE_ID,
+          d1_databases: [
+            { binding: 'DB', database_name: 'infra-db' },
+            { binding: 'OTHER', database_name: 'infra-other' },
+          ],
+        }),
+      )
+      writeFileSync(
+        join(fx.dir, 'kit.config.ts'),
+        CONFIG.replace(
+          'analytics: { name:',
+          "other: { name: 'infra-other', target: 'edge' }, analytics: { name:",
+        ),
+      )
+      for (const f of mine()) rmSync(f)
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes'])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toContain('no local infra-db to remove')
+      expect(readFileSync(other(), 'utf8')).toBe('sqlite')
+      expect(summary()).toEqual([
+        './apps/edge wrangler d1 migrations apply infra-db --local',
+        './apps/edge wrangler d1 execute infra-db --local --file <root>/apps/edge/seed.sql',
+      ])
+    })
+
     test('no state directory: a fresh checkout migrates and seeds, saying nothing was removed', async () => {
       rmSync(join(fx.dir, 'apps/edge/.wrangler'), { recursive: true })
       const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes'])
