@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { getTomlValue } from './toml'
+import { getTomlValue, parseToml } from './toml'
 import { ANDROID_VERSION_NAME, getYamlScalar } from './toolchain'
 
 /**
@@ -23,18 +23,27 @@ export function isToolchainRepo(exists: (repoPath: string) => boolean): boolean 
   return exists('kotlin') && exists('project.yaml')
 }
 
-/** Module dirs listed under `modules:` in project.yaml (plain `- path` entries). */
+/** Module dirs listed under `modules:` in project.yaml: a block or flow list of plain paths (no globs). */
 export function projectModules(projectYaml: string): string[] {
   const lines = projectYaml.split('\n')
   const start = lines.findIndex((l) => /^modules\s*:/.test(l))
   if (start < 0) return []
+  const clean = (raw: string) =>
+    raw
+      .trim()
+      .replace(/^(['"])(.*)\1$/, '$2')
+      .replace(/^\.\//, '')
+      .replace(/\/+$/, '')
+  const plain = (v: string) => v !== '' && !/[*{:]/.test(v)
+  const flow = lines[start]!.match(/^modules\s*:\s*\[(.*)\]/)
+  if (flow) return flow[1]!.split(',').map(clean).filter(plain)
   const out: string[] = []
   for (const line of lines.slice(start + 1)) {
     if (line.trim() === '' || line.trimStart().startsWith('#')) continue
     const m = line.match(/^\s*-\s*(.+?)\s*$/)
     if (!m) break
-    const value = m[1]!.replace(/\s+#.*$/, '').replace(/^(['"])(.*)\1$/, '$2')
-    if (!/[*{:]/.test(value)) out.push(value.replace(/^\.\//, '').replace(/\/+$/, ''))
+    const value = clean(m[1]!.replace(/\s+#.*$/, ''))
+    if (plain(value)) out.push(value)
   }
   return out
 }
@@ -211,6 +220,25 @@ export function kitPackageJson(name: string, kitVersion: string, zod: string): s
   return `${JSON.stringify(pkg, null, 2)}\n`
 }
 
+/**
+ * An existing package.json with the kit pin added to devDependencies; undefined when it already
+ * depends on kit (or is not a JSON object, which is left alone).
+ */
+export function withKitDependency(manifest: string, kitVersion: string, zod: string): string | undefined {
+  let pkg: Record<string, unknown>
+  try {
+    pkg = JSON.parse(manifest)
+  } catch {
+    return undefined
+  }
+  if (typeof pkg !== 'object' || pkg === null || Array.isArray(pkg)) return undefined
+  const deps = (k: string) => (pkg[k] ?? {}) as Record<string, string>
+  if (deps('devDependencies')['@jordond/kit'] || deps('dependencies')['@jordond/kit']) return undefined
+  const dev: Record<string, string> = { ...deps('devDependencies'), '@jordond/kit': `^${kitVersion}` }
+  if (!dev.zod && !deps('dependencies').zod) dev.zod = zod
+  return `${JSON.stringify({ ...pkg, devDependencies: dev }, null, 2)}\n`
+}
+
 /** `text` plus the `entries` it does not list yet; undefined when nothing is missing. */
 export function withGitignore(text: string | undefined, entries: string[]): string | undefined {
   const have = new Set((text ?? '').split('\n').map((l) => l.trim().replace(/^\//, '')))
@@ -222,16 +250,24 @@ export function withGitignore(text: string | undefined, entries: string[]): stri
 
 /**
  * The catalog with any missing `[versions]` key added; undefined when all are there. A new key goes
- * right under the `[versions]` header (created at the top when the file has none).
+ * right under the `[versions]` header (created at the top when the file has none). `'manual'`
+ * when the file has a versions table without a plain `[versions]` header line.
  */
-export function withVersionKeys(text: string | undefined, keys: Record<string, string>): string | undefined {
+export function withVersionKeys(
+  text: string | undefined,
+  keys: Record<string, string>,
+): string | 'manual' | undefined {
   const src = text ?? ''
   const missing = Object.entries(keys).filter(([k]) => getTomlValue(src, 'versions', k) === undefined)
   if (!missing.length) return undefined
   const added = missing.map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
   const lines = src.split('\n')
   const header = lines.findIndex((l) => /^\s*\[versions\]\s*(#.*)?$/.test(l))
-  if (header < 0) return `${['[versions]', ...added].join('\n')}\n${src.trim() ? `\n${src}` : ''}`
+  if (header < 0) {
+    // `versions` written another way (inline table, quoted or spaced header): not kit's to rewrite.
+    if (parseToml(src).versions !== undefined) return 'manual'
+    return `${['[versions]', ...added].join('\n')}\n${src.trim() ? `\n${src}` : ''}`
+  }
   lines.splice(header + 1, 0, ...added)
   return lines.join('\n')
 }
@@ -274,16 +310,30 @@ export function planScaffold(input: ScaffoldInput): FileAction[] {
       ? ` -- ${facts.ciPlatforms.map((p) => `--platform ${p}`).join(' ')}`
       : '',
   }
+  const manifest = toolchain ? '.kit/package.json' : 'package.json'
   const wanted: [string, string][] = [
-    [toolchain ? '.kit/package.json' : 'package.json', kitPackageJson(name, input.kitVersion, input.zod)],
     ...(facts ? ([['.kit/kit.config.ts', toolchainConfig(name, facts)]] as [string, string][]) : []),
     ...Object.entries(input.files)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([path, text]) => [path, fill(text, vars)] as [string, string]),
   ]
-  const plan: FileAction[] = wanted.map(([path, content]) =>
-    read(path) === undefined ? { kind: 'write', path, content } : { kind: 'skip', path, reason: 'exists' },
-  )
+  const plan: FileAction[] = []
+  const existing = read(manifest)
+  if (existing === undefined) {
+    plan.push({ kind: 'write', path: manifest, content: kitPackageJson(name, input.kitVersion, input.zod) })
+  } else {
+    const content = withKitDependency(existing, input.kitVersion, input.zod)
+    plan.push(
+      content === undefined
+        ? { kind: 'skip', path: manifest, reason: 'exists' }
+        : { kind: 'edit', path: manifest, content, note: 'add @jordond/kit to devDependencies' },
+    )
+  }
+  for (const [path, content] of wanted) {
+    plan.push(
+      read(path) === undefined ? { kind: 'write', path, content } : { kind: 'skip', path, reason: 'exists' },
+    )
+  }
 
   const ignore = withGitignore(read('.gitignore'), ['node_modules/', '.env'])
   if (ignore !== undefined) {
@@ -298,7 +348,13 @@ export function planScaffold(input: ScaffoldInput): FileAction[] {
     const android = facts.android?.versionName ?? '1.0.0'
     const keys = { 'app-android-version': android, 'app-ios-version': facts.ios?.version ?? android }
     const catalog = withVersionKeys(read('libs.versions.toml'), keys)
-    if (catalog !== undefined) {
+    if (catalog === 'manual') {
+      plan.push({
+        kind: 'skip',
+        path: 'libs.versions.toml',
+        reason: 'add app-android-version and app-ios-version to its versions table by hand',
+      })
+    } else if (catalog !== undefined) {
       plan.push(
         read('libs.versions.toml') === undefined
           ? { kind: 'write', path: 'libs.versions.toml', content: catalog }

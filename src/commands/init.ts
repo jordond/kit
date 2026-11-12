@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import pkg from '../../package.json' with { type: 'json' }
 import { defineCommand } from '../cli/command'
 import { KIT_DIR } from '../config/load'
 import type { KitConfig } from '../config/schema'
+import type { CompletionState, Shell } from '../lib/completion'
 import type { PackageManager } from '../lib/pm'
 
 /**
@@ -41,37 +43,6 @@ export function hookKit(kitDir: string): string {
   return kitDir === '.' ? 'kit' : `./${kitDir}/node_modules/.bin/kit`
 }
 
-export type Shell = 'zsh' | 'bash' | 'fish'
-
-export interface CompletionState {
-  shell: Shell
-  /** The file init writes or appends to, as shown to the user (`~/.zshrc`). */
-  file: string
-  /** Why it is not installed now; undefined installs it. */
-  skip?: string
-}
-
-/** The user's shell from `$SHELL`, when kit has a completion script for it. */
-export function shellOf(shellPath: string | undefined): Shell | undefined {
-  const name = shellPath?.split('/').pop()
-  return name === 'zsh' || name === 'bash' || name === 'fish' ? name : undefined
-}
-
-/** Where completion goes: fish autoloads a file; zsh and bash source it from the rc file. */
-export function completionFile(shell: Shell, env: Record<string, string | undefined>, home: string): string {
-  if (shell === 'fish') return join(env.XDG_CONFIG_HOME || join(home, '.config'), 'fish/completions/kit.fish')
-  return shell === 'zsh' ? join(env.ZDOTDIR || home, '.zshrc') : join(home, '.bashrc')
-}
-
-/** The rc line; the script calls back into the `kit` on PATH. */
-export const completionLine = (shell: Shell) => `source <(kit completion ${shell})`
-
-/** Whether `current` (the target file's text, undefined when absent) already loads kit completion. */
-export function completionInstalled(shell: Shell, current: string | undefined): boolean {
-  if (current === undefined) return false
-  return shell === 'fish' ? true : /\bkit completion\b/.test(current)
-}
-
 export interface InitState {
   root: string
   config: KitConfig | undefined
@@ -102,7 +73,7 @@ export type InitAction =
   | { kind: 'env-file'; title: string }
   | { kind: 'scaffold'; title: string; scaffold: Scaffold }
   | { kind: 'cmd'; title: string; cmd: string[]; cwd: string; env?: Record<string, string> }
-  | { kind: 'completion'; title: string; shell: Shell; file: string }
+  | { kind: 'completion'; title: string; shell: Shell; file: string; rc?: string }
   | { kind: 'skip'; title: string; reason: string }
 
 const WRANGLER_CONFIGS = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml']
@@ -156,9 +127,13 @@ export function planInit(s: InitState): InitAction[] {
   }
   plan.push(...planNative(s))
   if (s.completion) {
-    const { shell, file, skip } = s.completion
+    const { shell, file, rc, skip } = s.completion
     const title = `${shell} completion`
-    plan.push(skip ? { kind: 'skip', title, reason: skip } : { kind: 'completion', title, shell, file })
+    plan.push(
+      skip
+        ? { kind: 'skip', title, reason: skip }
+        : { kind: 'completion', title, shell, file, ...(rc ? { rc } : {}) },
+    )
   }
   return plan
 }
@@ -336,11 +311,18 @@ export default defineCommand({
     let config = ctx.config
     let scaffold: FileAction[] = []
     if (template) {
-      const pkg = (await import('../../package.json', { with: { type: 'json' } })).default
       const { tagSha, usesRef } = await import('../lib/kitref')
       let name = typeof ctx.args.name === 'string' && ctx.args.name ? ctx.args.name : basename(root)
       if (ctx.args.name === undefined && ctx.flags.interactive && !ctx.flags.yes && !ctx.flags.dryRun) {
         name = (await text(ctx.flags, 'App name', { initial: name })).trim() || name
+      }
+      // The name lands in TS, Kotlin, YAML and JSON strings.
+      if (!/^[\w][\w .-]*$/.test(name)) {
+        throw new KitError(
+          `"${name}" cannot be the app name`,
+          'Pass --name with letters, digits, spaces, dots, dashes or underscores',
+          ExitCode.usage,
+        )
       }
       const sha = await tagSha(pkg.version)
       if (!sha && say) {
@@ -420,23 +402,31 @@ export default defineCommand({
     }
 
     // Shell completion lives in the home dir, so it is asked for, and never touched in CI.
+    const { completionInstalled, completionTargets, rcSnippet, shellOf } = await import('../lib/completion')
     let completion: CompletionState | undefined
     const shell = shellOf(process.env.SHELL)
     if (shell && !ctx.flags.ci) {
       const home = homedir()
-      const target = completionFile(shell, process.env, home)
-      const file = target.startsWith(`${home}/`) ? `~/${relative(home, target)}` : target
-      const current = existsSync(target) ? readFileSync(target, 'utf8') : undefined
+      const targets = completionTargets(shell, process.env, home, process.platform)
+      const tilde = (f: string) => (f.startsWith(`${home}/`) ? `~/${relative(home, f)}` : f)
+      const shown = tilde(targets.rc ?? targets.script)
+      const current = targets.rc
+        ? existsSync(targets.rc)
+          ? readFileSync(targets.rc, 'utf8')
+          : undefined
+        : existsSync(targets.script)
+          ? ''
+          : undefined
       let skip: string | undefined
-      if (completionInstalled(shell, current)) skip = `already in ${file}`
+      if (completionInstalled(current, !!targets.rc)) skip = `already in ${shown}`
       else if (!Bun.which('kit')) skip = 'kit is not on PATH; bun add -g @jordond/kit, then re-run'
       else if (ctx.flags.dryRun && !ctx.flags.yes) skip = 'would ask'
       else if (!ctx.flags.yes && !ctx.flags.interactive) skip = 'no terminal; re-run with --yes to install it'
       else if (
-        !(await confirm(ctx.flags, `Install kit completion for ${shell} (${file})?`, { initial: true }))
+        !(await confirm(ctx.flags, `Install kit completion for ${shell} (${shown})?`, { initial: true }))
       )
         skip = 'declined'
-      completion = { shell, file: target, skip }
+      completion = { shell, file: targets.script, rc: targets.rc, skip }
     }
 
     const { bundleEnv } = await import('../lib/fastlane')
@@ -486,7 +476,7 @@ export default defineCommand({
         if (a.kind === 'skip') ctx.log.dim(`- ${a.title}  ${a.reason}`)
         else if (a.kind === 'cmd')
           ctx.log.step(`${a.title}  ${pc.dim(`${where(a.cwd)} $ ${a.cmd.join(' ')}`)}`)
-        else if (a.kind === 'completion') ctx.log.step(`${a.title}  ${pc.dim(a.file)}`)
+        else if (a.kind === 'completion') ctx.log.step(`${a.title}  ${pc.dim(a.rc ?? a.file)}`)
         else ctx.log.step(a.kind === 'scaffold' ? `write ${a.title}` : `create ${a.title}`)
       }
       return
@@ -515,17 +505,17 @@ export default defineCommand({
           renderTemplate(readFileSync(file, 'utf8'), vars),
         )
       } else if (a.kind === 'completion') {
-        if (a.shell === 'fish') {
-          const script = await runCapture([...self, 'completion', 'fish'], { cwd: root })
-          ok = script.code === 0
-          if (ok) {
-            mkdirSync(join(a.file, '..'), { recursive: true })
-            writeFileSync(a.file, script.stdout)
+        // A static script: no kit process (and no repo config) runs when a shell starts.
+        const script = await runCapture([...self, 'completion', a.shell], { cwd: homedir() })
+        ok = script.code === 0 && script.stdout.trim() !== ''
+        if (ok) {
+          mkdirSync(join(a.file, '..'), { recursive: true })
+          writeFileSync(a.file, script.stdout)
+          if (a.rc) {
+            const rc = existsSync(a.rc) ? readFileSync(a.rc, 'utf8') : ''
+            const lead = rc === '' || rc.endsWith('\n') ? '' : '\n'
+            appendFileSync(a.rc, `${lead}${rc === '' ? '' : '\n'}${rcSnippet(a.shell, a.file)}`)
           }
-        } else {
-          const rc = existsSync(a.file) ? readFileSync(a.file, 'utf8') : ''
-          const lead = rc === '' || rc.endsWith('\n') ? '' : '\n'
-          appendFileSync(a.file, `${lead}\n# kit shell completion\n${completionLine(a.shell)}\n`)
         }
         if (ok && say) ctx.log.dim('  open a new shell to use it')
         if (!ok && say) ctx.log.error(`${a.title} failed`)

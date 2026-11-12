@@ -2,18 +2,15 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  completionFile,
-  completionInstalled,
-  completionLine,
   hookKit,
   type InitState,
   kitPackageRoot,
   planInit,
   renderTemplate,
   scaffoldTemplate,
-  shellOf,
 } from '../../src/commands/init'
 import { configSchema } from '../../src/config/schema'
+import { completionInstalled, completionTargets, rcSnippet, shellOf } from '../../src/lib/completion'
 
 const config = configSchema.parse({
   name: 'X',
@@ -180,20 +177,38 @@ describe('shell completion', () => {
     expect(shellOf(undefined)).toBeUndefined()
   })
 
-  test('completionFile: a fish autoload file, or the rc file', () => {
-    expect(completionFile('fish', {}, '/h')).toBe('/h/.config/fish/completions/kit.fish')
-    expect(completionFile('fish', { XDG_CONFIG_HOME: '/x' }, '/h')).toBe('/x/fish/completions/kit.fish')
-    expect(completionFile('zsh', {}, '/h')).toBe('/h/.zshrc')
-    expect(completionFile('zsh', { ZDOTDIR: '/z' }, '/h')).toBe('/z/.zshrc')
-    expect(completionFile('bash', {}, '/h')).toBe('/h/.bashrc')
+  test('completionTargets: a fish autoload file, or a script sourced from the rc file', () => {
+    expect(completionTargets('fish', {}, '/h')).toEqual({ script: '/h/.config/fish/completions/kit.fish' })
+    expect(completionTargets('fish', { XDG_CONFIG_HOME: '/x' }, '/h').script).toBe(
+      '/x/fish/completions/kit.fish',
+    )
+    expect(completionTargets('zsh', {}, '/h')).toEqual({
+      script: '/h/.config/kit/completion.zsh',
+      rc: '/h/.zshrc',
+    })
+    expect(completionTargets('zsh', { ZDOTDIR: '/z' }, '/h').rc).toBe('/z/.zshrc')
+    expect(completionTargets('bash', {}, '/h', 'linux').rc).toBe('/h/.bashrc')
+    // Terminal on macOS starts login shells, which read .bash_profile.
+    expect(completionTargets('bash', {}, '/h', 'darwin').rc).toBe('/h/.bash_profile')
+  })
+
+  test('rcSnippet sources the static script; zsh loads compinit first when it has not run', () => {
+    expect(rcSnippet('bash', '/h/.config/kit/completion.bash')).toBe(
+      '# kit shell completion\n[ -f "/h/.config/kit/completion.bash" ] && { source "/h/.config/kit/completion.bash"; }\n',
+    )
+    const zsh = rcSnippet('zsh', '/h/.config/kit/completion.zsh')
+    expect(zsh).toContain('(( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }; source ')
+    // No kit process at shell start: a new terminal must not run a repo's kit.config.ts.
+    expect(zsh).not.toContain('kit completion')
   })
 
   test('completionInstalled: the fish file exists, or the rc file loads it', () => {
-    expect(completionInstalled('fish', undefined)).toBe(false)
-    expect(completionInstalled('fish', '# anything')).toBe(true)
-    expect(completionInstalled('zsh', 'autoload compinit\n')).toBe(false)
-    expect(completionInstalled('zsh', `compinit\n${completionLine('zsh')}\n`)).toBe(true)
-    expect(completionInstalled('bash', undefined)).toBe(false)
+    expect(completionInstalled(undefined, false)).toBe(false)
+    expect(completionInstalled('', false)).toBe(true)
+    expect(completionInstalled('autoload compinit\n', true)).toBe(false)
+    expect(completionInstalled(rcSnippet('zsh', '/h/.config/kit/completion.zsh'), true)).toBe(true)
+    expect(completionInstalled('source <(kit completion zsh)\n', true)).toBe(true)
+    expect(completionInstalled(undefined, true)).toBe(false)
   })
 
   test('planInit: installs last, skips with the reason, plans nothing without a state', () => {
@@ -204,7 +219,9 @@ describe('shell completion', () => {
       shell: 'fish',
       file: '/h/kit.fish',
     })
-    expect(last({ completion: { shell: 'zsh', file: '/h/.zshrc', skip: 'declined' } })).toEqual({
+    expect(
+      last({ completion: { shell: 'zsh', file: '/h/c.zsh', rc: '/h/.zshrc', skip: 'declined' } }),
+    ).toEqual({
       kind: 'skip',
       title: 'zsh completion',
       reason: 'declined',

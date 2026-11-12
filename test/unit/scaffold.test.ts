@@ -14,6 +14,7 @@ import {
   type ScaffoldInput,
   toolchainConfig,
   withGitignore,
+  withKitDependency,
   withVersionKeys,
 } from '../../src/lib/scaffold'
 
@@ -38,6 +39,7 @@ describe('toolchain project detection', () => {
       projectModules('modules:\n  - ./app/\n  # note\n  - "shared" # lib\n  - libs/*\n\nother: 1\n'),
     ).toEqual(['app', 'shared'])
     expect(projectModules('plugins:\n  - x\n')).toEqual([])
+    expect(projectModules('modules: [./a, "b/", libs/*]\n')).toEqual(['a', 'b'])
   })
 
   test('moduleProduct: short form, block form, flow form, block list', () => {
@@ -221,12 +223,26 @@ describe('planScaffold', () => {
       'libs.versions.toml': '[versions]\napp-android-version = "1"\napp-ios-version = "1"\n',
     }
     expect(summary(planScaffold(input({ read: reader(files), list: lister(files) })))).toEqual([
-      'skip .kit/package.json',
+      'edit .kit/package.json',
       'write .kit/kit.config.ts',
       'skip .env.example',
       'write .github/workflows/ci.yml',
       'write fastlane/Fastfile',
     ])
+  })
+
+  test('an existing package.json without kit gains the dependency, and keeps the rest', () => {
+    const files = { 'package.json': '{ "name": "mine", "devDependencies": { "typescript": "^5" } }' }
+    const plan = planScaffold(input({ template: 'gradle', files: {}, read: reader(files) }))
+    expect(plan[0]).toMatchObject({ kind: 'edit', path: 'package.json' })
+    expect(JSON.parse(content(plan, 'package.json')!)).toEqual({
+      name: 'mine',
+      devDependencies: { typescript: '^5', '@jordond/kit': '^1.2.3', zod: '^4.0.0' },
+    })
+    expect(
+      withKitDependency('{ "dependencies": { "@jordond/kit": "1.0.0" } }', '1.2.3', '^4'),
+    ).toBeUndefined()
+    expect(withKitDependency('not json', '1.2.3', '^4')).toBeUndefined()
   })
 
   test('gradle: kit in the root package.json, config from the template', () => {

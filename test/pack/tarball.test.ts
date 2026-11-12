@@ -123,6 +123,42 @@ describe.skipIf(!enabled)('packed tarball', () => {
     )
   })
 
+  test('kit init --template runs from the built dist', async () => {
+    // The scaffold reads package.json and templates/ from the installed package.
+    const dir = mkdtempSync(join(tmpdir(), 'kit-pack-new-'))
+    try {
+      const proc = Bun.spawn(
+        [
+          join(app, 'node_modules/.bin/kit'),
+          'init',
+          '--template',
+          'gradle',
+          '--name',
+          'Demo',
+          '--dry-run',
+          '--json',
+        ],
+        {
+          cwd: dir,
+          env: { ...process.env, KIT_ROOT: '', KIT_DEV: '', CI: 'true', KIT_REPO_URL: join(dir, 'none') },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      )
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ])
+      expect(stderr).toBe('')
+      expect(await proc.exited).toBe(0)
+      const doc = JSON.parse(stdout) as { template: string; files: { path: string }[] }
+      expect(doc.template).toBe('gradle')
+      expect(doc.files.map((f) => f.path)).toContain('.github/workflows/ci.yml')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   test('the tarball has no stale build output', () => {
     const dist = readdirSync(join(app, 'node_modules/@jordond/kit/dist'), { recursive: true }).map(String)
     expect(dist).not.toContain(STALE)

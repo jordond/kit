@@ -22,12 +22,20 @@ export function parseTagSha(lsRemote: string, version: string): string | undefin
 /** The commit `v<version>` points at, from kit's GitHub repo; undefined offline or for an untagged version. */
 export async function tagSha(version: string): Promise<string | undefined> {
   if (!Bun.which('git')) return undefined
-  const { runQuiet } = await import('./proc')
   const ref = `refs/tags/v${version}`
-  const r = await runQuiet(['git', 'ls-remote', kitRepoUrl(), ref, `${ref}^{}`], {
-    env: { GIT_TERMINAL_PROMPT: '0' },
-  })
-  return r.code === 0 ? parseTagSha(r.output, version) : undefined
+  try {
+    const proc = Bun.spawn(['git', 'ls-remote', kitRepoUrl(), ref, `${ref}^{}`], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'ignore',
+      timeout: 20_000,
+    })
+    const out = await new Response(proc.stdout).text()
+    return (await proc.exited) === 0 ? parseTagSha(out, version) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** What follows `@` in a `uses:` line. Without a SHA the tag itself is the ref. */
@@ -35,7 +43,8 @@ export function usesRef(version: string, sha: string | undefined): string {
   return `${sha ?? `v${version}`} # v${version}`
 }
 
-const KIT_USES_LINE = /(jordond\/kit\/[^@\s]+@)\S+([ \t]*#[ \t]*)v?\d+\.\d+\.\d+[^\s]*/g
+/** The ref stops at a quote, so `uses: 'jordond/kit/…@sha' # v1.2.3` keeps its closing quote. */
+const KIT_USES_LINE = /(jordond\/kit\/[^@\s]+@)[^\s'"]+(['"]?[ \t]*#[ \t]*)v?\d+\.\d+\.\d+[\w.+-]*/g
 
 /** Every `jordond/kit/…@<ref> # vX.Y.Z` in a workflow moved to `sha` and `version`. */
 export function repinWorkflow(text: string, version: string, sha: string): { text: string; count: number } {
@@ -49,6 +58,10 @@ export function repinWorkflow(text: string, version: string, sha: string): { tex
 
 export const KIT_PACKAGE = '@jordond/kit'
 
+/** A plain semver version: `1.2.3`, `1.2.3-rc.1`, `1.2.3+build`. */
+export const isVersion = (v: string): boolean =>
+  /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(v)
+
 /** Latest published version, from the npm registry (`KIT_REGISTRY` overrides the URL for tests). */
 export async function latestVersion(): Promise<string | undefined> {
   const registry = (process.env.KIT_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '')
@@ -56,7 +69,7 @@ export async function latestVersion(): Promise<string | undefined> {
     const res = await fetch(`${registry}/${KIT_PACKAGE}/latest`, { signal: AbortSignal.timeout(15_000) })
     if (!res.ok) return undefined
     const version = ((await res.json()) as { version?: unknown }).version
-    return typeof version === 'string' ? version : undefined
+    return typeof version === 'string' && isVersion(version) ? version : undefined
   } catch {
     return undefined
   }
@@ -80,7 +93,11 @@ export function bumpPin(manifest: string, version: string): PinEdit | undefined 
   if (!m) return undefined
   const from = m[2]!
   const range = from.match(/^([\^~]?)v?\d+\.\d+\.\d+\S*$/)
-  if (!range) return { text: manifest, from, to: from }
+  if (!range || !isVersion(version)) return { text: manifest, from, to: from }
   const to = `${range[1]}${version}`
-  return { text: manifest.replace(re, `$1${to}$3`), from, to }
+  return {
+    text: manifest.replace(re, (_m, head: string, _old: string, tail: string) => `${head}${to}${tail}`),
+    from,
+    to,
+  }
 }

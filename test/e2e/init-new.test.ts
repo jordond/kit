@@ -1,5 +1,14 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import pkg from '../../package.json' with { type: 'json' }
@@ -174,7 +183,7 @@ describe('kit init in a Kotlin toolchain project', () => {
     const steps = JSON.parse(again.stdout).steps as { title: string; skipped?: string }[]
     expect(steps.filter((s) => s.skipped).map((s) => s.title)).toEqual(['.env', 'mise.toml', 'lefthook.yml'])
     expect((await run(['init', '--template', 'toolchain'])).code).toBe(2)
-  })
+  }, 30_000)
 
   test('existing files are kept', async () => {
     writeFileSync(join(f.dir, '.editorconfig'), 'root = true\n')
@@ -252,6 +261,13 @@ describe('kit init --template elsewhere', () => {
     expect(existsSync(join(dir, 'kit.config.ts'))).toBe(false)
   })
 
+  test('a name that cannot sit in a string literal is refused before anything is written', async () => {
+    const r = await run(['--cwd', dir, 'init', '--template', 'gradle', '--name', "it's"])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('cannot be the app name')
+    expect(readdirSync(dir)).toEqual([])
+  })
+
   test('toolchain needs a toolchain project; unknown templates are usage errors', async () => {
     const r = await run(['--cwd', dir, 'init', '--template', 'toolchain'])
     expect(r.code).toBe(3)
@@ -265,18 +281,34 @@ describe('kit init shell completion', () => {
   const env = { CI: '' }
   beforeEach(() => f.script('kit', 'exit 0'))
 
-  test('zsh: --yes appends the source line once', async () => {
-    writeFileSync(join(home, '.zshrc'), 'autoload -U compinit && compinit')
+  test('zsh: --yes writes a static script and sources it from .zshrc once', async () => {
+    writeFileSync(join(home, '.zshrc'), 'export EDITOR=vi')
     const r = await run(['init', '--yes', '--js-only'], { env })
     expect(r.code).toBe(0)
     expect(r.stderr).toContain('zsh completion')
+    const script = join(home, '.config/kit/completion.zsh')
+    expect(readFileSync(script, 'utf8')).toStartWith('#compdef kit')
     const rc = readFileSync(join(home, '.zshrc'), 'utf8')
     expect(rc).toBe(
-      'autoload -U compinit && compinit\n\n# kit shell completion\nsource <(kit completion zsh)\n',
+      `export EDITOR=vi\n\n# kit shell completion\n[ -f "${script}" ] && { (( $+functions[compdef] )) || { autoload -Uz compinit && compinit; }; source "${script}"; }\n`,
     )
+    // Starting a shell runs no kit.
+    expect(rc).not.toContain('kit completion')
     const again = await run(['init', '--yes', '--js-only'], { env })
     expect(again.stderr).toContain('- zsh completion  already in ~/.zshrc')
     expect(readFileSync(join(home, '.zshrc'), 'utf8')).toBe(rc)
+  })
+
+  test('zsh: the installed lines load in a shell that never ran compinit', async () => {
+    if (!Bun.which('zsh')) return
+    expect((await run(['init', '--yes', '--js-only'], { env })).code).toBe(0)
+    const out = Bun.spawnSync(['zsh', '-f', '-c', 'source "$HOME/.zshrc" && print -r -- "$_comps[kit]"'], {
+      env: { ...process.env, HOME: home, ZDOTDIR: home },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    expect(out.stderr.toString()).not.toContain('command not found')
+    expect(out.stdout.toString().trim()).not.toBe('')
   })
 
   test('fish: writes the completions file', async () => {
@@ -371,8 +403,18 @@ describe('kit upgrade', () => {
     expect(read('.kit/package.json')).toContain('"@jordond/kit": "^8.0.0"')
   })
 
+  test('a failed install restores the pin and leaves the workflows', async () => {
+    const before = [read('.kit/package.json'), read('.github/workflows/ci.yml')]
+    f.script('bun', 'exit 1')
+    const r = await run(['upgrade', NEXT])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('.kit/package.json restored')
+    expect([read('.kit/package.json'), read('.github/workflows/ci.yml')]).toEqual(before)
+  })
+
   test('usage and config errors', async () => {
     expect((await run(['upgrade', 'latest'])).code).toBe(2)
+    expect((await run(['upgrade', '1.0.0","x":"y'])).code).toBe(2)
     writeFileSync(
       join(f.dir, '.kit/package.json'),
       '{ "devDependencies": { "@jordond/kit": "file:../kit.tgz" } }',

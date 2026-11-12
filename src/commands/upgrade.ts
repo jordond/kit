@@ -20,7 +20,9 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { installDir } = await import('../config/load')
     const { ExitCode, KitError } = await import('../lib/errors')
-    const { bumpPin, KIT_PACKAGE, latestVersion, repinWorkflow, tagSha } = await import('../lib/kitref')
+    const { bumpPin, isVersion, KIT_PACKAGE, latestVersion, repinWorkflow, tagSha } = await import(
+      '../lib/kitref'
+    )
     const { emitJson } = await import('../lib/log')
     const { detectPackageManager } = await import('../lib/pm')
     const { run, runQuiet } = await import('../lib/proc')
@@ -32,7 +34,7 @@ export default defineCommand({
       throw new KitError(`No ${manifest} here`, 'Run it in a repo that uses kit', ExitCode.config)
     }
     const asked = ctx.positionals[0]?.replace(/^v/, '')
-    if (asked !== undefined && !/^\d+\.\d+\.\d+\S*$/.test(asked)) {
+    if (asked !== undefined && !isVersion(asked)) {
       throw new KitError(`"${ctx.positionals[0]}" is not a version`, 'Pass X.Y.Z', ExitCode.usage)
     }
     const version = asked ?? (await latestVersion())
@@ -106,8 +108,12 @@ export default defineCommand({
       if (say) ctx.log.step(`${cmd.join(' ')}${dir === '.' ? '' : ` (${dir})`}`)
       const code = ctx.flags.json ? (await runQuiet(cmd, { cwd })).code : await run(cmd, { cwd })
       if (code !== 0) {
-        ok = false
-        if (say) ctx.log.error(`${cmd.join(' ')} failed (exit ${code})`)
+        // Nothing half-moved: the pin goes back and the workflows stay.
+        writeFileSync(join(root, manifest), before)
+        if (say) ctx.log.error(`${cmd.join(' ')} failed (exit ${code}): ${manifest} restored`)
+        if (ctx.flags.json) emitJson({ ok: false, ...doc })
+        process.exitCode = 1
+        return
       }
     }
     if (sha) for (const w of workflows) writeFileSync(join(root, w.file), w.text)

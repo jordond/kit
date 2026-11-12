@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { bumpPin, parseTagSha, repinWorkflow, usesRef } from '../../src/lib/kitref'
+import { bumpPin, isVersion, parseTagSha, repinWorkflow, usesRef } from '../../src/lib/kitref'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -38,6 +38,10 @@ describe('kit refs', () => {
     )
     expect(repinWorkflow(out.text, '0.6.0', B)).toEqual({ text: out.text, count: 0 })
     expect(repinWorkflow('uses: jordond/kit/.github/actions/setup@main\n', '0.6.0', B).count).toBe(0)
+    // A quoted value keeps its closing quote.
+    expect(repinWorkflow(`uses: 'jordond/kit/.github/actions/setup@${A}' # v0.5.0\n`, '0.6.0', B).text).toBe(
+      `uses: 'jordond/kit/.github/actions/setup@${B}' # v0.6.0\n`,
+    )
   })
 
   test('bumpPin keeps the range operator and the formatting', () => {
@@ -55,5 +59,9 @@ describe('kit refs', () => {
       to: 'file:../kit.tgz',
     })
     expect(bumpPin('{"devDependencies":{}}', '0.6.0')).toBeUndefined()
+    // Only a plain version is ever written into the manifest.
+    for (const bad of ['1.0.0","x":"y', '1.0.0$&', 'latest']) expect(bumpPin(pkg, bad)?.text).toBe(pkg)
+    expect(isVersion('1.2.3-rc.1')).toBe(true)
+    expect(isVersion('1.2')).toBe(false)
   })
 })
