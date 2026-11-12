@@ -30,7 +30,7 @@ Release
 
 Infra
   env         Render, check and push env from .env …
-  db          Cloudflare D1 migrations and queries …
+  db          Cloudflare D1 migrations, queries, backup, restore, seed and reset …
   logs        Tail a deployed worker's logs
 
 Setup
@@ -45,7 +45,7 @@ Setup
 `;
 
 exports[`help kit db --help 1`] = `
-"Cloudflare D1 migrations and queries
+"Cloudflare D1 migrations, queries, backup, restore, seed and reset
 
 Usage
   kit db <command> [options]

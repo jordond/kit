@@ -96,7 +96,8 @@ export default defineCommand({
     }
     pinCloudflareAccount(root, config)
     for (const f of files) rmSync(f, { force: true })
-    if (!ctx.flags.json) ctx.log.step(files.length ? `removed local ${db.name}` : `no local ${db.name} to remove`)
+    if (!ctx.flags.json)
+      ctx.log.step(files.length ? `removed local ${db.name}` : `no local ${db.name} to remove`)
 
     // --json: children print to stderr and the one document comes last.
     const exec = ctx.flags.json ? runToStderr : run
