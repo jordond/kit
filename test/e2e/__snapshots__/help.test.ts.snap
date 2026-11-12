@@ -68,10 +68,11 @@ Usage
   kit env <command> [options]
 
 Commands
-  sync   Render env outputs (.dev.vars) from .env
-  check  Validate .env and check outputs for drift
-  push   Push secrets with wrangler and gh
-  init   Create .env and ask for missing keys
+  sync    Render env outputs (.dev.vars) from .env
+  check   Validate .env and check outputs for drift
+  push    Push secrets with wrangler and gh
+  init    Create .env and ask for missing keys
+  rotate  Generate a new value for a key and sync
 
 Options
   -h, --help     Show help
@@ -474,6 +475,7 @@ Usage
 
 Examples
   kit env push                    # every worker in env.workerSecrets and env.githubSecrets
+  kit env push --workers          # every worker, GitHub skipped
   kit env push --target edge
   kit env push --github           # GitHub Actions secrets only
   kit env push --target edge --github
@@ -492,6 +494,33 @@ Options
   -t, --target <string>  Only this worker target (env.workerSecrets)
       --github           Push env.githubSecrets with gh
       --all              Every worker and GitHub; the default, kept for scripts
+      --workers          Every worker in env.workerSecrets; GitHub skipped
+
+"
+`;
+
+exports[`help kit env rotate --help 1`] = `
+"Generate a new value for keys the env schema marks \`generate\`, then sync
+
+Usage
+  kit env rotate [options]
+
+Examples
+  kit env rotate INTERNAL_API_SECRET           # new value in .env, outputs re-rendered
+  kit env rotate INTERNAL_API_SECRET --push    # and push it to its workers and GitHub
+  kit env rotate KEY_A KEY_B --yes
+  kit env rotate INTERNAL_API_SECRET --dry-run
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --push     Push to the remotes that hold the key (as \`kit env push\`)
 
 "
 `;
