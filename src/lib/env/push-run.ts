@@ -4,12 +4,13 @@ import { pinCloudflareAccount } from '../cloudflare'
 import { ExitCode, KitError } from '../errors'
 import type { Logger } from '../log'
 import { confirm } from '../prompt'
-import { executePush, githubDestination, planPush, workerDestination } from './push'
+import { executePush, githubDestination, type PlannedDestination, planPush, workerDestination } from './push'
 import type { EnvValues } from './schema'
 
 /**
  * One `kit env push` run: pick destinations, list, summarise, confirm, push. Shared by
- * `kit env push` and `kit env rotate --push`, so both follow the same confirm and failure rules.
+ * `kit env push` and `kit env rotate --push`, so both follow the same listing and failure rules.
+ * Split into a read-only preflight and the puts, so `rotate` can preflight before it writes `.env`.
  * Prints names and statuses only (to stderr, and not at all under --json); the caller writes the
  * JSON document and sets the exit code from the report.
  */
@@ -33,6 +34,17 @@ export interface PushReport {
   outcomes: { destination: string; key: string; status: string; output?: string }[]
 }
 
+type PushCtx = { flags: Flags; log: Logger }
+
+/** The read-only half of a push: the remotes listed and every key classified. Nothing is written yet. */
+export interface PushPreflight {
+  plans: PlannedDestination[]
+  /** How many keys would be put. */
+  count: number
+  /** Remotes kit could not list (and `--yes` was not given). */
+  listFailed: string[]
+}
+
 /** Usage error (exit 2) for flags that contradict each other. */
 export function assertSelection(sel: PushSelection): void {
   const clash = (a: string, b: string, hint: string): never => {
@@ -54,13 +66,23 @@ export function pushCommand(sel: PushSelection): string {
   return parts.join(' ')
 }
 
-export async function runPush(
-  ctx: { flags: Flags; log: Logger },
+/** Join the preflights of several selections, so one confirm and one push cover them all. */
+export function mergePreflights(list: PushPreflight[]): PushPreflight {
+  return {
+    plans: list.flatMap((p) => p.plans),
+    count: list.reduce((n, p) => n + p.count, 0),
+    listFailed: list.flatMap((p) => p.listFailed),
+  }
+}
+
+/** Pick the destinations, pin the Cloudflare account, list each remote and print the summary. */
+export async function preflightPush(
+  ctx: PushCtx,
   root: string,
   config: KitConfig,
   values: EnvValues,
   sel: PushSelection,
-): Promise<PushReport> {
+): Promise<PushPreflight> {
   assertSelection(sel)
   // No flags (or --all): every worker and GitHub (when env.githubSecrets is set).
   // --target: that worker. --github alone: GitHub only. Both: that worker and GitHub.
@@ -96,13 +118,15 @@ export async function runPush(
   }
   if (workerNames.length) pinCloudflareAccount(root, config)
 
-  const plans = []
+  const plans: PlannedDestination[] = []
   for (const d of destinations) plans.push(await planPush(d, values, { proceedOnListFailure: ctx.flags.yes }))
-  const toPush = plans.flatMap((p) =>
+  const count = plans.flatMap((p) =>
     p.items.filter((i) => i.status === 'new' || i.status === 'overwrite' || i.status === 'unknown'),
-  )
+  ).length
   // A remote kit could not list (bad wrangler or gh auth) is a failure, even if nothing else is left to push.
-  const listFailed = plans.filter((p) => p.items.some((i) => i.status === 'list-failed'))
+  const listFailed = plans
+    .filter((p) => p.items.some((i) => i.status === 'list-failed'))
+    .map((p) => p.destination.name)
 
   if (!ctx.flags.json) {
     for (const p of plans) {
@@ -113,15 +137,24 @@ export async function runPush(
     if (listFailed.length)
       ctx.log.warn('Skipping remotes kit could not list; re-run with --yes to push anyway')
   }
+  return { plans, count, listFailed }
+}
 
+/** The mutating half: put every planned key, stopping at the first failure. It does not confirm. */
+export async function executePreflight(
+  ctx: PushCtx,
+  pre: PushPreflight,
+  values: EnvValues,
+): Promise<PushReport> {
+  const { plans, listFailed } = pre
   const failListed = () => {
     if (listFailed.length && !ctx.flags.json) {
-      ctx.log.error(`could not list secrets on ${listFailed.map((p) => p.destination.name).join(', ')}`)
+      ctx.log.error(`could not list secrets on ${listFailed.join(', ')}`)
     }
   }
 
-  if (ctx.flags.dryRun || !toPush.length) {
-    if (!ctx.flags.json && !toPush.length && !listFailed.length) ctx.log.warn('Nothing to push')
+  if (ctx.flags.dryRun || !pre.count) {
+    if (!ctx.flags.json && !pre.count && !listFailed.length) ctx.log.warn('Nothing to push')
     failListed()
     return {
       ok: !listFailed.length,
@@ -130,11 +163,6 @@ export async function runPush(
         p.items.map((i) => ({ destination: p.destination.name, key: i.key, status: i.status })),
       ),
     }
-  }
-
-  const where = plans.map((p) => p.destination.name).join(', ')
-  if (!(await confirm(ctx.flags, `Push ${toPush.length} secret(s) to ${where}?`))) {
-    throw new KitError('Cancelled', undefined, ExitCode.interrupted)
   }
 
   const outcomes = await executePush(plans, values, (dest, key) => {
@@ -154,4 +182,21 @@ export async function runPush(
   }
   failListed()
   return { ok: !listFailed.length, dryRun: ctx.flags.dryRun, outcomes }
+}
+
+export async function runPush(
+  ctx: PushCtx,
+  root: string,
+  config: KitConfig,
+  values: EnvValues,
+  sel: PushSelection,
+): Promise<PushReport> {
+  const pre = await preflightPush(ctx, root, config, values, sel)
+  if (!ctx.flags.dryRun && pre.count) {
+    const where = pre.plans.map((p) => p.destination.name).join(', ')
+    if (!(await confirm(ctx.flags, `Push ${pre.count} secret(s) to ${where}?`))) {
+      throw new KitError('Cancelled', undefined, ExitCode.interrupted)
+    }
+  }
+  return executePreflight(ctx, pre, values)
 }
