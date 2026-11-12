@@ -4,7 +4,7 @@ import { type KitContext, requireProject } from '../cli/command'
 import type { KitConfig, Verb } from '../config/schema'
 import { ExitCode, KitError } from '../lib/errors'
 import { emitJson, log } from '../lib/log'
-import { commandStep, runSteps, type StepGroup, summarize } from '../lib/steps'
+import { commandStep, printTimings, runSteps, type StepGroup, summarize } from '../lib/steps'
 import {
   affectedTargets,
   type PlannedGroup,
@@ -115,10 +115,12 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
       ? 0
       : 1
     : summarize(v.name, results, started, v.hint)
+  if (!ctx.flags.json && code !== ExitCode.interrupted) printTimings(results, ctx.flags)
   if (ctx.flags.json) {
     emitJson({
       verb: v.name,
       ok: code === 0,
+      ms: Math.round(performance.now() - started),
       ...selection,
       steps: results.map((r) => ({
         target: r.group,

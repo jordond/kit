@@ -152,6 +152,30 @@ export function summarize(verb: string, results: StepResult[], startedAt: number
   return 0
 }
 
+const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`
+
+/** Per-step timings for a `--json` document: `ms` in whole milliseconds. */
+export const stepTimings = (results: StepResult[]): { title: string; ok: boolean; ms: number }[] =>
+  results.map((r) => ({ title: r.title, ok: r.ok, ms: Math.round(r.ms) }))
+
+/** Per-step durations, slowest first: the top `limit`, then how many were left out. */
+export function timingLines(results: StepResult[], limit = 5): string[] {
+  const sorted = [...results].sort((a, b) => b.ms - a.ms)
+  const shown = sorted.slice(0, limit)
+  const width = Math.max(0, ...shown.map((r) => seconds(r.ms).length))
+  const lines = shown.map((r) => `${seconds(r.ms).padStart(width)}  ${label(r)}`)
+  const more = sorted.length - shown.length
+  if (more > 0) lines.push(`… ${more} more (--verbose lists every step)`)
+  return lines
+}
+
+/** Step durations under the summary line, on stderr. Nothing for a single step: the summary has its time. */
+export function printTimings(results: StepResult[], flags: Pick<Flags, 'verbose' | 'quiet'>): void {
+  if (results.length < 2 || flags.quiet) return
+  const lines = timingLines(results, flags.verbose ? results.length : 5)
+  process.stderr.write(`${lines.map((l) => `  ${pc.dim(l)}`).join('\n')}\n`)
+}
+
 const colorEnabled = () => !process.env.NO_COLOR || !!process.env.FORCE_COLOR
 
 /**

@@ -30,9 +30,10 @@ export function serviceCommand(name: string): KitCommand<Args> {
       const { push, tag } = await import('../../lib/git')
       const { runPiped } = await import('../../lib/proc')
       const { confirm } = await import('../../lib/prompt')
-      const { commandStep, runSteps, summarize } = await import('../../lib/steps')
+      const { commandStep, runSteps, stepTimings, summarize } = await import('../../lib/steps')
       const { emitJson } = await import('../../lib/log')
       const started = performance.now()
+      const elapsed = () => Math.round(performance.now() - started)
       const { root, config } = requireProject(ctx)
       const svc = config.release?.services?.[name]
       if (!svc) throw new KitError(`No release.services.${name}`, undefined, ExitCode.config)
@@ -70,7 +71,7 @@ export function serviceCommand(name: string): KitCommand<Args> {
       ]
       const results = await runSteps([{ title: name, steps }], ctx.flags, { bail: true })
       if (results.some((r) => !r.ok)) {
-        if (ctx.flags.json) emitJson({ service: name, version, ok: false, results })
+        if (ctx.flags.json) emitJson({ service: name, version, ok: false, results, ms: elapsed() })
         process.exitCode = summarize(`release ${name}`, results, started)
         return
       }
@@ -82,7 +83,16 @@ export function serviceCommand(name: string): KitCommand<Args> {
       } catch (e) {
         ctx.log.warn(`deployed, but tagging ${tagName} failed: ${e instanceof Error ? e.message : String(e)}`)
       }
-      if (ctx.flags.json) emitJson({ service: name, version, ok: true, tag: tagName, tagPushed })
+      if (ctx.flags.json)
+        emitJson({
+          service: name,
+          version,
+          ok: true,
+          tag: tagName,
+          tagPushed,
+          steps: stepTimings(results),
+          ms: elapsed(),
+        })
       summarize(`release ${name}`, results, started)
     },
   }) as KitCommand<Args>
