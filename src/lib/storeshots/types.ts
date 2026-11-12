@@ -306,6 +306,8 @@ export interface PageDone {
   ok: boolean
   /** Why the run failed; set when `ok` is false. */
   error?: string
+  /** The `Job.id` the page was rendering when it failed; absent when the failure is not one job's. */
+  job?: string
 }
 
 /** The `plan.json` the render host serves for a plan. */
@@ -384,8 +386,15 @@ export interface RenderOptions {
   chrome: string
   /** The page JS (`pageBundle()`), served as `page.js`. */
   page: string
-  /** Kill Chrome and fail (exit 1) after this long; default 5 minutes. */
+  /**
+   * Kill Chrome and fail (exit 1) when no image has come back for this long; default 5 minutes.
+   * The clock restarts with every `out/<jobId>` the page posts, so it bounds one job, not the run.
+   */
   timeoutMs?: number
+  /** Absolute repo root: an error names a raw shot relative to it. Absent, the path is absolute. */
+  root?: string
+  /** Where `--verbose` detail goes (a temp dir that could not be removed); absent drops it. */
+  verbose?: (message: string) => void
 }
 
 export interface WriteOptions {
@@ -447,15 +456,17 @@ export type PageBundle = () => Promise<string>
  * `renderJobs` in `render.ts`. Serves the plan, runs Chrome, and resolves with one PNG per job,
  * keyed by `Job.id`. Every PNG is checked against the job's width and height (`imageInfo`) and
  * flattened onto white when it carries alpha (`flattenPng`), so the bytes are ready to write.
- * Chrome exiting early, the timeout, a page error (`PageDone.ok` false), a missing job or a PNG
- * of the wrong size is a KitError with exit 1. The server and the Chrome process tree are
- * registered with `lib/cleanup`.
+ * Chrome exiting early, the idle timeout, a page error (`PageDone.ok` false), a missing job or a
+ * PNG of the wrong size is a KitError with exit 1; a Chrome binary that cannot be spawned is one
+ * with exit 4. The server and the Chrome process tree are registered with `lib/cleanup`; a temp
+ * dir that cannot be removed afterwards does not fail a finished render.
  */
 export type RenderJobs = (plan: ExportPlan, opts: RenderOptions) => Promise<Map<string, Uint8Array>>
 
 /**
  * `writeExport` in `write.ts`. Checks ownership of every set first (exit 4 on an unlisted image
- * without `force`), then removes the stale files of each owned set, writes the PNGs and the
- * manifests. Nothing is written when any check fails.
+ * without `force`); then, per store dir, writes the interim manifest and the PNGs, removes the
+ * stale files of each owned set, and writes the final manifest. Nothing is written when any check
+ * fails.
  */
 export type WriteExport = (plan: ExportPlan, opts: WriteOptions) => Promise<WriteResult>

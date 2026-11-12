@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { configSchema } from '../../src/config/schema'
@@ -337,6 +347,17 @@ describe('writeExport', () => {
     expect(e.message).toContain(MANIFEST_FILE)
     await write(plan([apple()]), { force: true })
     expect(manifest(appleDir).files).toHaveLength(4)
+  })
+
+  test('a dangling symlink in an exported set is skipped, not a stat error', async () => {
+    const link = join(googleDir, 'en-US', 'images', 'phoneScreenshots', 'gone.png')
+    mkdirSync(dirname(link), { recursive: true })
+    symlinkSync(join(root, 'nowhere.png'), link)
+    const result = await write(plan([google()]))
+    expect(result.written.map((w) => w.file)).toEqual(GOOGLE_EN)
+    expect(result.removed).toEqual([])
+    // Not an image kit can read, so not in the way and not kit's to remove.
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
   })
 
   test('a job without a rendered image fails before anything is written', async () => {

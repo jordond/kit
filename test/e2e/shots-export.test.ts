@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -106,8 +107,12 @@ describe('kit shots export', () => {
       '--no-default-browser-check',
     ])
     expect(argv[5]).toMatch(/^--user-data-dir=.+\/profile$/)
-    expect(argv[6]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]+\/$/)
+    // The server URL, with its path token, is in a file of the work dir: never on argv, which `ps` shows.
+    expect(argv[6]).toMatch(/^file:\/\/.+\/open\.html$/)
     expect(argv).toHaveLength(7)
+    const { url } = chrome.runs()[0]!
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\/$/)
+    expect(argv.join(' ')).not.toContain(new URL(url!).pathname.split('/')[1]!)
 
     // The iOS metadata dir also holds supply's `android/`: it is not a locale.
     expect(ls(APPLE)).toEqual(['en-US', 'fr-FR'])
@@ -211,6 +216,71 @@ describe('kit shots export', () => {
     expect(locale.stderr).toContain('No exported store has the locale de-DE')
     expect(locale.stderr).toContain('apple: en-US, fr-FR')
     expect(chrome.calls()).toEqual([])
+  })
+
+  test('an empty --out, --locale or --store is a usage error (exit 2), not the default', async () => {
+    setup()
+    // `--out "$OUT"` with OUT unset must not fall back to the real store dirs, nor `--locale ""` to every locale.
+    for (const [args, flag] of [
+      [['--out', ''], '--out'],
+      [['--out='], '--out'],
+      [['--locale', ''], '--locale'],
+      [['--locale='], '--locale'],
+      [['--store', ''], '--store'],
+      [['--store=', '--out', 'build/store-shots'], '--store'],
+    ] as const) {
+      const r = await run([...args])
+      expect(r.stderr).toContain(`${flag} has an empty value`)
+      expect(r.code).toBe(2)
+    }
+    expect(chrome.calls()).toEqual([])
+    expect(pngs()).toEqual([])
+    // An empty argument after `--` is not a flag value.
+    expect((await run(['--dry-run', '--', '--out', ''])).stderr).not.toContain('has an empty value')
+  })
+
+  test("deliver's non-locale dirs and dirs that cannot be a locale get no screenshots", async () => {
+    setup()
+    for (const dir of [
+      'trade_representative_contact_information',
+      'review_information',
+      'app_clip_review_information',
+      'default',
+      'fonts',
+      'appleTV',
+      'Old Backup',
+    ]) {
+      put(`fastlane/metadata/${dir}/first_name.txt`, 'x')
+    }
+    put(`${GOOGLE}/Old Backup/title.txt`, 'x')
+    const r = await run(['--json'])
+    expect(r.stderr).toBe('')
+    expect(r.code).toBe(0)
+    expect(json(r.stdout).written).toHaveLength(12)
+    expect(ls(APPLE)).toEqual(['en-US', 'fr-FR'])
+    expect(ls(GOOGLE)).toEqual(['Old Backup', 'en-US', 'fr-FR'])
+    expect(ls(`${GOOGLE}/Old Backup`)).toEqual(['title.txt'])
+
+    // A --locale that cannot be a locale is still refused.
+    const bad = await run(['--locale', 'Old Backup', '--out', 'build/shots', '--store', 'apple'])
+    expect(bad.code).toBe(2)
+  })
+
+  test('a dangling symlink in the raw dir, a locale dir or a set dir is skipped', async () => {
+    setup()
+    symlinkSync(path('gone.png'), path('maestro/screenshots/ios/gone.png'))
+    symlinkSync(path('gone'), path('maestro/screenshots/gone-dir'))
+    symlinkSync(path('gone'), path('fastlane/metadata/de-DE'))
+    mkdirSync(path(`${GOOGLE}/en-US/${PHONE}`), { recursive: true })
+    symlinkSync(path('gone.png'), path(`${GOOGLE}/en-US/${PHONE}/gone.png`))
+    mkdirSync(path(`${APPLE}/en-US`), { recursive: true })
+    symlinkSync(path('gone.png'), path(`${APPLE}/en-US/gone.png`))
+
+    const r = await run(['--json'])
+    expect(r.stderr).not.toContain('ENOENT')
+    expect(r.code).toBe(0)
+    expect(json(r.stdout).written).toHaveLength(12)
+    expect(ls(APPLE)).toEqual(['en-US', 'fr-FR'])
   })
 
   test('--out writes <dir>/apple and <dir>/google and leaves the store dirs alone', async () => {
@@ -365,6 +435,75 @@ describe('kit shots export', () => {
     expect((await run(['--dry-run'])).code).toBe(0)
   })
 
+  test('the headline family is checked when only the badge or the wordmark is drawn in it', async () => {
+    setup()
+    // No brand font: the badge and the wordmark of slide 1 are drawn in its headline family.
+    editConfig(", font: 'Kit Fixture' }", ' }')
+    editProject((project) => {
+      delete project.locales
+      const slide = project.slides[0]!
+      slide.headline.text = ''
+      slide.headline.fontFamily = 'Nunito'
+    })
+    const r = await run()
+    expect(r.code).toBe(3)
+    expect(r.stderr).toContain('1 font family is not declared in shots.fonts')
+    expect(r.stderr).toContain(
+      'slide "1 - Home" (slide-1) badge (drawn in the headline family) uses "Nunito"',
+    )
+    expect(r.stderr).toContain(
+      'slide "1 - Home" (slide-1) brand wordmark (drawn in the headline family) uses "Nunito"',
+    )
+    expect(chrome.calls()).toEqual([])
+    expect(pngs()).toEqual([])
+
+    // Neither drawn: an empty headline's family is nobody's.
+    editProject((project) => {
+      project.slides[0]!.badge.enabled = false
+      project.slides[0]!.showMascot = false
+    })
+    expect((await run(['--dry-run'])).code).toBe(0)
+  })
+
+  test('an interrupt mid-render exits 130 and leaves no Chrome, server or temp dir', async () => {
+    setup()
+    // `Fixture.spawn` takes no env: the child inherits this process's.
+    const saved = { KIT_CHROME: process.env.KIT_CHROME, FAKE_CHROME: process.env.FAKE_CHROME }
+    process.env.KIT_CHROME = chrome.bin
+    process.env.FAKE_CHROME = 'hang'
+    let proc: ReturnType<Fixture['spawn']>
+    try {
+      proc = f.spawn(['shots', 'export'])
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
+    const stderr = new Response(proc.stderr).text()
+    const exited = proc.exited.then(() => true)
+    while (chrome.runs().length === 0 && !(await Promise.race([exited, Bun.sleep(25)]))) {
+      // until the fake Chrome has logged its start, or kit gave up before starting it
+    }
+    const [started] = chrome.runs()
+    expect(started).toBeDefined()
+    const { pid, url, argv } = started!
+    const work = dirname(argv.find((a) => a.startsWith('--user-data-dir='))!.slice('--user-data-dir='.length))
+    // Mid-run: Chrome is alive, the server answers, the temp dir is there.
+    expect(() => process.kill(pid, 0)).not.toThrow()
+    expect((await fetch(new URL('plan.json', url))).status).toBe(200)
+    expect(existsSync(work)).toBe(true)
+
+    proc.kill('SIGINT')
+    expect(await proc.exited).toBe(130)
+    expect(await stderr).toContain('Interrupted')
+
+    expect(() => process.kill(pid, 0)).toThrow()
+    await expect(fetch(new URL('plan.json', url))).rejects.toThrow()
+    expect(existsSync(work)).toBe(false)
+    expect(pngs()).toEqual([])
+  }, 30_000)
+
   test('more slides than a store keeps per set is exit 4 at plan time', async () => {
     setup()
     editProject((project) => {
@@ -433,11 +572,50 @@ describe('kit shots export', () => {
  * the page running, the fonts loading, and the size and colour type of what comes back.
  */
 describe.skipIf(process.env.KIT_CHROME_TEST !== '1')('kit shots export with a real Chrome', () => {
-  test('renders the fixture at the exact set sizes, without alpha', async () => {
+  /** A fresh fixture and a `kit shots export` runner on the installed Chrome. */
+  function real() {
     const bin = findChrome()
     if (bin === undefined) throw new Error('KIT_CHROME_TEST=1 needs Chrome: install it or set KIT_CHROME')
     f = fixture('shots-app', [])
-    const r = await f.kit(['shots', 'export', '--locale', 'en-US', '--json'], { env: { KIT_CHROME: bin } })
+    return (args: string[]) => f.kit(['shots', 'export', ...args], { env: { KIT_CHROME: bin } })
+  }
+
+  test('a generic family is drawn as that generic, not as the sans-serif fallback', async () => {
+    const kit = real()
+    const phone = `${GOOGLE}/en-US/${PHONE}/02_2-journal.png`
+    const drawn: Record<string, Buffer> = {}
+    for (const family of ['sans-serif', 'serif', 'monospace']) {
+      editProject((project) => {
+        project.slides[1]!.headline.fontFamily = family
+        project.slides[1]!.subheadline.fontFamily = family
+      })
+      const r = await kit(['--store', 'google', '--locale', 'en-US'])
+      expect(r.stderr).not.toContain('✖')
+      expect(r.code).toBe(0)
+      drawn[family] = readFileSync(path(phone))
+    }
+    // `"serif"` in quotes is a missing font named serif: it came out identical to sans-serif.
+    expect(drawn.serif!.equals(drawn['sans-serif']!)).toBe(false)
+    expect(drawn.monospace!.equals(drawn['sans-serif']!)).toBe(false)
+    expect(drawn.monospace!.equals(drawn.serif!)).toBe(false)
+  }, 120_000)
+
+  test('a raw shot that does not decode fails naming the file, not the server URL', async () => {
+    const kit = real()
+    writeFileSync(path('maestro/screenshots/android/journal.png'), 'not a png')
+    const r = await kit(['--store', 'google', '--locale', 'en-US'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain(
+      'The shots page failed on android-en-US-02: The raw shot does not load as an image',
+    )
+    expect(r.stderr).toContain('Its raw shot is maestro/screenshots/android/journal.png')
+    expect(r.stderr).not.toContain('http://')
+    expect(pngs()).toEqual([])
+  }, 120_000)
+
+  test('renders the fixture at the exact set sizes, without alpha', async () => {
+    const kit = real()
+    const r = await kit(['--locale', 'en-US', '--json'])
     expect(r.stderr).not.toContain('✖')
     expect(r.code).toBe(0)
     const doc = json(r.stdout)

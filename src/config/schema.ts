@@ -257,23 +257,6 @@ export const configSchema = z
           .partial()
           .strict()
           .optional(),
-        /** HTML artwork (feature graphic, icon) captured at a fixed size. */
-        pages: z
-          .array(
-            z
-              .object({
-                /** The HTML file, relative to the repo root. */
-                file: z.string(),
-                /** The PNG to write, relative to the repo root. */
-                out: z.string(),
-                width: z.number().int(),
-                height: z.number().int(),
-                scale: z.number().optional(),
-                background: z.string().optional(),
-              })
-              .strict(),
-          )
-          .optional(),
       })
       .strict()
       .optional(),

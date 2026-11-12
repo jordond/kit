@@ -7,12 +7,17 @@ import { type ExportPlan, type PageDone, pagePlan } from './types'
  * page posts back. The protocol is documented at `PagePlan` in `types.ts`.
  *
  * It listens on `127.0.0.1` at a port the OS picks, and every route sits under a random path
- * token, so another local process cannot read the raw shots or post a result without the URL.
+ * token: a local process that finds the port still cannot read the raw shots or post a result
+ * without the URL. `renderJobs` keeps the URL off Chrome's command line (which `ps` shows every
+ * local user) by handing Chrome a file in its 0700 work dir. The token does not protect against
+ * a process running as the same user, which can read that file and Chrome's profile.
  */
 
 export interface ShotsServerOptions {
   /** The page JS (`pageBundle()`), served as `page.js`. */
   page: string
+  /** Called with the job id each time the page posts a PNG to `out/<jobId>`. */
+  onImage?: (jobId: string) => void
 }
 
 export interface ShotsServer {
@@ -77,7 +82,8 @@ function parseDone(text: string): PageDone {
     const value: unknown = JSON.parse(text)
     if (typeof value === 'object' && value !== null && 'ok' in value && typeof value.ok === 'boolean') {
       const error = 'error' in value && typeof value.error === 'string' ? value.error : undefined
-      return error === undefined ? { ok: value.ok } : { ok: value.ok, error }
+      const job = 'job' in value && typeof value.job === 'string' ? { job: value.job } : {}
+      return error === undefined ? { ok: value.ok, ...job } : { ok: value.ok, error, ...job }
     }
   } catch {
     // reported below
@@ -120,6 +126,7 @@ export function serveShots(plan: ExportPlan, opts: ShotsServerOptions): ShotsSer
       const id = route.slice('out/'.length)
       if (!jobs.has(id)) return notFound()
       images.set(id, new Uint8Array(await req.arrayBuffer()))
+      opts.onImage?.(id)
       return new Response(null, { status: 204 })
     }
     return notFound()

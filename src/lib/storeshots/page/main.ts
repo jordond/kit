@@ -1,4 +1,5 @@
 /// <reference lib="dom" />
+import { cssFamily } from '../fonts'
 import type { PageDone, PageFont, PageJob, PagePlan } from '../types'
 import { loadImage, renderSlideToCanvas } from './renderer'
 
@@ -29,7 +30,18 @@ async function done(result: PageDone): Promise<void> {
   }
 }
 
-const fail = (err: unknown): Promise<void> => done({ ok: false, error: message(err) })
+/** A failure while rendering one job; `done` then says which, so the render host can name its raw shot. */
+class JobError extends Error {
+  constructor(
+    readonly job: string,
+    cause: unknown,
+  ) {
+    super(message(cause))
+  }
+}
+
+const fail = (err: unknown): Promise<void> =>
+  done({ ok: false, error: message(err), ...(err instanceof JobError ? { job: err.job } : {}) })
 
 /**
  * Loads one face and proves it is usable. A canvas draw of an unloaded face paints the fallback
@@ -50,7 +62,7 @@ async function loadFont(font: PageFont): Promise<void> {
   document.fonts.add(face)
   // A range (`400 800`) is checked at its first weight.
   const weight = font.weight?.trim().split(/\s+/)[0] || '400'
-  if (!document.fonts.check(`${weight} 16px "${font.family}"`)) {
+  if (!document.fonts.check(`${weight} 16px ${cssFamily(font.family)}`)) {
     throw new Error(`Font ${name} from ${font.url} loaded but is not usable`)
   }
 }
@@ -86,7 +98,7 @@ async function renderJob(
     })
     if (!res.ok) throw new Error(`POST out/${job.id} answered ${res.status}`)
   } catch (err) {
-    throw new Error(`${job.id}: ${message(err)}`)
+    throw new JobError(job.id, err)
   }
 }
 
@@ -98,7 +110,9 @@ async function run(): Promise<void> {
   await Promise.all(plan.fonts.map(loadFont))
   // Loaded once and only when a slide draws it; a mark that does not load ends the run.
   const mark =
-    plan.brand && plan.jobs.some((job) => job.slide.showMascot) ? await loadImage(url(plan.brand.mark)) : null
+    plan.brand && plan.jobs.some((job) => job.slide.showMascot)
+      ? await loadImage(url(plan.brand.mark), 'The brand mark')
+      : null
 
   const canvas = document.createElement('canvas')
   for (const job of plan.jobs) {

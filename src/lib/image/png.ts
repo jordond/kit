@@ -238,8 +238,8 @@ function unfilter(raw: Uint8Array, height: number, stride: number, bpp: number):
  * Composite a PNG onto an opaque `background` (`#rgb`, `#rrggbb`, or channels) and return an RGB
  * PNG (colour type 2, no `tRNS`) of the same size. An RGB PNG without alpha comes back unchanged.
  *
- * Reads 8-bit, non-interlaced PNGs of every colour type (what Chrome's `--screenshot` writes is
- * 8-bit RGBA); 16-bit, sub-byte and interlaced PNGs throw a KitError (exit 4), as does truncated data.
+ * Reads 8-bit, non-interlaced PNGs of every colour type (what Chrome's `canvas.toBlob` encodes is
+ * 8-bit RGB or RGBA); 16-bit, sub-byte and interlaced PNGs throw a KitError (exit 4), as does truncated data.
  */
 export function flattenPng(bytes: Uint8Array, background: string | Rgb): Uint8Array {
   if (bytes.length < PNG_MAGIC.length || !isPng(bytes)) throw bad('Not a PNG image')

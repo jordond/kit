@@ -1,5 +1,8 @@
 /// <reference lib="dom" />
+
+import { fontStack } from '../fonts'
 import type { PageBrand, Slide } from '../types'
+import { drawBackground } from './background'
 import { drawDeviceFrame, roundedRectPath } from './device-frames'
 
 /** What a slide is drawn from besides its own settings. */
@@ -12,20 +15,17 @@ export interface SlideSources {
   mark: HTMLImageElement | null
 }
 
-/** Loads an image, or throws: a slide is never drawn without its shot. */
-export async function loadImage(src: string): Promise<HTMLImageElement> {
+/** Loads an image, or throws naming `what` it is: the URL means nothing to whoever reads the error. */
+export async function loadImage(src: string, what: string): Promise<HTMLImageElement> {
   const img = new Image()
   img.src = src
   try {
     await img.decode()
   } catch {
-    throw new Error(`Failed to load image: ${src}`)
+    throw new Error(`${what} does not load as an image`)
   }
   return img
 }
-
-/** Drawn under everything when a slide has no primary colour. */
-const FALLBACK_BACKGROUND = '#ffffff'
 
 /**
  * Wraps text into lines that fit within maxWidth
@@ -51,111 +51,6 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
 }
 
 /**
- * Draw background pattern accents
- */
-function drawBackgroundPattern(
-  ctx: CanvasRenderingContext2D,
-  slide: Slide,
-  width: number,
-  height: number,
-): void {
-  const { pattern, accentColor } = slide.background
-
-  ctx.save()
-  if (pattern === 'warm-glow') {
-    const glowRadius = width * 0.75
-    const cx = width * 0.5
-    const cy = height * 0.55
-    const grad = ctx.createRadialGradient(cx, cy, 50, cx, cy, glowRadius)
-    grad.addColorStop(0, accentColor.includes('rgba') ? accentColor : `${accentColor}33`)
-    grad.addColorStop(1, 'transparent')
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2)
-    ctx.fill()
-  } else if (pattern === 'rings') {
-    ctx.strokeStyle = accentColor.includes('rgba') ? accentColor : `${accentColor}18`
-    ctx.lineWidth = width * 0.015
-    for (let r = width * 0.2; r < width * 0.8; r += width * 0.18) {
-      ctx.beginPath()
-      ctx.arc(width * 0.85, height * 0.25, r, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-  } else if (pattern === 'coffee-beans') {
-    ctx.fillStyle = accentColor.includes('rgba') ? accentColor : `${accentColor}15`
-    const beanPositions = [
-      { x: width * 0.12, y: height * 0.15, r: 24, a: 0.3 },
-      { x: width * 0.88, y: height * 0.18, r: 28, a: -0.5 },
-      { x: width * 0.08, y: height * 0.42, r: 20, a: 0.8 },
-      { x: width * 0.92, y: height * 0.52, r: 22, a: -0.2 },
-    ]
-    for (const b of beanPositions) {
-      ctx.save()
-      ctx.translate(b.x, b.y)
-      ctx.rotate(b.a)
-      ctx.beginPath()
-      ctx.ellipse(0, 0, b.r, b.r * 1.5, 0, 0, Math.PI * 2)
-      ctx.fill()
-      // Center slit
-      ctx.strokeStyle = slide.background.primaryColor || FALLBACK_BACKGROUND
-      ctx.lineWidth = 3
-      ctx.beginPath()
-      ctx.moveTo(0, -b.r * 1.1)
-      ctx.bezierCurveTo(b.r * 0.3, 0, -b.r * 0.3, 0, 0, b.r * 1.1)
-      ctx.stroke()
-      ctx.restore()
-    }
-  } else if (pattern === 'subtle-grid') {
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)'
-    ctx.lineWidth = 1
-    const step = width * 0.08
-    for (let x = 0; x < width; x += step) {
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, height)
-      ctx.stroke()
-    }
-    for (let y = 0; y < height; y += step) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(width, y)
-      ctx.stroke()
-    }
-  }
-  ctx.restore()
-}
-
-/**
- * Draw continuous panoramic wave connecting all slides
- */
-function drawPanoramaWave(ctx: CanvasRenderingContext2D, slide: Slide, width: number, height: number): void {
-  const total = slide.background.panoramaTotalSlides ?? 9
-  const index = slide.background.panoramaSlideIndex ?? 0
-  const globalWidth = width * total
-  const globalOffsetX = index * width
-
-  ctx.save()
-  const waveColor = slide.background.accentColor || '#c97b31'
-  ctx.fillStyle = waveColor.includes('rgba') ? waveColor : `${waveColor}1a`
-
-  // Continuous harmonic wave curve across all slides
-  ctx.beginPath()
-  ctx.moveTo(0, height)
-  for (let x = 0; x <= width; x += 20) {
-    const globalX = globalOffsetX + x
-    const waveY =
-      height * 0.48 +
-      Math.sin((globalX / globalWidth) * Math.PI * 4) * height * 0.12 +
-      Math.cos((globalX / globalWidth) * Math.PI * 2) * height * 0.06
-    ctx.lineTo(x, waveY)
-  }
-  ctx.lineTo(width, height)
-  ctx.closePath()
-  ctx.fill()
-  ctx.restore()
-}
-
-/**
  * Brand mark + wordmark, centred, the mark about 1.2x the wordmark. Kept small so the headline
  * under it stays the thing legible at thumbnail size. Without a wordmark the mark stands alone.
  */
@@ -174,7 +69,7 @@ function drawBrandLockup(
   const gap = word ? Math.round(10 * scaleFactor) : 0
 
   ctx.save()
-  ctx.font = `800 ${wordSize}px "${brand.font || slide.headline.fontFamily}", sans-serif`
+  ctx.font = `800 ${wordSize}px ${fontStack(brand.font || slide.headline.fontFamily)}`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
   const wordWidth = word ? ctx.measureText(word).width : 0
@@ -206,7 +101,7 @@ function drawBadge(
   if (!slide.badge.enabled || !slide.badge.text.trim()) return startY
 
   const badgeFontSize = Math.round(24 * scaleFactor * (slide.badge.fontSize / 100))
-  ctx.font = `700 ${badgeFontSize}px "${badgeFont}", sans-serif`
+  ctx.font = `700 ${badgeFontSize}px ${fontStack(badgeFont)}`
   const text = slide.badge.text.toUpperCase()
   const textMetrics = ctx.measureText(text)
 
@@ -256,7 +151,7 @@ function drawBadge(
 
   // Draw text
   ctx.fillStyle = slide.badge.textColor
-  ctx.font = `700 ${badgeFontSize}px "${badgeFont}", sans-serif`
+  ctx.font = `700 ${badgeFontSize}px ${fontStack(badgeFont)}`
   ctx.textAlign = 'left'
   ctx.textBaseline = 'middle'
   ctx.fillText(text, textStartX, pillY + pillHeight / 2 + 1)
@@ -281,7 +176,7 @@ function drawTypography(
   if (slide.headline.text.trim()) {
     const headlineFontSize = Math.round(76 * scaleFactor * (slide.headline.fontSize / 100))
     ctx.save()
-    ctx.font = `${slide.headline.fontWeight} ${headlineFontSize}px "${slide.headline.fontFamily}", sans-serif`
+    ctx.font = `${slide.headline.fontWeight} ${headlineFontSize}px ${fontStack(slide.headline.fontFamily)}`
     ctx.textAlign = slide.headline.align
     ctx.textBaseline = 'top'
 
@@ -315,7 +210,7 @@ function drawTypography(
   if (slide.subheadline.text.trim()) {
     const subFontSize = Math.round(38 * scaleFactor * (slide.subheadline.fontSize / 100))
     ctx.save()
-    ctx.font = `${slide.subheadline.fontWeight} ${subFontSize}px "${slide.subheadline.fontFamily}", sans-serif`
+    ctx.font = `${slide.subheadline.fontWeight} ${subFontSize}px ${fontStack(slide.subheadline.fontFamily)}`
     ctx.textAlign = slide.subheadline.align
     ctx.textBaseline = 'top'
 
@@ -409,8 +304,9 @@ export async function renderSlideToCanvas(
   sources: SlideSources,
 ): Promise<void> {
   const { brand, mark } = sources
-  const img = await loadImage(sources.shot)
-  if (!img.naturalWidth || !img.naturalHeight) throw new Error(`Image has no size: ${sources.shot}`)
+  // A slide is never drawn without its shot. The render host adds which file the job's shot is.
+  const img = await loadImage(sources.shot, 'The raw shot')
+  if (!img.naturalWidth || !img.naturalHeight) throw new Error('The raw shot has no size')
 
   canvas.width = targetWidth
   canvas.height = targetHeight
@@ -420,71 +316,7 @@ export async function renderSlideToCanvas(
 
   const scaleFactor = targetWidth / 1320
 
-  // Solid background first, so nothing below is drawn onto an unpainted canvas
-  ctx.fillStyle = slide.background.primaryColor || FALLBACK_BACKGROUND
-  ctx.fillRect(0, 0, targetWidth, targetHeight)
-
-  // Background Gradient / Mesh / Panorama
-  if (slide.background.type === 'linear-gradient') {
-    const angleRad = ((slide.background.angle - 90) * Math.PI) / 180
-    const cx = targetWidth / 2
-    const cy = targetHeight / 2
-    const length = Math.sqrt(targetWidth * targetWidth + targetHeight * targetHeight) / 2
-    const x0 = cx - Math.cos(angleRad) * length
-    const y0 = cy - Math.sin(angleRad) * length
-    const x1 = cx + Math.cos(angleRad) * length
-    const y1 = cy + Math.sin(angleRad) * length
-
-    const grad = ctx.createLinearGradient(x0, y0, x1, y1)
-    grad.addColorStop(0, slide.background.primaryColor)
-    grad.addColorStop(1, slide.background.secondaryColor)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, targetWidth, targetHeight)
-  } else if (slide.background.type === 'radial-gradient') {
-    const grad = ctx.createRadialGradient(
-      targetWidth * 0.5,
-      targetHeight * 0.4,
-      targetWidth * 0.1,
-      targetWidth * 0.5,
-      targetHeight * 0.4,
-      targetWidth * 0.85,
-    )
-    grad.addColorStop(0, slide.background.secondaryColor)
-    grad.addColorStop(1, slide.background.primaryColor)
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, targetWidth, targetHeight)
-  } else if (slide.background.type === 'mesh-glow') {
-    const grad1 = ctx.createRadialGradient(
-      targetWidth * 0.25,
-      targetHeight * 0.3,
-      50,
-      targetWidth * 0.25,
-      targetHeight * 0.3,
-      targetWidth * 0.7,
-    )
-    grad1.addColorStop(0, slide.background.secondaryColor)
-    grad1.addColorStop(1, slide.background.primaryColor)
-    ctx.fillStyle = grad1
-    ctx.fillRect(0, 0, targetWidth, targetHeight)
-
-    const grad2 = ctx.createRadialGradient(
-      targetWidth * 0.8,
-      targetHeight * 0.7,
-      50,
-      targetWidth * 0.8,
-      targetHeight * 0.7,
-      targetWidth * 0.6,
-    )
-    grad2.addColorStop(0, `${slide.background.accentColor}33`)
-    grad2.addColorStop(1, 'transparent')
-    ctx.fillStyle = grad2
-    ctx.fillRect(0, 0, targetWidth, targetHeight)
-  } else if (slide.background.type === 'panorama') {
-    drawPanoramaWave(ctx, slide, targetWidth, targetHeight)
-  }
-
-  // Draw background decorative patterns
-  drawBackgroundPattern(ctx, slide, targetWidth, targetHeight)
+  drawBackground(ctx, slide, targetWidth, targetHeight)
 
   // Header: brand lockup, badge, typography
   let currentY = targetHeight * 0.05

@@ -28,7 +28,6 @@ describe('shots config', () => {
         fonts: [{ family: 'Nunito', file: 'brand/fonts/nunito.woff2', weight: '400 800' }],
         brand: { mark: 'brand/logo.svg', wordmark: 'app', color: '#46291B', font: 'Nunito' },
         sets: { ios: 'iphone-6.5' },
-        pages: [{ file: 'brand/feature.html', out: 'meta/featureGraphic.png', width: 1024, height: 500 }],
       },
     })
     expect(resolveSets(config)).toEqual({ ios: 'iphone-6.5', ipad: 'ipad-13', android: 'phone' })
@@ -49,6 +48,13 @@ describe('shots config', () => {
       configSchema.safeParse({ ...base, shots: { project: 'p', sets: { ios: 'iphone-5.5' } } }).success,
     ).toBe(false)
     expect(configSchema.safeParse({ ...base, shots: { project: 'p', logo: 'x' } }).success).toBe(false)
+  })
+
+  test('rejects shots.pages: artwork pages are not built, so the key is unknown, not ignored', () => {
+    const pages = [{ file: 'brand/feature.html', out: 'meta/featureGraphic.png', width: 1024, height: 500 }]
+    const r = configSchema.safeParse({ name: 'app', maestro, shots: { project: 'p', pages } })
+    expect(r.success).toBe(false)
+    expect(r.error?.issues[0]).toMatchObject({ code: 'unrecognized_keys', path: ['shots'], keys: ['pages'] })
   })
 })
 

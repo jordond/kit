@@ -5,6 +5,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  type Stats,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -94,11 +95,22 @@ function readManifest(dir: string, force: boolean): string[] {
   }
 }
 
-/** The image files directly in `dir` (no dot files, no sub-dirs), sorted. */
+/** `statSync`, or undefined for an entry that cannot be read: a dangling symlink, a file gone since the listing. */
+export function statOrSkip(path: string): Stats | undefined {
+  try {
+    return statSync(path)
+  } catch {
+    return undefined
+  }
+}
+
+/** The image files directly in `dir` (no dot files, no sub-dirs, nothing that fails to stat), sorted. */
 function imagesIn(dir: string): string[] {
   if (!existsSync(dir)) return []
   return readdirSync(dir)
-    .filter((name) => !name.startsWith('.') && IMAGE.test(name) && statSync(join(dir, name)).isFile())
+    .filter(
+      (name) => !name.startsWith('.') && IMAGE.test(name) && statOrSkip(join(dir, name))?.isFile() === true,
+    )
     .sort()
 }
 
