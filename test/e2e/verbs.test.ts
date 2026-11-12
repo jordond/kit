@@ -120,14 +120,16 @@ describe('verbs', () => {
     expect(r.code).toBe(0)
     expect(JSON.parse(r.stdout)).toEqual({
       ok: true,
+      ms: expect.any(Number),
       deploys: [
         {
           target: 'web',
           env: 'staging',
           ok: true,
+          ms: expect.any(Number),
           steps: [
-            { title: 'kit --version', code: 0 },
-            { title: expect.any(String), code: 0 },
+            { title: 'kit --version', code: 0, ms: expect.any(Number) },
+            { title: expect.any(String), code: 0, ms: expect.any(Number) },
           ],
         },
       ],
