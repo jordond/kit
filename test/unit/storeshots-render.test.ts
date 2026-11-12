@@ -192,7 +192,7 @@ describe('renderJobs', () => {
       if (url === undefined) await Bun.sleep(20)
     }
     expect(url).toBeDefined()
-    const body = encodePng(6, 8, new Uint8Array(6 * 8 * 3))
+    const body = encodePng(6, 8, new Uint8Array(6 * 8 * 3)) as BodyInit
     const reposts = (async () => {
       while (Date.now() - started < 3000) {
         await fetch(new URL('out/ios-en-US-01', url), { method: 'POST', body }).catch(() => {})

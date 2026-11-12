@@ -57,7 +57,8 @@ const ios = () => checkListingImages('ios', root, join(root, SHOTS))
 const android = () => checkListingImages('android', root, join(root, PLAY))
 
 const IPHONE = () => png(1320, 2868)
-const NOT_A_FILE = 'not a regular file (a directory, or a link to nothing); fastlane would still try to upload it'
+const NOT_A_FILE =
+  'not a regular file (a directory, or a link to nothing); fastlane would still try to upload it'
 
 describe('checkListingImages: both stores', () => {
   test('a clean set has no problems and reports each file', () => {
@@ -189,7 +190,9 @@ describe('checkListingImages: iOS', () => {
     expect(ios()).toMatchObject({ files: [shot], problems: [] })
     // one image there and deliver loads it with no language
     put(`${SHOTS}/default/01.JPG`, 'x')
-    expect(ios().problems).toEqual([expect.stringContaining(`${SHOTS}/default: deliver gives this directory no locale`)])
+    expect(ios().problems).toEqual([
+      expect.stringContaining(`${SHOTS}/default: deliver gives this directory no locale`),
+    ])
   })
 
   test('a dangling link or a directory with an image name is a problem: deliver would still load it', () => {
