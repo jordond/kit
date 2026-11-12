@@ -1,7 +1,8 @@
 import { join, normalize } from 'node:path'
 import { ExitCode, KitError } from '../errors'
 import { type FileAction, fill, type ReadFile } from '../scaffold'
-import { includeLines, withInclude, withProjectModule, withTarget } from './edits'
+import { withProjectModule, withTarget } from './edits'
+import { includeLines, withInclude } from './settings'
 
 /**
  * Plans for `kit add module` and `kit add target`: the files to write and the one-line edits to
