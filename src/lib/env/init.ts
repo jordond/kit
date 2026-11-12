@@ -25,11 +25,12 @@ export function setKey(text: string, key: string, value: string): string {
       .trim()
     if (k !== key) return line
     replaced = true
-    return dotenvLine(key, value)
+    return dotenvLine(key, value, 'env')
   })
   if (!replaced) {
-    if (next.length && next[next.length - 1] === '') next.splice(next.length - 1, 0, dotenvLine(key, value))
-    else next.push(dotenvLine(key, value))
+    if (next.length && next[next.length - 1] === '')
+      next.splice(next.length - 1, 0, dotenvLine(key, value, 'env'))
+    else next.push(dotenvLine(key, value, 'env'))
   }
   return next.join('\n')
 }
@@ -51,10 +52,10 @@ export function planInit(root: string, schema: EnvSchema): InitPlan {
   const example = existsSync(examplePath) ? readFileSync(examplePath, 'utf8') : null
   const created = !existsSync(envPath)
   let text = created ? (example ?? '') : readFileSync(envPath, 'utf8')
-  const parsed = parseDotenv(text)
+  const parsed = parseDotenv(text, 'env')
   const backfilled: string[] = []
   if (example !== null && !created) {
-    for (const [k, v] of Object.entries(parseDotenv(example))) {
+    for (const [k, v] of Object.entries(parseDotenv(example, 'env'))) {
       if (k in parsed) continue
       text = setKey(text, k, v)
       parsed[k] = v
@@ -79,5 +80,5 @@ export function applyInit(
   for (const [k, v] of Object.entries(answers)) text = setKey(text, k, v)
   if (text && !text.endsWith('\n')) text += '\n'
   writeAtomic(join(root, '.env'), text)
-  return parseDotenv(text)
+  return parseDotenv(text, 'env')
 }

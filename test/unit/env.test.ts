@@ -166,7 +166,7 @@ describe('diffKeys / parseDotenv', () => {
       updated: ['B'],
       removed: ['C'],
     })
-    expect(parseDotenv('export A="q"\n# comment\n# B=\n')).toEqual({ A: 'q', B: '' })
+    expect(parseDotenv('export A="q"\n# comment\n# B=\n', 'vars')).toEqual({ A: 'q', B: '' })
   })
 })
 
@@ -329,6 +329,7 @@ describe('dotenv values', () => {
           'F=',
           'G=value   ',
         ].join('\n'),
+        'env',
       ),
     ).toEqual({ A: 'plain', B: 'quoted # kept', C: 'single', D: 'no#space', E: 'a"b', F: '', G: 'value' })
   })

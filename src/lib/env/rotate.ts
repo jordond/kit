@@ -41,17 +41,17 @@ export function rewriteKey(text: string, key: string, value: string): string {
     replaced = true
     const rest = m[2]!
     // `KEY= # note`: an empty value and a comment.
-    if (rest.startsWith('#')) return `${m[1]!.trimEnd()}${dotenvEncode(value)} ${rest}${cr}`
+    if (rest.startsWith('#')) return `${m[1]!.trimEnd()}${dotenvEncode(key, value, 'env')} ${rest}${cr}`
     // Quoted: the value runs to the closing quote; what follows is blank or a comment.
     const quoted = /^(['"`]).*?\1([ \t]+#.*|[ \t]*)$/.exec(rest)
-    if (quoted) return `${m[1]}${dotenvEncode(value, quoted[1])}${quoted[2]}${cr}`
+    if (quoted) return `${m[1]}${dotenvEncode(key, value, 'env', quoted[1])}${quoted[2]}${cr}`
     // Unquoted: the value ends at the first whitespace-then-#, else at trailing whitespace.
     const tail = /[ \t]+#.*$/.exec(rest)?.[0] ?? /[ \t]*$/.exec(rest)?.[0] ?? ''
-    return `${m[1]}${dotenvEncode(value)}${tail}${cr}`
+    return `${m[1]}${dotenvEncode(key, value, 'env')}${tail}${cr}`
   })
   if (replaced) return lines.join('\n')
   const head = text === '' || text.endsWith('\n') ? text : `${text}${eol}`
-  return `${head}${dotenvLine(key, value)}${eol}`
+  return `${head}${dotenvLine(key, value, 'env')}${eol}`
 }
 
 /** Remotes that hold `key`: worker targets from `env.workerSecrets`, then `github` from `env.githubSecrets`. */

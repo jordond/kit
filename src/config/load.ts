@@ -67,7 +67,7 @@ export async function loadDotEnv(root: string): Promise<void> {
     if (!m) continue
     const [, key, raw] = m as unknown as [string, string, string]
     if (process.env[key] !== undefined) continue
-    process.env[key] = dotenvValue(raw)
+    process.env[key] = dotenvValue(raw, 'env')
   }
 }
 

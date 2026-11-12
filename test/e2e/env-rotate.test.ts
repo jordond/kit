@@ -34,6 +34,20 @@ const stdinLog = () => (existsSync(join(fx.dir, '.stdin.log')) ? read('.stdin.lo
 const apiSecret = () => /^API_SECRET=(.*)$/m.exec(read('.env'))?.[1] ?? ''
 
 describe('env rotate', () => {
+  test('a .env value with escaped dollars and a # reaches .dev.vars raw and intact', async () => {
+    const hash = '$2b$10$N9qo8uLOickgx2ZMRZoMye#1'
+    writeFileSync(
+      join(fx.dir, '.env'),
+      `API_SECRET='\\$2b\\$10\\$N9qo8uLOickgx2ZMRZoMye#1'\nPUBLIC_URL=https://edge.example.com # note\n`,
+    )
+    const r = await fx.kit(['env', 'sync'])
+    expect(r.code).toBe(0)
+    expect(read('apps/edge/.dev.vars')).toContain(
+      `API_SECRET='${hash}'\nPUBLIC_URL=https://edge.example.com\n`,
+    )
+    expect(r.stdout + r.stderr).not.toContain(hash)
+  })
+
   test('--yes rewrites only that .env line, re-renders outputs, and never prints the value', async () => {
     writeFileSync(
       join(fx.dir, '.env'),
