@@ -99,7 +99,8 @@ export async function runPreview(
   // A custom deploy usually builds before it uploads (`['bun run build', 'wrangler deploy']`); a
   // preview of stale output would be a lie, so it needs the target's own build command to run first.
   const d = target.deploy
-  const custom = d !== undefined && d !== false && (typeof d === 'string' || Array.isArray(d) ? d : d.run)
+  // `{ before }` without `run` is still the default deploy.
+  const custom = d === undefined || d === false || typeof d === 'string' || Array.isArray(d) ? d : d.run
   if (d === false || custom === false) {
     throw new KitError(
       `Target "${name}" is not deployable (deploy: false), so it has no preview`,

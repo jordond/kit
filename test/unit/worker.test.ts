@@ -1,14 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import { join, resolve } from 'node:path'
 import { configSchema } from '../../src/config/schema'
-import { backupFile, type D1Database, d1Args, seedFile } from '../../src/lib/cloudflare'
+import { backupFile, type D1Database, d1Args, d1Tables, seedFile } from '../../src/lib/cloudflare'
 import {
   dashboardUrl,
+  listArgs,
   localD1Files,
   localD1Hash,
   localD1Id,
   parsePr,
   parseVersionUpload,
+  pickRollback,
   previewAlias,
   previewComment,
   previewMarker,
@@ -116,24 +118,27 @@ describe('preview', () => {
     expect(parseVersionUpload('Uploaded api')).toEqual({ version: undefined, url: undefined })
   })
 
-  test('parsePr finds the PR and only the marked comment for this target', () => {
-    const pr = {
-      number: 7,
-      comments: [
-        { body: 'hello', url: 'https://github.com/o/r/pull/7#issuecomment-1' },
-        {
-          body: previewComment({ target: 'web', url: 'u' }),
-          url: 'https://github.com/o/r/pull/7#issuecomment-2',
-        },
-        {
-          body: previewComment({ target: 'api', url: 'u' }),
-          url: 'https://github.com/o/r/pull/7#issuecomment-3',
-        },
-      ],
-    }
+  test('parsePr finds the PR and only its own marked comment for this target', () => {
+    const at = (n: number) => `https://github.com/o/r/pull/7#issuecomment-${n}`
+    const mine = (target: string, n: number) => ({
+      body: previewComment({ target, url: 'u' }),
+      url: at(n),
+      viewerDidAuthor: true,
+    })
+    const pr = { number: 7, comments: [{ body: 'hello', url: at(1) }, mine('web', 2), mine('api', 3)] }
     expect(parsePr(JSON.stringify(pr), 'api')).toEqual({ number: 7, commentId: '3' })
     expect(parsePr(JSON.stringify(pr), 'admin')).toEqual({ number: 7 })
     expect(parsePr('no pull requests found', 'api')).toBeUndefined()
+    // Someone else's comment with the marker, and the viewer quoting it mid-comment: neither is kit's.
+    const human = {
+      number: 7,
+      comments: [
+        { ...mine('api', 4), viewerDidAuthor: false },
+        { body: previewComment({ target: 'api', url: 'u' }), url: at(5) },
+        { body: `look: ${previewMarker('api')}`, url: at(6), viewerDidAuthor: true },
+      ],
+    }
+    expect(parsePr(JSON.stringify(human), 'api')).toEqual({ number: 7 })
     expect(previewComment({ target: 'api', url: 'https://x', version: 'v1', env: 'staging' })).toBe(
       `${previewMarker('api')}\nPreview of \`api\` (staging): https://x\n\nVersion \`v1\``,
     )
@@ -141,8 +146,8 @@ describe('preview', () => {
 })
 
 describe('rollback and tail', () => {
-  test('rollbackArgs', () => {
-    expect(rollbackArgs({ message: 'm' })).toEqual(['rollback', '--message', 'm', '--yes'])
+  test('rollbackArgs: always an explicit version, no --yes (wrangler never reads it)', () => {
+    expect(rollbackArgs({ to: 'v1', message: 'm' })).toEqual(['rollback', 'v1', '--message', 'm'])
     expect(rollbackArgs({ to: 'v1', env: 'prod', message: 'm' })).toEqual([
       'rollback',
       'v1',
@@ -150,8 +155,61 @@ describe('rollback and tail', () => {
       'prod',
       '--message',
       'm',
-      '--yes',
     ])
+    expect(listArgs('deployments')).toEqual(['deployments', 'list', '--json'])
+    expect(listArgs('versions', 'prod')).toEqual(['versions', 'list', '--env', 'prod', '--json'])
+  })
+
+  describe('pickRollback', () => {
+    const dep = (version: string, day: number, by?: string) => ({
+      created_on: `2026-03-0${day}T10:00:00.000Z`,
+      annotations: by ? { 'workers/triggered_by': by } : {},
+      versions: [{ version_id: version, percentage: 100 }],
+    })
+    const pick = (deployments: unknown[], versions: unknown[] = []) =>
+      pickRollback(JSON.stringify(deployments), JSON.stringify(versions))
+
+    test('the previous deployment when it is other code', () => {
+      expect(pick([dep('b', 2), dep('a', 1)])).toEqual({
+        version: 'a',
+        deployed: '2026-03-01T10:00:00.000Z',
+        secretChanges: 0,
+      })
+    })
+
+    test('secret-only deployments on top are skipped, whichever listing marks them', () => {
+      const versions = [{ id: 's2', annotations: { 'workers/triggered_by': 'secret' } }]
+      expect(pick([dep('a', 1), dep('b', 2), dep('s1', 3, 'secret'), dep('s2', 4)], versions)).toEqual({
+        version: 'a',
+        deployed: '2026-03-01T10:00:00.000Z',
+        secretChanges: 2,
+      })
+    })
+
+    test('a secret push on the older code is the version to go back to (its secrets are the newest)', () => {
+      expect(pick([dep('a', 1), dep('a-secret', 2, 'secret'), dep('b', 3)])?.version).toBe('a-secret')
+    })
+
+    test('an earlier rollback to the live code is not a different code version', () => {
+      // a, b, then rolled back to a: live is a; the last different code is b.
+      expect(pick([dep('a', 1), dep('b', 2), dep('a', 3, 'rollback')])?.version).toBe('b')
+    })
+
+    test('gradual deployments without a 100% version are ignored', () => {
+      const split = {
+        created_on: '2026-03-02T10:00:00.000Z',
+        versions: [{ version_id: 'x', percentage: 50 }],
+      }
+      expect(pick([dep('a', 1), split, dep('b', 3)])?.version).toBe('a')
+    })
+
+    test('nothing to go back to, or not a listing: undefined', () => {
+      expect(pick([dep('b', 1), dep('s', 2, 'secret')])).toBeUndefined()
+      expect(pick([dep('b', 1)])).toBeUndefined()
+      expect(pick([])).toBeUndefined()
+      expect(pickRollback('Authentication error')).toBeUndefined()
+      expect(pickRollback('{}')).toBeUndefined()
+    })
   })
 
   test('tailArgs', () => {
@@ -180,6 +238,19 @@ describe('rollback and tail', () => {
 })
 
 describe('d1', () => {
+  test('d1Tables: user tables from d1 execute --json, or undefined', () => {
+    const out = (names: string[]) =>
+      JSON.stringify([{ results: names.map((name) => ({ name })), success: true }])
+    expect(d1Tables(out([]))).toEqual([])
+    expect(d1Tables(out(['_cf_KV', 'd1_migrations', 'sqlite_sequence', 'users']))).toEqual([
+      'd1_migrations',
+      'users',
+    ])
+    expect(d1Tables('Authentication error')).toBeUndefined()
+    expect(d1Tables('[{"success":false}]')).toBeUndefined()
+    expect(d1Tables('[]')).toBeUndefined()
+  })
+
   test('d1Args export', () => {
     expect(d1Args(db, { kind: 'export', remote: false, output: '/tmp/a.sql' })).toEqual([
       'd1',

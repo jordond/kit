@@ -51,9 +51,15 @@ const CONFIG = `export default {
 }
 `
 
-/** Records argv, cwd and the account id it saw; `versions upload` answers the way wrangler does. */
+/**
+ * Records argv, cwd and the account id it saw, and answers the way wrangler does: `versions upload`
+ * prints the URLs, the listings print `.deployments.json` / `.versions.json` / `.tables.json`, and a
+ * local `d1 migrations apply` or `d1 execute --file` leaves infra-db's SQLite file behind (unless
+ * `.no-d1-file` exists: a wrangler that keeps local state somewhere else).
+ */
 function fakeWrangler(): string {
   const log = join(fx.dir, '.calls.log')
+  const sqlite = localD1Files(join(fx.dir, 'apps/edge'), 'DB')[0]!
   return `printf '%s\\n' "$(bun -e 'console.log(JSON.stringify({bin:process.argv[1],argv:process.argv.slice(2),cwd:process.cwd()}))' wrangler "$@")" >> "${log}"
 echo "$CLOUDFLARE_ACCOUNT_ID" >> "${fx.dir}/.account.log"
 f="${fx.dir}/.fakebin/wrangler.fail"
@@ -65,6 +71,13 @@ if [ "$1 $2" = "versions upload" ]; then
   case "$*" in *--preview-alias*) echo "Version Preview Alias URL: https://feat-add-thing-edge.acme.workers.dev" ;; esac
   exit 0
 fi
+case "$*" in
+  "deployments list"*) cat "${fx.dir}/.deployments.json" 2>/dev/null || echo '[]'; exit 0 ;;
+  "versions list"*) cat "${fx.dir}/.versions.json" 2>/dev/null || echo '[]'; exit 0 ;;
+  *sqlite_master*) cat "${fx.dir}/.tables.json" 2>/dev/null || echo '[{"results":[],"success":true}]'; exit 0 ;;
+  "d1 migrations apply infra-db --local"*|"d1 execute infra-db --local --file"*)
+    if [ ! -f "${fx.dir}/.no-d1-file" ]; then mkdir -p "${dirname(sqlite)}"; : > "${sqlite}"; fi ;;
+esac
 echo "wrangler ok"`
 }
 
@@ -108,6 +121,7 @@ describe('deploy --preview', () => {
       './apps/edge wrangler versions upload --env staging --preview-alias feat-add-thing',
     ])
     expect(JSON.parse(r.stdout)).toEqual({
+      ok: true,
       target: 'edge',
       env: 'staging',
       url: 'https://feat-add-thing-edge.acme.workers.dev',
@@ -159,12 +173,68 @@ describe('deploy --preview', () => {
   ].join('\n')
 
   test('--comment without a PR warns and still succeeds', async () => {
-    fx.fail('gh', 1, 'no pull requests found')
+    fx.script('gh', 'echo "no pull requests found for branch feat/Add_Thing" >&2; exit 1')
     const r = await fx.kit(['deploy', 'admin', '--preview', '--comment'], { env: BRANCH })
     expect(r.code).toBe(0)
     expect(r.stdout).toBe('https://feat-add-thing-edge.acme.workers.dev\n')
     expect(r.stderr).toContain('no pull request for feat/Add_Thing')
-    expect(summary().slice(1)).toEqual(['. gh pr view feat/Add_Thing --json number,comments'])
+  })
+
+  test('--comment: any other gh failure exits 1, after the URL is on stdout', async () => {
+    fx.fail('gh', 4, 'gh: To get started with GitHub CLI, please run: gh auth login')
+    const r = await fx.kit(['deploy', 'admin', '--preview', '--comment'], { env: BRANCH })
+    expect(r.code).toBe(1)
+    expect(r.stdout).toBe('https://feat-add-thing-edge.acme.workers.dev\n')
+    expect(r.stderr).toContain('could not look up the pull request')
+    const j = await fx.kit(['deploy', 'admin', '--preview', '--comment', '--json'], { env: BRANCH })
+    expect(j.code).toBe(1)
+    expect(JSON.parse(j.stdout)).toMatchObject({
+      ok: false,
+      comment: 'failed',
+      url: 'https://feat-add-thing-edge.acme.workers.dev',
+    })
+  })
+
+  test('--comment without gh installed: the result still reaches stdout, exit 1', async () => {
+    rmSync(join(fx.dir, '.fakebin/gh'))
+    rmSync(join(fx.dir, 'node_modules/.bin/gh'))
+    // A PATH with the fakes, bun and sh, but no gh.
+    const PATH = [join(fx.dir, '.fakebin'), dirname(process.execPath), '/usr/bin', '/bin'].join(':')
+    const r = await fx.kit(['deploy', 'admin', '--preview', '--comment', '--json'], {
+      env: { ...BRANCH, PATH },
+    })
+    expect(r.code).toBe(1)
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      ok: false,
+      comment: 'failed',
+      url: 'https://feat-add-thing-edge.acme.workers.dev',
+    })
+  })
+
+  test('a custom deploy previews after the target build; without one, or with deploy: false, exit 2', async () => {
+    const withEdge = (edge: string) =>
+      writeFileSync(
+        join(fx.dir, 'kit.config.ts'),
+        CONFIG.replace(
+          /edge: \{ kind: 'worker'[^\n]*\n/,
+          `edge: { kind: 'worker', dir: 'apps/edge', ${edge} },\n`,
+        ),
+      )
+    withEdge("deploy: ['bun run build', 'wrangler deploy']")
+    const none = await fx.kit(['deploy', 'edge', '--preview'], { env: BRANCH })
+    expect(none.code).toBe(2)
+    expect(none.stderr).toContain('A preview of "edge" needs targets.edge.build')
+    withEdge('deploy: false')
+    const off = await fx.kit(['deploy', 'edge', '--preview'], { env: BRANCH })
+    expect(off.code).toBe(2)
+    expect(off.stderr).toContain('not deployable')
+    expect(fx.calls()).toEqual([])
+    withEdge("build: 'touch built.txt', deploy: ['bun run build', 'wrangler deploy']")
+    const r = await fx.kit(['deploy', 'edge', '--preview'], { env: BRANCH })
+    expect(r.code).toBe(0)
+    expect(r.stdout).toBe('https://feat-add-thing-edge.acme.workers.dev\n')
+    expect(existsSync(join(fx.dir, 'apps/edge/built.txt'))).toBe(true)
+    expect(summary()).toEqual(['./apps/edge wrangler versions upload --preview-alias feat-add-thing'])
   })
 
   test('--comment posts on the PR', async () => {
@@ -190,8 +260,16 @@ if [ "$2" = view ]; then echo '{"number":12,"comments":[{"body":"lgtm","url":"ht
       number: 12,
       comments: [
         { body: 'lgtm', url: 'https://github.com/o/r/pull/12#issuecomment-1' },
-        { body: `${previewMarker('edge')}\nold`, url: 'https://github.com/o/r/pull/12#issuecomment-2' },
-        { body: `${previewMarker('admin')}\nold`, url: 'https://github.com/o/r/pull/12#issuecomment-987' },
+        {
+          body: `${previewMarker('edge')}\nold`,
+          url: 'https://github.com/o/r/pull/12#issuecomment-2',
+          viewerDidAuthor: true,
+        },
+        {
+          body: `${previewMarker('admin')}\nold`,
+          url: 'https://github.com/o/r/pull/12#issuecomment-987',
+          viewerDidAuthor: true,
+        },
       ],
     }
     writeFileSync(join(fx.dir, '.pr.json'), JSON.stringify(pr))
@@ -210,6 +288,37 @@ if [ "$2" = view ]; then cat "${fx.dir}/.pr.json"; fi`,
   })
 })
 
+describe('deploy --preview --comment', () => {
+  test("a person's comment carrying the marker is left alone: kit creates its own", async () => {
+    const pr = {
+      number: 12,
+      comments: [
+        // Someone else pasted kit's comment; the gh user quoted the marker mid-comment.
+        {
+          body: `${previewMarker('admin')}\nmine now`,
+          url: 'https://github.com/o/r/pull/12#issuecomment-5',
+          viewerDidAuthor: false,
+        },
+        {
+          body: `see ${previewMarker('admin')}`,
+          url: 'https://github.com/o/r/pull/12#issuecomment-6',
+          viewerDidAuthor: true,
+        },
+      ],
+    }
+    writeFileSync(join(fx.dir, '.pr.json'), JSON.stringify(pr))
+    fx.script(
+      'gh',
+      `printf '%s\\n' "$(bun -e 'console.log(JSON.stringify({bin:process.argv[1],argv:process.argv.slice(2),cwd:process.cwd()}))' gh "$@")" >> "${join(fx.dir, '.calls.log')}"
+if [ "$2" = view ]; then cat "${fx.dir}/.pr.json"; fi`,
+    )
+    const r = await fx.kit(['deploy', 'admin', '--preview', '--comment', '--json'], { env: BRANCH })
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout).comment).toBe('created')
+    expect(fx.calls().at(-1)!.argv.slice(0, 3)).toEqual(['pr', 'comment', '12'])
+  })
+})
+
 describe('release rollback', () => {
   function git(...args: string[]) {
     const r = Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], {
@@ -221,21 +330,66 @@ describe('release rollback', () => {
     return r.stdout.toString().trim()
   }
 
-  test('confirms: exit 2 without --yes; --yes runs wrangler rollback in the target dir, account pinned', async () => {
-    expect((await fx.kit(['release', 'rollback', 'edge'])).code).toBe(2)
-    expect(fx.calls()).toEqual([])
-    const r = await fx.kit(['release', 'rollback', 'edge', '--yes'], {
+  // Newest last: code A, code B (live), then two secret pushes on top of B.
+  const dep = (version: string, day: number, secret = false) => ({
+    id: `dep-${day}`,
+    created_on: `2026-03-0${day}T10:00:00.000Z`,
+    annotations: secret ? { 'workers/triggered_by': 'secret' } : {},
+    versions: [{ version_id: version, percentage: 100 }],
+  })
+  const listings = (deployments: unknown[], versions: unknown[] = []) => {
+    writeFileSync(join(fx.dir, '.deployments.json'), JSON.stringify(deployments))
+    writeFileSync(join(fx.dir, '.versions.json'), JSON.stringify(versions))
+  }
+  const LISTS = [
+    './apps/edge wrangler deployments list --env staging --json',
+    './apps/edge wrangler versions list --env staging --json',
+  ]
+
+  test('skips secret-only deployments: rolls back to the last different code, named in the confirm', async () => {
+    // The first secret push is marked on the deployment, the second only on its version.
+    listings(
+      [dep('code-a', 1), dep('code-b', 2), dep('secret-1', 3, true), dep('secret-2', 4)],
+      [{ id: 'secret-2', annotations: { 'workers/triggered_by': 'secret' } }],
+    )
+    const ask = await fx.kit(['release', 'rollback', 'edge'])
+    expect(ask.code).toBe(2)
+    expect(summary()).toEqual(LISTS)
+    const r = await fx.kit(['release', 'rollback', 'edge', '--yes', '--json'], {
       env: { CLOUDFLARE_ACCOUNT_ID: 'deadbeefdeadbeefdeadbeefdeadbeef' },
     })
     expect(r.code).toBe(0)
-    expect(fx.calls()).toEqual([
-      {
-        bin: 'wrangler',
-        argv: ['rollback', '--env', 'staging', '--message', 'kit release rollback edge', '--yes'],
-        cwd: './apps/edge',
-      },
+    expect(summary().slice(2)).toEqual([
+      ...LISTS,
+      './apps/edge wrangler rollback code-a --env staging --message kit release rollback edge',
     ])
-    expect(accounts()).toEqual([EDGE_ID])
+    expect(new Set(accounts())).toEqual(new Set([EDGE_ID]))
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      to: 'code-a',
+      deployed: '2026-03-01T10:00:00.000Z',
+      secretChanges: 2,
+      ok: true,
+    })
+    expect(r.stderr).toContain('2 secret changes since then revert with it; run `kit env push` afterwards')
+  })
+
+  test('no earlier code version, or no listing: exit 4 and no rollback', async () => {
+    listings([dep('code-b', 2), dep('secret-1', 3, true)])
+    const r = await fx.kit(['release', 'rollback', 'edge', '--yes'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('No earlier code version of edge')
+    expect(summary()).toEqual(LISTS)
+    fx.fail('wrangler', 1, 'Authentication error')
+    expect((await fx.kit(['release', 'rollback', 'edge', '--yes'])).code).toBe(4)
+    expect(summary().some((c) => c.includes('wrangler rollback'))).toBe(false)
+  })
+
+  test('wrangler gets no terminal on stdin, so it takes its defaults instead of prompting', async () => {
+    fx.script('wrangler', 'if [ -t 0 ]; then echo tty; exit 9; fi; cat; echo done')
+    const r = await fx.kit(['release', 'rollback', 'edge', '--to', VERSION, '--yes'])
+    expect(r.code).toBe(0)
+    expect(r.stdout).toBe('')
+    expect(r.stderr).toContain('done')
   })
 
   test('--to names the version; tags stay and the stale one is named', async () => {
@@ -244,7 +398,9 @@ describe('release rollback', () => {
     git('tag', 'edge/v1.2.3')
     const r = await fx.kit(['release', 'rollback', 'edge', '--to', VERSION, '--yes', '--json'])
     expect(r.code).toBe(0)
-    expect(fx.calls()[0]!.argv.slice(0, 2)).toEqual(['rollback', VERSION])
+    expect(fx.calls().map((c) => c.argv)).toEqual([
+      ['rollback', VERSION, '--env', 'staging', '--message', 'kit release rollback edge'],
+    ])
     expect(JSON.parse(r.stdout)).toEqual({
       service: 'edge',
       target: 'edge',
@@ -260,13 +416,13 @@ describe('release rollback', () => {
   test('--dry-run runs nothing', async () => {
     const r = await fx.kit(['release', 'rollback', 'edge', '--dry-run'])
     expect(r.code).toBe(0)
-    expect(r.stderr).toContain('apps/edge $ bun x wrangler rollback --env staging')
+    expect(r.stderr).toContain('apps/edge $ bun x wrangler rollback <previous code version> --env staging')
     expect(fx.calls()).toEqual([])
   })
 
   test('a failed rollback exits 1', async () => {
     fx.fail('wrangler', 1, 'nope')
-    expect((await fx.kit(['release', 'rollback', 'edge', '--yes'])).code).toBe(1)
+    expect((await fx.kit(['release', 'rollback', 'edge', '--to', VERSION, '--yes'])).code).toBe(1)
   })
 
   test('worker-only: other deploys and unknown services exit 2', async () => {
@@ -316,6 +472,13 @@ describe('logs', () => {
       target: 'admin',
       cmd: ['bun', 'x', 'wrangler', 'tail'],
       cwd: 'apps/admin',
+    })
+    expect(fx.calls()).toEqual([])
+    const json = await fx.kit(['logs', 'admin', '--json'])
+    expect(json.code).toBe(2)
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      ok: false,
+      hint: 'For JSON lines: kit logs admin -- --format json',
     })
     expect(fx.calls()).toEqual([])
     fx.fail('wrangler', 5)
@@ -416,18 +579,92 @@ describe('db backup / restore / seed / reset', () => {
     expect(existsSync(join(fx.dir, 'backups'))).toBe(false)
   })
 
-  test('restore runs the file; remote confirms; a missing file is a usage error', async () => {
-    writeFileSync(join(fx.dir, 'dump.sql'), 'SELECT 1;\n')
-    expect((await fx.kit(['db', 'restore', 'nope.sql', '--db', 'db'])).code).toBe(2)
-    expect((await fx.kit(['db', 'restore', '--db', 'db'])).code).toBe(2)
-    expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote'])).code).toBe(2)
-    expect(fx.calls()).toEqual([])
-    expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db'])).code).toBe(0)
-    expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote', '--yes'])).code).toBe(0)
-    expect(summary()).toEqual([
-      './apps/edge wrangler d1 execute infra-db --local --file <root>/dump.sql',
-      './apps/edge wrangler d1 execute infra-db --remote --file <root>/dump.sql',
-    ])
+  test('backup warns when git does not ignore the dump; quiet once backups/ is ignored', async () => {
+    const git = (...args: string[]) => Bun.spawnSync(['git', ...args], { cwd: fx.dir })
+    git('init', '-q')
+    const loud = await fx.kit(['db', 'backup', '--db', 'db'])
+    expect(loud.code).toBe(0)
+    expect(loud.stderr).toContain('is not ignored by git')
+    writeFileSync(join(fx.dir, '.gitignore'), 'backups/\n')
+    const quiet = await fx.kit(['db', 'backup', '--db', 'db'])
+    expect(quiet.code).toBe(0)
+    expect(quiet.stderr).not.toContain('not ignored')
+  })
+
+  describe('restore', () => {
+    const mine = () => localD1Files(join(fx.dir, 'apps/edge'), 'DB')
+    beforeEach(() => {
+      writeFileSync(join(fx.dir, 'dump.sql'), 'CREATE TABLE t (id);\n')
+      mkdirSync(dirname(mine()[0]!), { recursive: true })
+      for (const f of mine()) writeFileSync(f, 'old')
+    })
+    const EXEC = './apps/edge wrangler d1 execute infra-db'
+
+    test('usage: a missing file, no file', async () => {
+      expect((await fx.kit(['db', 'restore', 'nope.sql', '--db', 'db'])).code).toBe(2)
+      expect((await fx.kit(['db', 'restore', '--db', 'db'])).code).toBe(2)
+      expect(fx.calls()).toEqual([])
+    })
+
+    test('local: confirms, deletes the local database, then runs the file', async () => {
+      expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db'])).code).toBe(2)
+      expect(readFileSync(mine()[0]!, 'utf8')).toBe('old')
+      const dry = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--dry-run'])
+      expect(dry.code).toBe(0)
+      expect(readFileSync(mine()[0]!, 'utf8')).toBe('old')
+      expect(fx.calls()).toEqual([])
+      const r = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--yes'])
+      expect(r.code).toBe(0)
+      expect(r.stderr).toContain('removed local infra-db')
+      expect(summary()).toEqual([`${EXEC} --local --file <root>/dump.sql`])
+      // The old file and its WAL sidecars are gone; wrangler wrote a new, empty one.
+      expect(readFileSync(mine()[0]!, 'utf8')).toBe('')
+      expect(existsSync(mine()[1]!)).toBe(false)
+    })
+
+    test('local: an unrecognised layout stops before anything is deleted or run', async () => {
+      mkdirSync(join(fx.dir, 'apps/edge/.wrangler/state/v4'))
+      const r = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--yes'])
+      expect(r.code).toBe(1)
+      expect(r.stderr).toContain('Local D1 layout not recognised: apps/edge/.wrangler/state holds v4')
+      expect(readFileSync(mine()[0]!, 'utf8')).toBe('old')
+      expect(fx.calls()).toEqual([])
+    })
+
+    test('remote: an empty database is restored after a confirm', async () => {
+      const TABLES = `${EXEC} --remote --command SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name --json`
+      writeFileSync(
+        join(fx.dir, '.tables.json'),
+        JSON.stringify([{ results: [{ name: 'sqlite_sequence' }, { name: '_cf_KV' }], success: true }]),
+      )
+      expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote'])).code).toBe(2)
+      expect(summary()).toEqual([TABLES])
+      expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote', '--yes'])).code).toBe(0)
+      expect(summary().slice(1)).toEqual([TABLES, `${EXEC} --remote --file <root>/dump.sql`])
+      // The local database is not touched by a remote restore.
+      expect(readFileSync(mine()[0]!, 'utf8')).toBe('old')
+    })
+
+    test('remote: a database with tables exits 4 naming them; nothing is dropped or run', async () => {
+      writeFileSync(
+        join(fx.dir, '.tables.json'),
+        JSON.stringify([{ results: [{ name: 'd1_migrations' }, { name: 'users' }], success: true }]),
+      )
+      const r = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote', '--yes'])
+      expect(r.code).toBe(4)
+      expect(r.stderr).toContain('Remote infra-db is not empty: d1_migrations, users')
+      expect(fx.calls()).toHaveLength(1)
+      writeFileSync(join(fx.dir, '.tables.json'), 'not json')
+      expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote', '--yes'])).code).toBe(4)
+      expect(summary().some((c) => c.includes('--file'))).toBe(false)
+    })
+
+    test('remote --dry-run runs nothing', async () => {
+      expect((await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--remote', '--dry-run'])).code).toBe(
+        0,
+      )
+      expect(fx.calls()).toEqual([])
+    })
   })
 
   test('seed runs cloudflare.d1.<db>.seed; none configured exits 3; remote confirms', async () => {
@@ -466,7 +703,9 @@ describe('db backup / restore / seed / reset', () => {
         env: { CLOUDFLARE_ACCOUNT_ID: 'deadbeefdeadbeefdeadbeefdeadbeef' },
       })
       expect(r.code).toBe(0)
-      expect(mine().some((f) => existsSync(f))).toBe(false)
+      // The old files are gone; the migrate wrote a new, empty database in the same place.
+      expect(readFileSync(mine()[0]!, 'utf8')).toBe('')
+      expect(existsSync(mine()[1]!)).toBe(false)
       expect(existsSync(other())).toBe(true)
       expect(summary()).toEqual([
         './apps/edge wrangler d1 migrations apply infra-db --local',
@@ -513,6 +752,27 @@ describe('db backup / restore / seed / reset', () => {
       expect(j.code).toBe(1)
       expect(JSON.parse(j.stdout).ok).toBe(false)
       expect(fx.calls()).toEqual([])
+    })
+
+    test('a state version dir other than v3: exit 1 up front, nothing deleted', async () => {
+      mkdirSync(join(fx.dir, 'apps/edge/.wrangler/state/v4'))
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes'])
+      expect(r.code).toBe(1)
+      expect(r.stderr).toContain(
+        'Local D1 layout not recognised: apps/edge/.wrangler/state holds v4, kit knows v3',
+      )
+      expect(mine().every((f) => existsSync(f))).toBe(true)
+      expect(fx.calls()).toEqual([])
+    })
+
+    test('wrangler writes the database somewhere else: exit 1 after migrating, no seed, no success', async () => {
+      rmSync(join(fx.dir, 'apps/edge/.wrangler'), { recursive: true })
+      writeFileSync(join(fx.dir, '.no-d1-file'), '')
+      const r = await fx.kit(['db', 'reset', '--db', 'db', '--yes'])
+      expect(r.code).toBe(1)
+      expect(r.stderr).toContain('Local D1 layout not recognised: wrangler did not write infra-db to')
+      expect(r.stderr).not.toContain('reset local infra-db')
+      expect(summary()).toEqual(['./apps/edge wrangler d1 migrations apply infra-db --local'])
     })
 
     test("only the worker's other database exists locally: this one is fresh, the other untouched", async () => {
