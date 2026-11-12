@@ -135,7 +135,8 @@ permissions:
 
 jobs:
   distribute:
-    name: ${{ inputs.platform }} ${{ inputs.operation != 'release' && inputs.operation || '' }} → ${{ inputs.operation == 'rollout' && 'prod' || inputs.track }}
+    # release keeps its name (`ios → internal`): required checks match on it.
+    name: ${{ inputs.operation == 'release' && format('{0} → {1}', inputs.platform, inputs.track) || format('{0} {1} → {2}', inputs.platform, inputs.operation, inputs.operation == 'rollout' && 'prod' || inputs.track) }}
     runs-on: ${{ inputs.runs-on || (inputs.platform == 'ios' && 'macos-latest' || 'ubuntu-latest') }}
     # release and promote: a prod destination. rollout: always (it only ever touches production).
     environment: ${{ (inputs.operation == 'rollout' || inputs.track == 'prod') && 'production' || '' }}
