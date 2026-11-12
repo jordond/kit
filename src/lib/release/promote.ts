@@ -53,7 +53,7 @@ export interface PromoteResult {
   build: number | null
   dryRun: boolean
   promoted: boolean
-  /** The lanes and git commands, in order. */
+  /** The lanes, in order. */
   plan: string[]
   /** The build's tag, `<platform>/v<version>+<build>`. A promotion never creates it. */
   tag?: string

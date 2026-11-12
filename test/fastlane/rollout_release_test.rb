@@ -83,6 +83,16 @@ class RolloutReleaseTest < Minitest::Test
     assert_equal ["inProgress", 0.2], [release.status, release.user_fraction]
   end
 
+  # Rolled out to everyone, then halted in the Play Console: no fraction left.
+  def test_resume_of_a_release_halted_at_full_rollout_fails_and_does_not_complete_it
+    release = halted("40", nil)
+    error = assert_raises(KitUserError) { kit_play_apply_rollout(release, "resume", nil) }
+    assert_includes error.message, "version code 40"
+    assert_includes error.message, "halted at 100%"
+    assert_includes error.message, "kit release rollout android --complete"
+    assert_equal ["halted", nil], [release.status, release.user_fraction]
+  end
+
   def test_rejects_a_fraction_out_of_range_and_an_unknown_action
     ["0", "1.5", "-0.1", "abc"].each do |fraction|
       assert_raises(KitUserError) { kit_play_apply_rollout(in_progress, "percent", fraction) }
@@ -159,6 +169,14 @@ class RolloutReleaseTest < Minitest::Test
   def test_update_aborts_the_edit_when_there_is_only_a_draft
     client = FakeClient.new(Track.new("production", [completed, draft]))
     assert_raises(KitUserError) { update(client, "complete") }
+    assert_nil client.updated
+    assert_equal [:abort], client.calls.last
+    refute_includes client.calls, [:commit]
+  end
+
+  def test_update_commits_nothing_for_a_release_halted_at_full_rollout
+    client = FakeClient.new(Track.new("production", [completed, halted("40", nil)]))
+    assert_raises(KitUserError) { update(client, "resume") }
     assert_nil client.updated
     assert_equal [:abort], client.calls.last
     refute_includes client.calls, [:commit]

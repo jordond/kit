@@ -125,12 +125,16 @@ end
 # (name, phone, email) and the demo account's user and password as plaintext
 # files in <metadata>/review_information. kit never leaves that directory in
 # the repo and never uploads it.
-def kit_strip_review_information(metadata)
-  dir = File.join(metadata, "review_information")
-  return false unless File.exist?(dir)
+def kit_review_information?(entry)
+  entry.casecmp?("review_information")
+end
 
-  FileUtils.rm_rf(dir)
-  true
+def kit_strip_review_information(metadata)
+  return false unless File.directory?(metadata)
+
+  found = Dir.children(metadata).select { |entry| kit_review_information?(entry) }
+  found.each { |entry| FileUtils.rm_rf(File.join(metadata, entry)) }
+  !found.empty?
 end
 
 # Copy the metadata directory into `into` for deliver to read, without
@@ -138,7 +142,8 @@ end
 def kit_metadata_for_push(metadata, into)
   FileUtils.mkdir_p(into)
   Dir.children(metadata).each do |entry|
-    next if entry.start_with?(".") || %w[review_information android].include?(entry)
+    # Any case: on a case-insensitive disk deliver reads Review_Information/ as review_information/.
+    next if entry.start_with?(".") || kit_review_information?(entry) || entry.casecmp?("android")
 
     FileUtils.cp_r(File.join(metadata, entry), into)
   end
@@ -455,9 +460,11 @@ end
 
 # metadata_pull helper. `expected` maps a Play image type to how many images
 # the listing has. Returns "<language>/<type> (<got> of <want>)" for each type
-# with fewer files written since `since`: supply stores single images as
+# with fewer image files written since `since`: supply stores single images as
 # <language>/images/<type>.<ext> and screenshots as files in
-# <language>/images/<type>/.
+# <language>/images/<type>/. Only a non-empty .png/.jpg/.jpeg counts: supply
+# writes the HTTP body whatever the status, and names the file `<type>.` when
+# it cannot tell the image type, so a 403 or 5xx body is not an image.
 def kit_play_missing_images(metadata, language, expected, since)
   images = File.join(metadata, language, "images")
   expected.filter_map do |type, want|
@@ -465,7 +472,9 @@ def kit_play_missing_images(metadata, language, expected, since)
 
     path = File.join(images, type)
     files = File.directory?(path) ? Dir.glob(File.join(path, "*")) : Dir.glob("#{path}.*")
-    got = files.count { |f| File.file?(f) && File.mtime(f) >= since - 1 }
+    got = files.count do |f|
+      File.file?(f) && File.size(f).positive? && f.match?(/\.(png|jpe?g)\z/i) && File.mtime(f) >= since - 1
+    end
     "#{language}/#{type} (#{got} of #{want})" if got < want
   end
 end
@@ -730,9 +739,26 @@ def kit_ios_group_builds(app, group, version)
   ).all_pages.flat_map(&:to_models)
 end
 
+# A source group must receive its builds explicitly (the groups
+# `kit release ios --track alpha|beta` distributes to). A group with automatic
+# distribution (hasAccessToAllBuilds, App Store Connect's default for an
+# internal group) holds every upload, `--track internal` builds included, and
+# kit cannot tell those apart there.
+def kit_ios_require_explicit_group(group)
+  return group unless group.has_access_to_all_builds
+
+  UI.user_error!(
+    "The TestFlight group '#{group.name}' receives every build automatically, internal (KIT_INTERNAL) builds " \
+    "included, so kit cannot tell which of its builds may be promoted. Promotion needs a source group that " \
+    "receives builds explicitly: the one `kit release ios --track alpha|beta` distributes to " \
+    "(release.ios.testflightGroups), with automatic distribution off."
+  )
+end
+
 # The build to promote, from the source group's builds only: `number` when
 # given, else the highest build number. An internal build (compiled with
-# KIT_INTERNAL, sent to no group) is never among them.
+# KIT_INTERNAL, sent to no group) is not among them, as long as the group
+# receives builds explicitly (kit_ios_require_explicit_group).
 def kit_ios_select_build(builds, number, version, group_name)
   if number
     builds.find { |b| b.version.to_s == number.to_s } ||
@@ -750,6 +776,7 @@ def kit_ios_promote_build
   app = kit_ios_app
   version = kit_env("KIT_IOS_VERSION")
   group = kit_ios_resolve_groups(app.get_beta_groups, [kit_env("KIT_TESTFLIGHT_FROM_GROUP")]).first
+  kit_ios_require_explicit_group(group)
   builds = kit_ios_group_builds(app, group, version)
   [app, kit_ios_select_build(builds, kit_env_opt("KIT_IOS_BUILD"), version, group.name)]
 end
@@ -758,7 +785,8 @@ platform :ios do
   desc "Print the latest TestFlight build and the live App Store build."
   desc "In: KIT_IOS_BUNDLE_ID, KIT_IOS_VERSION (optional: TestFlight builds of this version only), ASC_*. " \
        "Out: KIT_STATUS_TESTFLIGHT_BUILD=, KIT_STATUS_TESTFLIGHT_VERSION=, KIT_STATUS_APPSTORE_BUILD=, " \
-       "KIT_STATUS_APPSTORE_VERSION=, KIT_STATUS_APPSTORE_PHASED=, KIT_STATUS_<TRACK>_ERROR= (empty BUILD = no build)."
+       "KIT_STATUS_APPSTORE_VERSION=, KIT_STATUS_APPSTORE_PHASED= (or KIT_STATUS_APPSTORE_PHASED_ERROR=), " \
+       "KIT_STATUS_<TRACK>_ERROR= (empty BUILD = no build)."
   lane :status do
     api_key = kit_asc_api_key
     bundle_id = kit_ios_bundle_id
@@ -790,7 +818,9 @@ platform :ios do
       phased = live && kit_ios_phased_release(live)
       kit_emit("STATUS_APPSTORE_PHASED", phased.phased_release_state) if phased
     rescue StandardError => e
+      # Not the same as "no phased release": kit shows the phased state as unknown.
       UI.important("Could not read the phased release: #{e.message}")
+      kit_emit("STATUS_APPSTORE_PHASED_ERROR", e.message.to_s.lines.first.to_s.strip)
     end
   end
 
@@ -919,7 +949,8 @@ def kit_play_rollout_release(releases, action, code)
 end
 
 # Set the release's status and user fraction for the action. Halt and resume
-# keep the fraction the rollout had.
+# keep the fraction the rollout had. A release halted with no fraction was at
+# 100%: Play rejects it as inProgress, and completing it is the user's call.
 def kit_play_apply_rollout(release, action, fraction)
   case action
   when "percent"
@@ -933,6 +964,11 @@ def kit_play_apply_rollout(release, action, fraction)
   when "halt"
     release.status = "halted"
   when "resume"
+    if release.user_fraction.nil?
+      codes = (release.version_codes || []).join(", ")
+      UI.user_error!("The halted release (version code #{codes}) was halted at 100%, so there is no staged rollout " \
+                     "to resume. Release it to everyone with `kit release rollout android --complete`.")
+    end
     release.status = "inProgress"
   else
     UI.user_error!("KIT_ROLLOUT_ACTION must be percent, halt, resume or complete, got '#{action}'")

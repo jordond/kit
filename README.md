@@ -402,7 +402,8 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 
 - `kit release status`: Android lists every Play track (version codes and release names); iOS lists
   `testflight` (one build list for every group) and `prod` (the live App Store build and its phased
-  release state). A track the store will not answer for is `unknown` with a warning; the command fails
+  release state; `unknown` with a warning and `phasedError` when it could not be read, which is not
+  the same as having none). A track the store will not answer for is `unknown` with a warning; the command fails
   only when a platform has no readable track.
 - `kit release promote`: `--build` picks the build number / version code (default: the latest on the
   source track). It runs the branch check, the store credentials, `release.preflight` and the same
@@ -422,6 +423,11 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
   - iOS: the build must be in the source tester group (`release.ios.testflightGroups.<from>`, default
     the track name). A build that never reached it, an internal build included, is refused with
     exit 1, `--build` or not; so is a destination group the app does not have.
+  - iOS: the source group must receive its builds explicitly, as `kit release ios --track alpha|beta`
+    distributes them. A group with automatic distribution (App Store Connect's default for an
+    internal group) holds every upload, internal builds included, and kit cannot tell them apart
+    there: promoting from it is refused. Turn automatic distribution off for that group, or point
+    `release.ios.testflightGroups` at one without it.
   - iOS: `alpha → beta` distributes the build to `release.ios.testflightGroups.beta`;
     `→ prod` submits it for App Store review (phased, manual release) and requires `--notes`.
 - `kit release rollout` takes exactly one action. `--percent`, `--resume` and `--complete` widen
@@ -431,7 +437,8 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
   Android changes the production staged rollout; `--percent 100` completes it, and a halted rollout
   must be resumed before its percentage changes. Only a rollout in progress (or, for `--resume`, a
   halted one) is touched, never a draft; `--build <version code>` names the release when the track
-  holds more than one. The App Store has no percentage (a phased release
+  holds more than one, and the result names the version code that changed. A release halted at 100%
+  has no staged rollout to resume: `--resume` says so, use `--complete`. The App Store has no percentage (a phased release
   follows Apple's 7-day schedule), so `--percent` is a usage error on iOS: `--halt` pauses the phased
   release, `--resume` and `--complete` do what they say.
 - Build numbers are never committed: `max(store) + 1`, or `--build` / `--code`.
