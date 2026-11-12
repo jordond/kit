@@ -1,0 +1,8 @@
+{
+  // "name" is a placeholder: rename it before the first deploy. No account id is written here;
+  // set CLOUDFLARE_ACCOUNT_ID in .env (or "account_id" in this file) when you have one.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "{{worker}}",
+  "main": "src/index.ts",
+  "compatibility_date": "{{date}}"
+}
