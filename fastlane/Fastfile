@@ -274,6 +274,96 @@ platform :ios do
     UI.user_error!("KIT_CERTS_MODE must be readonly or add, got '#{mode}'") unless %w[readonly add].include?(mode)
     kit_match(readonly: mode == "readonly", api_key: kit_asc_api_key)
   end
+
+  # fastlane has no download action, so this does what `deliver download_metadata`
+  # and `deliver download_screenshots` do, with the same deliver classes. Text
+  # comes from the latest version; screenshots from the version being edited,
+  # else the live one.
+  desc "Download the App Store listing (text + screenshots) into the app's metadata directory."
+  desc "In: KIT_METADATA_PATH, KIT_SCREENSHOTS_PATH, KIT_IOS_BUNDLE_ID, ASC_*."
+  lane :metadata_pull do
+    require "deliver"
+    require "deliver/setup"
+
+    metadata = kit_path("KIT_METADATA_PATH")
+    screenshots = kit_path("KIT_SCREENSHOTS_PATH")
+    available = Deliver::Options.available_options
+    # As `deliver download_metadata` does: a stray .ipa/.pkg next to the Fastfile is irrelevant here.
+    available.each do |opt|
+      next unless %i[ipa pkg app_rating_config_path].include?(opt.key)
+
+      opt.verify_block = nil
+      opt.conflicting_options = nil
+    end
+    options = FastlaneCore::Configuration.create(
+      available,
+      api_key: kit_asc_api_key,
+      app_identifier: kit_ios_bundle_id,
+      metadata_path: metadata,
+      screenshots_path: screenshots,
+      force: true
+    )
+    Deliver::Runner.new(options, skip_version: true) # logs in and finds the app; uploads nothing
+    app = Deliver.cache[:app]
+    platform = Spaceship::ConnectAPI::Platform.map(options[:platform])
+    version = app.get_latest_app_store_version(platform: platform)
+    UI.user_error!("#{kit_ios_bundle_id} has no App Store version to download a listing from.") unless version
+
+    Deliver::Setup.new.generate_metadata_files(app, version, metadata, options)
+    editing = app.get_edit_app_store_version(platform: platform)
+    Deliver::DownloadScreenshots.download({ platform: options[:platform], use_live_version: editing.nil? }, screenshots)
+    UI.success("Downloaded the App Store listing to #{metadata} and #{screenshots}.")
+  end
+
+  # Listing only: no binary, no review submission, no release settings.
+  # This runs deliver itself rather than upload_to_app_store because the
+  # action's defaults are not neutral: phased_release and reset_ratings default
+  # to false, and deliver then deletes the phased release (set by
+  # upload_appstore) and any ratings reset on the version. With no default
+  # deliver leaves both alone, like automatic_release. The .ipa/.pkg defaults
+  # (newest in the working directory) go too, so a stray build is never read
+  # for a version or platform.
+  # deliver edits the version being prepared, so one must exist in App Store
+  # Connect; skip_app_version_update keeps it from creating or renaming one.
+  desc "Upload the App Store listing text; screenshots too when KIT_METADATA_SCREENSHOTS=1 (replaces them)."
+  desc "In: KIT_METADATA_PATH, KIT_SCREENSHOTS_PATH, KIT_METADATA_SCREENSHOTS, KIT_IOS_BUNDLE_ID, ASC_*, KIT_SKIP_UPLOAD."
+  lane :metadata_push do
+    metadata = kit_require_file("KIT_METADATA_PATH")
+    next if kit_skip_upload?("the App Store listing upload", metadata)
+
+    require "deliver"
+
+    with_screenshots = kit_flag?("KIT_METADATA_SCREENSHOTS")
+    available = Deliver::Options.available_options
+    available.each do |opt|
+      opt.default_value = nil if %i[phased_release reset_ratings].include?(opt.key)
+      next unless %i[ipa pkg].include?(opt.key)
+
+      opt.default_value = nil
+      opt.verify_block = nil
+      opt.conflicting_options = nil
+    end
+    # deliver creates its screenshots dir even when it skips them; give it a throwaway one then.
+    Dir.mktmpdir("kit-screenshots") do |unused|
+      options = FastlaneCore::Configuration.create(
+        available,
+        api_key: kit_asc_api_key,
+        app_identifier: kit_ios_bundle_id,
+        metadata_path: metadata,
+        screenshots_path: with_screenshots ? kit_require_file("KIT_SCREENSHOTS_PATH") : unused,
+        skip_binary_upload: true,
+        skip_app_version_update: true,
+        skip_metadata: false,
+        skip_screenshots: !with_screenshots,
+        overwrite_screenshots: with_screenshots,
+        submit_for_review: false,
+        run_precheck_before_submit: false,
+        force: true # skip the interactive HTML preview
+      )
+      Deliver::Runner.new(options).run
+    end
+    UI.success("Updated the App Store listing#{with_screenshots ? ' and screenshots' : ''}.")
+  end
 end
 
 # --------------------------------------------------------------- Android ---
@@ -409,5 +499,85 @@ platform :android do
       upload_to_play_store(params)
     end
     UI.success("Uploaded to the Play '#{track}' track#{draft ? ' as a draft (roll it out in the Play Console)' : ''}.")
+  end
+
+  # `supply init` refuses a directory that already exists and also needs a
+  # production release (it downloads changelogs). This runs the same
+  # Supply::Setup steps for the listing only; changelogs stay with
+  # `upload_play`. The edit is read-only and is discarded.
+  desc "Download the Play listing (text, images, screenshots) into the app's metadata directory."
+  desc "In: KIT_METADATA_PATH, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY."
+  lane :metadata_pull do
+    require "supply"
+    require "supply/options"
+    require "supply/setup"
+
+    metadata = kit_path("KIT_METADATA_PATH")
+    package = kit_env("KIT_ANDROID_PACKAGE")
+    Supply.config = FastlaneCore::Configuration.create(
+      Supply::Options.available_options,
+      package_name: package,
+      json_key: kit_play_json_key,
+      metadata_path: metadata
+    )
+    setup = Supply::Setup.new
+    client = setup.send(:client) # the client Setup downloads images with; it holds the edit
+    client.begin_edit(package_name: package)
+    begin
+      client.listings.each do |listing|
+        setup.store_metadata(listing)
+        setup.download_images(listing)
+      end
+    ensure
+      client.abort_current_edit
+    end
+    UI.success("Downloaded the Play listing to #{metadata}.")
+  end
+
+  # Listing only: no AAB/APK, no changelogs, no rollout or promotion (supply
+  # touches a track only for a binary, `rollout` or `track_promote_to`).
+  # supply still wants one release to hang the edit on and fails when a track
+  # holds several (a staged rollout), so pick the newest version code of the
+  # first track that has any.
+  desc "Upload the Play listing text; images and screenshots too when KIT_METADATA_SCREENSHOTS=1 (replaces them)."
+  desc "In: KIT_METADATA_PATH, KIT_METADATA_SCREENSHOTS, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY, KIT_SKIP_UPLOAD."
+  lane :metadata_push do
+    metadata = kit_require_file("KIT_METADATA_PATH")
+    next if kit_skip_upload?("the Play listing upload", metadata)
+
+    json_key = kit_play_json_key
+    package = kit_env("KIT_ANDROID_PACKAGE")
+    with_images = kit_flag?("KIT_METADATA_SCREENSHOTS")
+    track = nil
+    code = nil
+    %w[production beta alpha internal].each do |t|
+      codes = begin
+        google_play_track_version_codes(track: t, json_key: json_key, package_name: package)
+      rescue StandardError => e
+        UI.important("Could not fetch version codes for the '#{t}' track: #{e.message}")
+        []
+      end
+      next if codes.empty?
+
+      track = t
+      code = codes.max
+      break
+    end
+    UI.user_error!("No release on any Play track: upload a build with `kit release android` before pushing the listing.") unless track
+
+    upload_to_play_store(
+      package_name: package,
+      json_key: json_key,
+      metadata_path: metadata,
+      track: track,
+      version_code: code,
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_changelogs: true,
+      skip_upload_metadata: false,
+      skip_upload_images: !with_images,
+      skip_upload_screenshots: !with_images
+    )
+    UI.success("Updated the Play listing#{with_images ? ', images and screenshots' : ''}.")
   end
 end
