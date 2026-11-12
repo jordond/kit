@@ -156,7 +156,7 @@ describe('kit init in a Kotlin toolchain project', () => {
     )
     expect(read('fastlane/Fastfile')).toContain('KIT_FASTFILE')
     expect(read('.editorconfig')).toContain('[*.{kt,kts}]')
-    expect(read('.gitignore')).toBe('/build/\n.fakebin/\nnode_modules/\n.env\n')
+    expect(read('.gitignore')).toBe('/build/\n.fakebin/\nnode_modules/\n.env\nbackups/\n')
     expect(read('libs.versions.toml')).toStartWith(
       '[versions]\napp-android-version = "0.3.0"\napp-ios-version = "0.2.0"\nlogback = "1.6.2"\n',
     )
@@ -251,7 +251,7 @@ describe('kit init --template elsewhere', () => {
     expect(at('kit.config.ts')).toContain("name: 'Demo'")
     expect(at('apps/client/settings.gradle.kts')).toContain('rootProject.name = "Demo"')
     expect(at('.github/workflows/ci.yml')).toContain(`setup@${shas[pkg.version]} # v${pkg.version}`)
-    expect(at('.gitignore')).toBe('node_modules/\n.env\n')
+    expect(at('.gitignore')).toBe('node_modules/\n.env\nbackups/\n')
     expect(at('mise.toml')).toContain('java = ')
     expect(at('lefthook.yml')).toContain('run: kit lint --staged --fix')
     expect(JSON.parse(at('renovate.json')).extends).toContain('github>jordond/kit//renovate/default')
