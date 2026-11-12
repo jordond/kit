@@ -8,9 +8,13 @@ export default defineCommand({
       type: 'boolean',
       description: 'Also replace the screenshots (Play: and the feature graphic and icon)',
     },
+    'only-screenshots': {
+      type: 'boolean',
+      description: 'Replace the screenshots and leave the listing text as the store has it',
+    },
   },
   examples:
-    'kit release metadata push ios\nkit release metadata push android --screenshots\nkit release metadata push ios --dry-run\nkit release metadata push android --yes',
+    'kit release metadata push ios\nkit release metadata push android --screenshots\nkit release metadata push ios --only-screenshots\nkit release metadata push ios --dry-run\nkit release metadata push android --yes',
   async run(ctx) {
     const { requireProject } = await import('../../../cli/command')
     const { metadataPlatform, pushMetadata } = await import('../../../lib/release/metadata')
@@ -18,6 +22,7 @@ export default defineCommand({
     await pushMetadata(ctx, {
       platform: metadataPlatform('push', ctx.positionals[0]),
       screenshots: ctx.args.screenshots === true,
+      onlyScreenshots: ctx.args['only-screenshots'] === true,
     })
   },
 })

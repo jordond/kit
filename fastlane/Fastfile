@@ -150,6 +150,43 @@ def kit_metadata_for_push(metadata, into)
   into
 end
 
+# What a listing push sends. Text goes up unless KIT_METADATA_TEXT=0
+# (`kit release metadata push --only-screenshots`); images only with
+# KIT_METADATA_SCREENSHOTS=1. Text off and no images is nothing to upload.
+def kit_listing_parts
+  text = kit_flag?("KIT_METADATA_TEXT", default: true)
+  images = kit_flag?("KIT_METADATA_SCREENSHOTS")
+  UI.user_error!("KIT_METADATA_TEXT=0 needs KIT_METADATA_SCREENSHOTS=1: there is nothing to upload.") unless text || images
+  { text: text, images: images }
+end
+
+# deliver's switches for a listing push.
+def kit_deliver_listing_options(parts = kit_listing_parts)
+  {
+    skip_metadata: !parts[:text],
+    skip_screenshots: !parts[:images],
+    overwrite_screenshots: parts[:images]
+  }
+end
+
+# supply's switches for a listing push: never a binary or a changelog. Each
+# part has its own switch, so with the text off only images are sent.
+def kit_supply_listing_options(parts = kit_listing_parts)
+  {
+    skip_upload_apk: true,
+    skip_upload_aab: true,
+    skip_upload_changelogs: true,
+    skip_upload_metadata: !parts[:text],
+    skip_upload_images: !parts[:images],
+    skip_upload_screenshots: !parts[:images]
+  }
+end
+
+# "the App Store listing and screenshots", "the Play screenshots", …
+def kit_listing_summary(parts, images)
+  [parts[:text] ? "listing" : nil, parts[:images] ? images : nil].compact.join(" and ")
+end
+
 # The version deliver would edit, or an immediate error: with none, deliver
 # sits in its retry loop (7 tries, up to 5 minutes apart) before failing.
 def kit_require_editable_version(app, platform, bundle_id)
@@ -390,14 +427,17 @@ platform :ios do
   # lane checks first. deliver reads a copy of the metadata directory without
   # review_information/, so the App Review contact and demo login are never sent.
   desc "Upload the App Store listing text; screenshots too when KIT_METADATA_SCREENSHOTS=1 (replaces them)."
-  desc "In: KIT_METADATA_PATH, KIT_SCREENSHOTS_PATH, KIT_METADATA_SCREENSHOTS, KIT_IOS_BUNDLE_ID, ASC_*, KIT_SKIP_UPLOAD."
+  desc "KIT_METADATA_TEXT=0 sends the screenshots alone and leaves the text as the store has it."
+  desc "In: KIT_METADATA_PATH, KIT_SCREENSHOTS_PATH, KIT_METADATA_SCREENSHOTS, KIT_METADATA_TEXT, KIT_IOS_BUNDLE_ID, ASC_*, KIT_SKIP_UPLOAD."
   lane :metadata_push do
-    metadata = kit_require_file("KIT_METADATA_PATH")
+    parts = kit_listing_parts
+    with_screenshots = parts[:images]
+    # Screenshots alone need no metadata directory: deliver gets an empty one.
+    metadata = parts[:text] ? kit_require_file("KIT_METADATA_PATH") : kit_path("KIT_METADATA_PATH")
     next if kit_skip_upload?("the App Store listing upload", metadata)
 
     require "deliver"
 
-    with_screenshots = kit_flag?("KIT_METADATA_SCREENSHOTS")
     available = Deliver::Options.available_options
     available.each do |opt|
       opt.default_value = nil if %i[phased_release reset_ratings].include?(opt.key)
@@ -410,27 +450,27 @@ platform :ios do
     # deliver creates its screenshots dir even when it skips them; give it a throwaway one then.
     Dir.mktmpdir("kit-listing") do |tmp|
       unused = File.join(tmp, "screenshots")
+      listing = File.join(tmp, "metadata")
+      parts[:text] ? kit_metadata_for_push(metadata, listing) : FileUtils.mkdir_p(listing)
       options = FastlaneCore::Configuration.create(
         available,
         api_key: kit_asc_api_key,
         app_identifier: kit_ios_bundle_id,
-        metadata_path: kit_metadata_for_push(metadata, File.join(tmp, "metadata")),
+        metadata_path: listing,
         screenshots_path: with_screenshots ? kit_require_file("KIT_SCREENSHOTS_PATH") : unused,
         skip_binary_upload: true,
         skip_app_version_update: true,
-        skip_metadata: false,
-        skip_screenshots: !with_screenshots,
-        overwrite_screenshots: with_screenshots,
         submit_for_review: false,
         run_precheck_before_submit: false,
-        force: true # skip the interactive HTML preview
+        force: true, # skip the interactive HTML preview
+        **kit_deliver_listing_options(parts)
       )
       runner = Deliver::Runner.new(options) # logs in and finds the app; uploads nothing yet
       platform = Spaceship::ConnectAPI::Platform.map(options[:platform])
       kit_require_editable_version(Deliver.cache[:app], platform, kit_ios_bundle_id)
       runner.run
     end
-    UI.success("Updated the App Store listing#{with_screenshots ? ' and screenshots' : ''}.")
+    UI.success("Updated the App Store #{kit_listing_summary(parts, 'screenshots')}.")
   end
 end
 
@@ -643,14 +683,15 @@ platform :android do
   # holds several (a staged rollout), so pick the newest version code of the
   # first track that has any.
   desc "Upload the Play listing text; images and screenshots too when KIT_METADATA_SCREENSHOTS=1 (replaces them)."
-  desc "In: KIT_METADATA_PATH, KIT_METADATA_SCREENSHOTS, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY, KIT_SKIP_UPLOAD."
+  desc "KIT_METADATA_TEXT=0 sends the images and screenshots alone and leaves the text as the store has it."
+  desc "In: KIT_METADATA_PATH, KIT_METADATA_SCREENSHOTS, KIT_METADATA_TEXT, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY, KIT_SKIP_UPLOAD."
   lane :metadata_push do
     metadata = kit_require_file("KIT_METADATA_PATH")
     next if kit_skip_upload?("the Play listing upload", metadata)
 
     json_key = kit_play_json_key
     package = kit_env("KIT_ANDROID_PACKAGE")
-    with_images = kit_flag?("KIT_METADATA_SCREENSHOTS")
+    parts = kit_listing_parts
     track = nil
     code = nil
     %w[production beta alpha internal].each do |t|
@@ -674,14 +715,9 @@ platform :android do
       metadata_path: metadata,
       track: track,
       version_code: code,
-      skip_upload_apk: true,
-      skip_upload_aab: true,
-      skip_upload_changelogs: true,
-      skip_upload_metadata: false,
-      skip_upload_images: !with_images,
-      skip_upload_screenshots: !with_images
+      **kit_supply_listing_options(parts)
     )
-    UI.success("Updated the Play listing#{with_images ? ', images and screenshots' : ''}.")
+    UI.success("Updated the Play #{kit_listing_summary(parts, 'images and screenshots')}.")
   end
 end
 
