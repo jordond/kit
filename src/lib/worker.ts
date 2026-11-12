@@ -152,8 +152,52 @@ export interface RollbackTarget {
 const triggeredBy = (v: unknown): unknown =>
   isRecord(v) && isRecord(v.annotations) ? v.annotations['workers/triggered_by'] : undefined
 
+export interface RollbackCandidate {
+  version: string
+  /** When the deployment carrying it was made (ISO). */
+  deployed: string
+  /** Its share of traffic in that deployment. */
+  percentage: number
+}
+
+/**
+ * When the newest deployment splits traffic across versions (a gradual rollout), there is no single
+ * live version to roll back from, and kit does not guess. This returns what the user can choose
+ * from: the versions in the split, then the fully deployed versions before it, newest first.
+ * Undefined when the newest deployment is at 100% or the listing is not that shape.
+ */
+export function gradualRollout(deploymentsJson: string): RollbackCandidate[] | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(deploymentsJson)
+  } catch {
+    return undefined
+  }
+  if (!Array.isArray(parsed)) return undefined
+  const deployments: { deployed: string; versions: RollbackCandidate[] }[] = []
+  for (const d of parsed) {
+    if (!isRecord(d) || typeof d.created_on !== 'string' || !Array.isArray(d.versions)) continue
+    const versions: RollbackCandidate[] = []
+    for (const v of d.versions) {
+      if (!isRecord(v) || typeof v.version_id !== 'string' || typeof v.percentage !== 'number') continue
+      versions.push({ version: v.version_id, deployed: d.created_on, percentage: v.percentage })
+    }
+    if (versions.length) deployments.push({ deployed: d.created_on, versions })
+  }
+  deployments.sort((a, b) => b.deployed.localeCompare(a.deployed))
+  const newest = deployments[0]
+  if (!newest || newest.versions.some((v) => v.percentage === 100)) return undefined
+  const out = [...newest.versions].sort((a, b) => b.percentage - a.percentage)
+  for (const d of deployments.slice(1)) {
+    const full = d.versions.find((v) => v.percentage === 100)
+    if (full && !out.some((c) => c.version === full.version)) out.push(full)
+  }
+  return out
+}
+
 /**
  * The version to roll back to: the newest earlier deployment whose code differs from what is live.
+ * Call `gradualRollout` first: this only looks at deployments with one version at 100%.
  * wrangler's own default is "the deployment before the latest", but every `wrangler secret put`
  * makes a deployment (a new version: the same code, one secret changed), so after a secrets push
  * that default only undoes the last secret and leaves the bad code live. Here a secret-only

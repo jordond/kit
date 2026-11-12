@@ -373,6 +373,30 @@ describe('release rollback', () => {
     expect(r.stderr).toContain('2 secret changes since then revert with it; run `kit env push` afterwards')
   })
 
+  test('a gradual deployment is live: exit 4 listing the candidates, no guess, no rollback', async () => {
+    const split = {
+      id: 'dep-3',
+      created_on: '2026-03-03T10:00:00.000Z',
+      annotations: {},
+      versions: [
+        { version_id: 'code-b', percentage: 90 },
+        { version_id: 'code-c', percentage: 10 },
+      ],
+    }
+    listings([dep('code-a', 1), dep('code-b', 2), split])
+    const r = await fx.kit(['release', 'rollback', 'edge', '--yes'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('A gradual deployment of edge is live')
+    expect(r.stderr).toContain('--to <version-id>')
+    expect(r.stderr).toContain('code-b  2026-03-03T10:00:00.000Z  90%')
+    expect(r.stderr).toContain('code-c  2026-03-03T10:00:00.000Z  10%')
+    expect(r.stderr).toContain('code-a  2026-03-01T10:00:00.000Z  100%')
+    expect(summary()).toEqual(LISTS.slice(0, 1))
+    // --to still works with the split live.
+    expect((await fx.kit(['release', 'rollback', 'edge', '--to', 'code-a', '--yes'])).code).toBe(0)
+    expect(summary().at(-1)).toContain('wrangler rollback code-a')
+  })
+
   test('no earlier code version, or no listing: exit 4 and no rollback', async () => {
     listings([dep('code-b', 2), dep('secret-1', 3, true)])
     const r = await fx.kit(['release', 'rollback', 'edge', '--yes'])
@@ -629,6 +653,44 @@ describe('db backup / restore / seed / reset', () => {
       expect(r.stderr).toContain('Local D1 layout not recognised: apps/edge/.wrangler/state holds v4')
       expect(readFileSync(mine()[0]!, 'utf8')).toBe('old')
       expect(fx.calls()).toEqual([])
+    })
+
+    test('local: a failing precondition leaves the database files untouched', async () => {
+      // accountId is 'from-wrangler' and the wrangler config has no account_id: exit 3 at the pin.
+      writeFileSync(
+        join(fx.dir, 'apps/edge/wrangler.jsonc'),
+        JSON.stringify({ name: 'edge', d1_databases: [{ binding: 'DB', database_name: 'infra-db' }] }),
+      )
+      const r = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--yes'])
+      expect(r.code).toBe(3)
+      expect(r.stderr).toContain('No account_id in apps/edge/wrangler.jsonc')
+      for (const f of mine()) expect(readFileSync(f, 'utf8')).toBe('old')
+      expect(fx.calls()).toEqual([])
+    })
+
+    test('local --json: the dry run lists what it would delete; one document after every check', async () => {
+      const removed = mine().map((f) => f.slice(fx.dir.length + 1))
+      const dry = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--dry-run', '--json'])
+      expect(dry.code).toBe(0)
+      expect(JSON.parse(dry.stdout)).toMatchObject({
+        dryRun: true,
+        db: 'infra-db',
+        remote: false,
+        remove: removed,
+      })
+      expect(fx.calls()).toEqual([])
+      const r = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--yes', '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.stdout)).toMatchObject({ db: 'infra-db', remote: false, ok: true, removed })
+      expect(summary()).toEqual([`${EXEC} --local --file <root>/dump.sql --json`])
+      // wrangler wrote the database somewhere else: no ok document goes out first.
+      writeFileSync(join(fx.dir, '.no-d1-file'), '')
+      rmSync(join(fx.dir, 'apps/edge/.wrangler'), { recursive: true })
+      const lost = await fx.kit(['db', 'restore', 'dump.sql', '--db', 'db', '--yes', '--json'])
+      expect(lost.code).toBe(1)
+      const doc = JSON.parse(lost.stdout)
+      expect(doc.ok).toBe(false)
+      expect(doc.error).toContain('Local D1 layout not recognised')
     })
 
     test('remote: an empty database is restored after a confirm', async () => {

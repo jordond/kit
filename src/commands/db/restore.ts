@@ -10,7 +10,7 @@ export default defineCommand({
     'kit db restore prod.sql --remote                    # only into an empty database; asks first',
   ].join('\n'),
   async run(ctx) {
-    const { existsSync } = await import('node:fs')
+    const { accessSync, constants, existsSync } = await import('node:fs')
     const { relative, resolve } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
     const { d1Args, d1Tables, pinCloudflareAccount, resolveD1, runD1, TABLES_SQL, wrangler } = await import(
@@ -18,7 +18,8 @@ export default defineCommand({
     )
     const { locateLocalD1, removeLocalD1, requireLocalD1 } = await import('../../lib/d1-local')
     const { ExitCode, KitError } = await import('../../lib/errors')
-    const { runPiped } = await import('../../lib/proc')
+    const { emitJson } = await import('../../lib/log')
+    const { run, runPiped } = await import('../../lib/proc')
     const { confirm } = await import('../../lib/prompt')
     const [name, ...more] = ctx.positionals
     if (!name || more.length) {
@@ -31,6 +32,11 @@ export default defineCommand({
     // wrangler runs from the target dir; keep the file relative to where kit was started.
     const file = resolve(process.cwd(), name)
     if (!existsSync(file)) throw new KitError(`No file ${name}`, undefined, ExitCode.usage)
+    try {
+      accessSync(file, constants.R_OK)
+    } catch {
+      throw new KitError(`Cannot read ${name}`, undefined, ExitCode.usage)
+    }
     const { root, config } = requireProject(ctx)
     const db = resolveD1(config, ctx.args.db)
     const remote = !!ctx.args.remote
@@ -69,19 +75,48 @@ export default defineCommand({
     }
 
     // Local: the database is replaced, the way `kit db reset` deletes it (and with the same guards).
+    // Every check comes before the delete: a restore that cannot run must leave the old data alone.
     const local = locateLocalD1(root, config, db)
+    const rel = (p: string) => relative(root, p) || '.'
+    const w = wrangler(root, config, db.target, ...d1Args(db, { ...action, json: ctx.flags.json }))
+    const shown = `${rel(w.cwd)} $ ${w.cmd.join(' ')}`
+    const removed = local.files.map(rel)
     if (ctx.flags.dryRun) {
-      if (!ctx.flags.json) for (const f of local.files) ctx.log.step(`rm ${relative(root, f)}`)
-    } else {
-      if (!(await confirm(ctx.flags, `Replace local ${db.name} with ${name}? Its local data is deleted`))) {
-        throw new KitError('Cancelled', undefined, ExitCode.interrupted)
+      if (ctx.flags.json) {
+        emitJson({ dryRun: true, db: db.name, remote: false, remove: removed, cmd: w.cmd, cwd: rel(w.cwd) })
+      } else {
+        for (const f of removed) ctx.log.step(`rm ${f}`)
+        ctx.log.step(shown)
       }
-      removeLocalD1(local)
-      if (!ctx.flags.json) {
-        ctx.log.step(local.files.length ? `removed local ${db.name}` : `no local ${db.name} to remove`)
-      }
+      return
     }
-    const outcome = await runD1(ctx, action, { mutates: true })
-    if (outcome === 'ok') requireLocalD1(root, db, local)
+    pinCloudflareAccount(root, config)
+    if (!(await confirm(ctx.flags, `Replace local ${db.name} with ${name}? Its local data is deleted`))) {
+      throw new KitError('Cancelled', undefined, ExitCode.interrupted)
+    }
+    removeLocalD1(local)
+    if (!ctx.flags.json) {
+      ctx.log.step(removed.length ? `removed local ${db.name}` : `no local ${db.name} to remove`)
+      ctx.log.dim(shown)
+    }
+    // --json: wrangler's result is held back until the database is known to be where kit deleted
+    // from, so one document says what happened.
+    let result: unknown
+    let code: number
+    if (ctx.flags.json) {
+      const done = await runPiped(w.cmd, { cwd: w.cwd })
+      code = done.code
+      if (done.stderr) process.stderr.write(done.stderr)
+      try {
+        result = JSON.parse(done.stdout)
+      } catch {
+        result = done.stdout
+      }
+    } else {
+      code = await run(w.cmd, { cwd: w.cwd })
+    }
+    if (code === 0) requireLocalD1(root, db, local)
+    if (ctx.flags.json) emitJson({ db: db.name, remote: false, ok: code === 0, removed, result })
+    if (code !== 0) process.exitCode = ExitCode.failed
   },
 })

@@ -23,7 +23,9 @@ export default defineCommand({
     const { emitJson } = await import('../../lib/log')
     const { runLines, runPiped } = await import('../../lib/proc')
     const { confirm } = await import('../../lib/prompt')
-    const { listArgs, pickRollback, rollbackArgs, serviceDeployTarget } = await import('../../lib/worker')
+    const { gradualRollout, listArgs, pickRollback, rollbackArgs, serviceDeployTarget } = await import(
+      '../../lib/worker'
+    )
     const { root, config } = requireProject(ctx)
     const services = config.release?.services ?? {}
     const [name, ...more] = ctx.positionals
@@ -81,6 +83,16 @@ export default defineCommand({
         throw new KitError(
           `Could not list ${name}'s deployments (wrangler exited with ${deployments.code})`,
           (deployments.stderr || deployments.stdout).trim().split('\n').at(-1) || undefined,
+          ExitCode.precondition,
+        )
+      }
+      // A gradual deployment is live: there is no one version to roll back from, so kit does not guess.
+      const split = gradualRollout(deployments.stdout)
+      if (split) {
+        const lines = split.map((c) => `${c.version}  ${c.deployed}  ${c.percentage}%`)
+        throw new KitError(
+          `A gradual deployment of ${name} is live, so kit cannot tell which version to roll back to`,
+          `Pass one with --to <version-id>:\n    ${lines.join('\n    ')}`,
           ExitCode.precondition,
         )
       }
