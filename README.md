@@ -249,13 +249,14 @@ release: {
 
 | Command | Does |
 | --- | --- |
-| `kit release metadata pull <ios\|android> [--force]` | Download the listing text and screenshots into the directory |
+| `kit release metadata pull <ios\|android> [--screenshots] [--force]` | Download the listing text; `--screenshots` also downloads the screenshots (Play: and the feature graphic and icon) |
 | `kit release metadata push <ios\|android> [--screenshots]` | Upload the listing text; `--screenshots` also replaces the screenshots (Play: and the feature graphic and icon) |
 
 - `push` never uploads a binary, submits for review, or changes a rollout or phased release. It asks
   before changing the public listing (`--yes` skips); `--dry-run` prints the files it would send and
   runs nothing.
-- `pull` stops when the directory has uncommitted changes; `--force` overwrites them.
+- `pull` stops when what it would write has uncommitted changes (the text; with `--screenshots` the
+  screenshots too); `--force` overwrites them. Without `--screenshots` local screenshots are left alone.
 - Only the store key is needed: `ASC_*` for iOS, `PLAY_SERVICE_ACCOUNT_BASE64` for Android.
 - iOS edits the version being prepared in App Store Connect, so one must exist. Android needs a
   release on some Play track, and `changelogs/` is never sent: `kit release android` writes those.

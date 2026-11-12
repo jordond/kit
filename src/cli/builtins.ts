@@ -73,7 +73,8 @@ export const builtins: BuiltinEntry[] = [
   },
   {
     path: ['release', 'metadata', 'pull'],
-    description: 'Download the store listing into release.<platform>.metadata',
+    description:
+      'Download the store listing text into release.<platform>.metadata; --screenshots adds images',
     group: 'Release',
     load: () => import('../commands/release/metadata/pull'),
   },

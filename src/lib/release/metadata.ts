@@ -136,12 +136,49 @@ export function pushPlan(
 
 /**
  * Uncommitted changes under `paths` (`git status --porcelain` lines): what a pull would overwrite
- * with no way back. Outside a git repo, every existing file counts.
+ * with no way back. Outside a git repo, every existing file counts. `excludes` are globs relative
+ * to `root` for what sits under `paths` but the pull never writes.
  */
-export async function dirtyUnder(root: string, paths: string[]): Promise<string[]> {
-  const { code, stdout } = await runPiped(['git', 'status', '--porcelain', '--', ...paths], { cwd: root })
+export async function dirtyUnder(root: string, paths: string[], excludes: string[] = []): Promise<string[]> {
+  const { code, stdout } = await runPiped(
+    [
+      'git',
+      'status',
+      '--porcelain',
+      '--untracked-files=all',
+      '--',
+      ...paths,
+      ...excludes.map((g) => `:(exclude,glob)${g}`),
+    ],
+    { cwd: root },
+  )
   if (code === 0) return stdout.split('\n').filter(Boolean)
-  return paths.flatMap((p) => walk(p, () => true).map((f) => `?? ${relative(root, f)}`))
+  const globs = excludes.map((g) => new Bun.Glob(g))
+  return paths
+    .flatMap((p) => walk(p, () => true).map((f) => relative(root, f)))
+    .filter((f) => !globs.some((g) => g.match(f)))
+    .map((f) => `?? ${f}`)
+}
+
+/**
+ * What a pull writes, for the dirty check: the metadata dir, plus deliver's screenshots dir with
+ * `--screenshots` (iOS). Left out: supply's `android/` inside an iOS metadata dir, and supply's
+ * `<locale>/images/` when an Android pull is text only.
+ */
+export function pullScope(
+  root: string,
+  platform: Platform,
+  dirs: MetadataDirs,
+  screenshots: boolean,
+): { targets: string[]; excludes: string[] } {
+  const rel = relative(root, dirs.dir)
+  if (platform === 'ios') {
+    return {
+      targets: [dirs.dir, ...(screenshots && dirs.screenshotsDir ? [dirs.screenshotsDir] : [])],
+      excludes: [`${rel}/${SUPPLY_DIR}/**`],
+    }
+  }
+  return { targets: [dirs.dir], excludes: screenshots ? [] : [`${rel}/*/images/**`] }
 }
 
 const STORE = { ios: 'App Store', android: 'Google Play' } as const
@@ -180,19 +217,25 @@ type Ctx = Pick<KitContext, 'root' | 'config' | 'flags' | 'log'>
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
-/** Download the current listing (text and screenshots) into the metadata directory. */
-export async function pullMetadata(ctx: Ctx, opts: { platform: Platform; force: boolean }): Promise<void> {
+/**
+ * Download the current listing text into the metadata directory; screenshots and images only with
+ * `screenshots`. Without it, local screenshots are neither written nor checked.
+ */
+export async function pullMetadata(
+  ctx: Ctx,
+  opts: { platform: Platform; force: boolean; screenshots: boolean },
+): Promise<void> {
   const started = performance.now()
   const { root, config } = ctx as { root: string; config: KitConfig }
-  const { platform } = opts
+  const { platform, screenshots } = opts
   const flags = ctx.flags
   const dirs = metadataDirs(root, config, platform)
-  const targets = [dirs.dir, ...(dirs.screenshotsDir ? [dirs.screenshotsDir] : [])]
+  const { targets, excludes } = pullScope(root, platform, dirs, screenshots)
   const shown = targets.map((t) => relative(root, t))
-  const base = { platform, action: 'pull' as const, dir: shown[0]!, screenshotsDir: shown[1] }
+  const base = { platform, action: 'pull' as const, dir: shown[0]!, screenshots, screenshotsDir: shown[1] }
 
   if (!opts.force) {
-    const dirty = await dirtyUnder(root, targets)
+    const dirty = await dirtyUnder(root, targets, excludes)
     if (dirty.length) {
       throw new KitError(
         `A pull would overwrite uncommitted changes in ${shown.join(' and ')}:\n${dirty
@@ -208,22 +251,24 @@ export async function pullMetadata(ctx: Ctx, opts: { platform: Platform; force: 
     if (flags.json) emitJson({ ...base, dryRun: true })
     else {
       ctx.log.step(
-        `would download the ${STORE[platform]} listing of ${storeId(config, platform)} into ${shown.join(' and ')}`,
+        `would download the ${STORE[platform]} listing ${screenshots ? 'text and screenshots' : 'text'} of ${storeId(config, platform)} into ${shown.join(' and ')}`,
       )
     }
     return
   }
   requireBundle()
   const appRoot = appFastlaneDir(root, config)
-  const env = laneEnv(root, config, platform, dirs)
+  const env = {
+    ...laneEnv(root, config, platform, dirs),
+    ...(screenshots ? { KIT_METADATA_SCREENSHOTS: '1' } : {}),
+  }
   const results = await runSteps(
     [laneStep(`pull ${STORE[platform]} listing`, appRoot, platform, 'metadata_pull', () => env)],
     flags,
     { bail: true },
   )
   const ok = results.length === 1 && results.every((r) => r.ok) && !interrupted()
-  const found = listingFiles(platform, dirs)
-  const files = [...found.text, ...found.images].map((f) => relative(root, f))
+  const { files } = pushPlan(root, platform, dirs, screenshots)
   if (flags.json) emitJson({ ...base, dryRun: false, ok, files, ...(ok ? {} : { results }) })
   process.exitCode = summarize(`metadata pull ${platform}`, results, started)
   if (ok && !flags.json) ctx.log.dim(`  ${plural(files.length, 'file')} in ${shown.join(' and ')}`)

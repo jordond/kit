@@ -69,8 +69,10 @@ beforeEach(() => {
     'bundle',
     `bun -e 'const e=process.env;console.log(JSON.stringify({argv:process.argv.slice(1),cwd:process.cwd(),env:Object.fromEntries(Object.entries(e).filter(([k])=>/^(KIT_|BUNDLE_|FASTLANE_|FL_|ASC_|MATCH_|ANDROID_)/.test(k)))}))' -- "$@" >> "${laneLog}"
 case "$*" in
-  *"ios metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US" "$KIT_SCREENSHOTS_PATH/en-US"; echo pulled > "$KIT_METADATA_PATH/en-US/name.txt"; echo png > "$KIT_SCREENSHOTS_PATH/en-US/0_APP_IPHONE_67_0.png" ;;
-  *"android metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US"; echo pulled > "$KIT_METADATA_PATH/en-US/title.txt" ;;
+  *"ios metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US"; echo pulled > "$KIT_METADATA_PATH/en-US/name.txt"
+    if [ "$KIT_METADATA_SCREENSHOTS" = 1 ]; then mkdir -p "$KIT_SCREENSHOTS_PATH/en-US"; echo pulled > "$KIT_SCREENSHOTS_PATH/en-US/0_APP_IPHONE_67_0.png"; fi ;;
+  *"android metadata_pull"*) mkdir -p "$KIT_METADATA_PATH/en-US/images"; echo pulled > "$KIT_METADATA_PATH/en-US/title.txt"
+    if [ "$KIT_METADATA_SCREENSHOTS" = 1 ]; then echo pulled > "$KIT_METADATA_PATH/en-US/images/icon.png"; fi ;;
 esac
 exit 0`,
   )
@@ -262,29 +264,53 @@ describe('kit release metadata push', () => {
 })
 
 describe('kit release metadata pull', () => {
-  test('ios: one metadata_pull lane with both directories; no confirmation', async () => {
+  const IOS_SHOT = 'client/fastlane/screenshots/en-US/0_APP_IPHONE_67_0.png'
+  const read = (path: string) => readFileSync(join(f.dir, path), 'utf8')
+
+  test('ios: one metadata_pull lane, text only by default; no confirmation', async () => {
     const r = await run(['release', 'metadata', 'pull', 'ios', '--json'])
     expect(r.code).toBe(0)
     expect(JSON.parse(r.stdout)).toEqual({
       platform: 'ios',
       action: 'pull',
       dir: IOS_DIR,
-      screenshotsDir: 'client/fastlane/screenshots',
+      screenshots: false,
       dryRun: false,
       ok: true,
-      files: [...IOS_TEXT, 'client/fastlane/screenshots/en-US/0_APP_IPHONE_67_0.png'],
+      files: IOS_TEXT,
     })
     const calls = lanes()
     expect(calls.map(lane)).toEqual(['ios metadata_pull'])
     const env = calls[0]!.env
     expect(real(env.KIT_METADATA_PATH!)).toBe(real(join(f.dir, IOS_DIR)))
-    expect(real(env.KIT_SCREENSHOTS_PATH!)).toBe(real(join(f.dir, 'client/fastlane/screenshots')))
     expect(env).toMatchObject({ KIT_IOS_BUNDLE_ID: 'app.example', ASC_KEY_ID: 'KEYID123' })
     expect(env.KIT_ASC_KEY_PATH).toMatch(/asc-key\.p8$/)
-    expect(readFileSync(join(f.dir, IOS_DIR, 'en-US/name.txt'), 'utf8')).toBe('pulled\n')
+    expect(env.KIT_METADATA_SCREENSHOTS).toBeUndefined()
+    expect(read(`${IOS_DIR}/en-US/name.txt`)).toBe('pulled\n')
+    // local screenshots are untouched
+    expect(read(IOS_SHOT)).toBe('x')
   })
 
-  test('android: metadata_pull with the Play key', async () => {
+  test('ios --screenshots: KIT_METADATA_SCREENSHOTS=1 and both directories', async () => {
+    const r = await run(['release', 'metadata', 'pull', 'ios', '--screenshots', '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout)).toEqual({
+      platform: 'ios',
+      action: 'pull',
+      dir: IOS_DIR,
+      screenshots: true,
+      screenshotsDir: 'client/fastlane/screenshots',
+      dryRun: false,
+      ok: true,
+      files: [...IOS_TEXT, IOS_SHOT],
+    })
+    const env = lanes()[0]!.env
+    expect(env.KIT_METADATA_SCREENSHOTS).toBe('1')
+    expect(real(env.KIT_SCREENSHOTS_PATH!)).toBe(real(join(f.dir, 'client/fastlane/screenshots')))
+    expect(read(IOS_SHOT)).toBe('pulled\n')
+  })
+
+  test('android: metadata_pull with the Play key, text only by default', async () => {
     const r = await run(['release', 'metadata', 'pull', 'android'])
     expect(r.code).toBe(0)
     expect(r.stdout).toBe('')
@@ -295,7 +321,50 @@ describe('kit release metadata pull', () => {
     expect(env.KIT_ANDROID_PACKAGE).toBe('app.example')
     expect(env.KIT_PLAY_JSON_KEY).toMatch(/play\.json$/)
     expect(env.KIT_SCREENSHOTS_PATH).toBeUndefined()
-    expect(readFileSync(join(f.dir, ANDROID_DIR, 'en-US/title.txt'), 'utf8')).toBe('pulled\n')
+    expect(env.KIT_METADATA_SCREENSHOTS).toBeUndefined()
+    expect(read(`${ANDROID_DIR}/en-US/title.txt`)).toBe('pulled\n')
+    expect(read(`${ANDROID_DIR}/en-US/images/icon.png`)).toBe('x')
+  })
+
+  test('android --screenshots: KIT_METADATA_SCREENSHOTS=1, images listed', async () => {
+    const r = await run(['release', 'metadata', 'pull', 'android', '--screenshots', '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout)).toMatchObject({
+      screenshots: true,
+      ok: true,
+      files: [...ANDROID_TEXT, ...ANDROID_IMAGES],
+    })
+    expect(lanes()[0]!.env.KIT_METADATA_SCREENSHOTS).toBe('1')
+    expect(read(`${ANDROID_DIR}/en-US/images/icon.png`)).toBe('pulled\n')
+  })
+
+  test('the dirty check covers only what the pull writes', async () => {
+    // uncommitted screenshots and images, and Play files inside the iOS metadata dir
+    put('client/fastlane/screenshots/en-US/new.png')
+    put(`${ANDROID_DIR}/en-US/images/icon.png`, 'edited')
+    put(`${ANDROID_DIR}/en-US/images/phoneScreenshots/2_en-US.png`)
+    for (const platform of ['ios', 'android']) {
+      const text = await run(['release', 'metadata', 'pull', platform])
+      expect(text.code).toBe(0)
+    }
+    expect(read(`${ANDROID_DIR}/en-US/images/icon.png`)).toBe('edited')
+    const before = lanes().length
+
+    const ios = await run(['release', 'metadata', 'pull', 'ios', '--screenshots', '--force'])
+    expect(ios.code).toBe(0)
+    sh(['git', 'add', '-A'])
+    sh(['git', 'commit', '-qm', 'chore: listing'])
+    put('client/fastlane/screenshots/en-US/newer.png')
+    put(`${ANDROID_DIR}/en-US/images/icon.png`, 'edited again')
+    const shots = await run(['release', 'metadata', 'pull', 'ios', '--screenshots'])
+    expect(shots.code).toBe(4)
+    expect(shots.stderr).toContain(`${IOS_DIR} and client/fastlane/screenshots`)
+    expect(shots.stderr).toContain('client/fastlane/screenshots/en-US/newer.png')
+    expect(shots.stderr).not.toContain('images/icon.png')
+    const images = await run(['release', 'metadata', 'pull', 'android', '--screenshots'])
+    expect(images.code).toBe(4)
+    expect(images.stderr).toContain(`${ANDROID_DIR}/en-US/images/icon.png`)
+    expect(lanes().length).toBe(before + 1)
   })
 
   test('refuses a dirty directory (exit 4); --force overwrites', async () => {
@@ -314,14 +383,6 @@ describe('kit release metadata pull', () => {
     expect(readFileSync(join(f.dir, ANDROID_DIR, 'en-US/title.txt'), 'utf8')).toBe('pulled\n')
   })
 
-  test('ios: a dirty screenshots directory counts too', async () => {
-    put('client/fastlane/screenshots/en-US/new.png')
-    const r = await run(['release', 'metadata', 'pull', 'ios'])
-    expect(r.code).toBe(4)
-    expect(r.stderr).toContain('client/fastlane/screenshots/')
-    expect(lanes()).toEqual([])
-  })
-
   test('a first pull creates the directory', async () => {
     rmSync(join(f.dir, ANDROID_DIR), { recursive: true })
     sh(['git', 'commit', '-qam', 'chore: drop the listing'])
@@ -331,10 +392,15 @@ describe('kit release metadata pull', () => {
   })
 
   test('--dry-run runs nothing', async () => {
-    const r = await run(['release', 'metadata', 'pull', 'ios', '--dry-run'], { ASC_KEY_P8_BASE64: '' })
+    const none = { ASC_KEY_P8_BASE64: '' }
+    const r = await run(['release', 'metadata', 'pull', 'ios', '--screenshots', '--dry-run'], none)
     expect(r.code).toBe(0)
     expect(r.stderr).toContain(
-      `would download the App Store listing of app.example into ${IOS_DIR} and client/fastlane/screenshots`,
+      `would download the App Store listing text and screenshots of app.example into ${IOS_DIR} and client/fastlane/screenshots`,
+    )
+    const text = await run(['release', 'metadata', 'pull', 'ios', '--dry-run'], none)
+    expect(text.stderr).toContain(
+      `would download the App Store listing text of app.example into ${IOS_DIR}\n`,
     )
     expect(readFileSync(laneLog, 'utf8')).toBe('')
     expect(sh(['git', 'status', '--porcelain'])).toBe('')

@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { configSchema } from '../../src/config/schema'
 import { ExitCode, KitError } from '../../src/lib/errors'
-import { dirtyUnder, metadataDirs, metadataPlatform, pushPlan } from '../../src/lib/release/metadata'
+import {
+  dirtyUnder,
+  metadataDirs,
+  metadataPlatform,
+  pullScope,
+  pushPlan,
+} from '../../src/lib/release/metadata'
 
 const ios = { bundleIds: ['app.example'], project: 'ios/App.xcodeproj', scheme: 'App', output: 'App.ipa' }
 const android = { packageName: 'app.example', module: ':android' }
@@ -146,5 +152,42 @@ describe('dirtyUnder', () => {
     expect(await dirtyUnder(root, [join(root, 'store'), join(root, 'absent')])).toEqual([
       '?? store/en-US/title.txt',
     ])
+  })
+
+  test('excludes apply outside a git repo too', async () => {
+    put('store/en-US/title.txt')
+    put('store/en-US/images/icon.png')
+    put('store/en-US/images/phoneScreenshots/1_en-US.png')
+    expect(await dirtyUnder(root, [join(root, 'store')], ['store/*/images/**'])).toEqual([
+      '?? store/en-US/title.txt',
+    ])
+  })
+})
+
+describe('pullScope', () => {
+  const c = parse({
+    ios: { ...ios, metadata: 'fastlane/metadata' },
+    android: { ...android, metadata: 'fastlane/metadata/android' },
+  })
+
+  test('iOS: the metadata dir minus supply’s android/; the screenshots dir only with --screenshots', () => {
+    const dirs = metadataDirs('/repo', c, 'ios')
+    expect(pullScope('/repo', 'ios', dirs, false)).toEqual({
+      targets: ['/repo/fastlane/metadata'],
+      excludes: ['fastlane/metadata/android/**'],
+    })
+    expect(pullScope('/repo', 'ios', dirs, true).targets).toEqual([
+      '/repo/fastlane/metadata',
+      '/repo/fastlane/screenshots',
+    ])
+  })
+
+  test('Android: <locale>/images is left out unless --screenshots', () => {
+    const dirs = metadataDirs('/repo', c, 'android')
+    expect(pullScope('/repo', 'android', dirs, false)).toEqual({
+      targets: ['/repo/fastlane/metadata/android'],
+      excludes: ['fastlane/metadata/android/*/images/**'],
+    })
+    expect(pullScope('/repo', 'android', dirs, true).excludes).toEqual([])
   })
 })

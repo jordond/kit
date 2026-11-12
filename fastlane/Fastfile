@@ -279,14 +279,18 @@ platform :ios do
   # and `deliver download_screenshots` do, with the same deliver classes. Text
   # comes from the latest version; screenshots from the version being edited,
   # else the live one.
-  desc "Download the App Store listing (text + screenshots) into the app's metadata directory."
-  desc "In: KIT_METADATA_PATH, KIT_SCREENSHOTS_PATH, KIT_IOS_BUNDLE_ID, ASC_*."
+  desc "Download the App Store listing text into the app's metadata directory; screenshots too when KIT_METADATA_SCREENSHOTS=1."
+  desc "In: KIT_METADATA_PATH, KIT_SCREENSHOTS_PATH, KIT_METADATA_SCREENSHOTS, KIT_IOS_BUNDLE_ID, ASC_*."
   lane :metadata_pull do
     require "deliver"
     require "deliver/setup"
 
     metadata = kit_path("KIT_METADATA_PATH")
-    screenshots = kit_path("KIT_SCREENSHOTS_PATH")
+    with_screenshots = kit_flag?("KIT_METADATA_SCREENSHOTS")
+    # deliver creates its screenshots dir on login; without the flag give it a throwaway one,
+    # so the app's screenshots directory is neither created nor touched.
+    unused = Dir.mktmpdir("kit-screenshots")
+    screenshots = with_screenshots ? kit_path("KIT_SCREENSHOTS_PATH") : unused
     available = Deliver::Options.available_options
     # As `deliver download_metadata` does: a stray .ipa/.pkg next to the Fastfile is irrelevant here.
     available.each do |opt|
@@ -310,9 +314,13 @@ platform :ios do
     UI.user_error!("#{kit_ios_bundle_id} has no App Store version to download a listing from.") unless version
 
     Deliver::Setup.new.generate_metadata_files(app, version, metadata, options)
-    editing = app.get_edit_app_store_version(platform: platform)
-    Deliver::DownloadScreenshots.download({ platform: options[:platform], use_live_version: editing.nil? }, screenshots)
-    UI.success("Downloaded the App Store listing to #{metadata} and #{screenshots}.")
+    if with_screenshots
+      editing = app.get_edit_app_store_version(platform: platform)
+      Deliver::DownloadScreenshots.download({ platform: options[:platform], use_live_version: editing.nil? }, screenshots)
+    end
+    UI.success("Downloaded the App Store listing to #{metadata}#{with_screenshots ? " and #{screenshots}" : ''}.")
+  ensure
+    FileUtils.remove_entry(unused) if unused && File.exist?(unused)
   end
 
   # Listing only: no binary, no review submission, no release settings.
@@ -505,8 +513,8 @@ platform :android do
   # production release (it downloads changelogs). This runs the same
   # Supply::Setup steps for the listing only; changelogs stay with
   # `upload_play`. The edit is read-only and is discarded.
-  desc "Download the Play listing (text, images, screenshots) into the app's metadata directory."
-  desc "In: KIT_METADATA_PATH, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY."
+  desc "Download the Play listing text into the app's metadata directory; images and screenshots too when KIT_METADATA_SCREENSHOTS=1."
+  desc "In: KIT_METADATA_PATH, KIT_METADATA_SCREENSHOTS, KIT_ANDROID_PACKAGE, KIT_PLAY_JSON_KEY."
   lane :metadata_pull do
     require "supply"
     require "supply/options"
@@ -520,18 +528,19 @@ platform :android do
       json_key: kit_play_json_key,
       metadata_path: metadata
     )
+    with_images = kit_flag?("KIT_METADATA_SCREENSHOTS")
     setup = Supply::Setup.new
     client = setup.send(:client) # the client Setup downloads images with; it holds the edit
     client.begin_edit(package_name: package)
     begin
       client.listings.each do |listing|
         setup.store_metadata(listing)
-        setup.download_images(listing)
+        setup.download_images(listing) if with_images
       end
     ensure
       client.abort_current_edit
     end
-    UI.success("Downloaded the Play listing to #{metadata}.")
+    UI.success("Downloaded the Play listing#{with_images ? ', images and screenshots' : ''} to #{metadata}.")
   end
 
   # Listing only: no AAB/APK, no changelogs, no rollout or promotion (supply

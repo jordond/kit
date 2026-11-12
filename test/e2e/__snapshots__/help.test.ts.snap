@@ -739,26 +739,27 @@ Options
 `;
 
 exports[`help kit release metadata pull --help 1`] = `
-"Download the store listing into release.<platform>.metadata
+"Download the store listing text into release.<platform>.metadata; --screenshots adds images
 
 Usage
   kit release metadata pull [options]
 
 Examples
   kit release metadata pull ios
-  kit release metadata pull android
+  kit release metadata pull android --screenshots
   kit release metadata pull ios --force
 
 Options
-  -h, --help     Show help
-  -V, --version  Show kit version
-      --json     Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run  Plan and run read-only steps; skip mutations
-  -y, --yes      Accept confirmations (never skips prod)
-  -v, --verbose  Stream all child output
-  -q, --quiet    Errors and summary only
-      --bail     Stop at the first failure
-      --force    Overwrite uncommitted changes in the metadata directory
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --screenshots  Also download the screenshots (Play: and the feature graphic and icon)
+      --force        Overwrite uncommitted changes in what the pull writes
 
 "
 `;
