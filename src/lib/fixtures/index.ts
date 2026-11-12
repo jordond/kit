@@ -22,16 +22,35 @@ export interface FixtureResult {
 
 export { fixtureConfig, listFixtures, resolveFixtureName } from './config'
 
+/**
+ * Why `device` cannot take a fixture. kit takes any id that is not a simulator UDID for a physical
+ * device, so a simulator's name or a mistyped id gets its own message, not "physical".
+ */
+export function notASimulator(
+  device: string,
+  simulators: readonly { readonly udid: string; readonly name: string }[],
+): KitError {
+  const named = simulators.find((sim) => sim.name === device)
+  if (named) {
+    return new KitError(
+      `${device} is a simulator's name; fixtures need its UDID`,
+      `--device ${named.udid}`,
+      ExitCode.usage,
+    )
+  }
+  return new KitError(
+    `No simulator has the UDID ${device}`,
+    '`kit device list` shows them. kit cannot copy fixtures to or from a physical iPhone or iPad',
+    ExitCode.precondition,
+  )
+}
+
 async function requireSimulator(target: DeviceTarget, device: string): Promise<void> {
   if (platformOf(target) !== 'ios') return
   const { deviceKind } = await import('../app/install')
-  if ((await deviceKind(target, device)) === 'physical') {
-    throw new KitError(
-      'kit cannot copy fixtures to or from a physical iPhone or iPad',
-      'Use a simulator',
-      ExitCode.precondition,
-    )
-  }
+  if ((await deviceKind(target, device)) !== 'physical') return
+  const { listSimulators } = await import('../devices')
+  throw notASimulator(device, await listSimulators())
 }
 
 /** Replay `<fixtures.dir>/<name>` onto `device`. The app must be installed; it is stopped first. */

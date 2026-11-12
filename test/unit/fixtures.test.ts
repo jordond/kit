@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { KitConfig } from '../../src/config/schema'
+import { notASimulator } from '../../src/lib/fixtures'
 import { androidDumpScript, androidLoadScript, shQuote } from '../../src/lib/fixtures/android'
 import {
   cleanRelPath,
@@ -409,5 +410,21 @@ describe('the simulator container guard', () => {
     const bundle = join(root, 'CoreSimulator/Devices/UDID-1/data/Containers/Bundle/Application/ID-9')
     mkdirSync(bundle, { recursive: true })
     expect(() => containerRoot(bundle, 'UDID-1')).toThrow('Refusing')
+  })
+})
+
+describe('a device that is not a simulator UDID', () => {
+  const sims = [{ udid: 'AAAA-1', name: 'iPhone 17 Pro' }]
+
+  test("a simulator's name gets the UDID to pass", () => {
+    const error = notASimulator('iPhone 17 Pro', sims)
+    expect(error.message).toBe("iPhone 17 Pro is a simulator's name; fixtures need its UDID")
+    expect(error.hint).toBe('--device AAAA-1')
+  })
+
+  test('an unknown id is reported as not found, not as a physical device', () => {
+    const error = notASimulator('no-such-device', sims)
+    expect(error.message).toBe('No simulator has the UDID no-such-device')
+    expect(error.hint).toContain('kit device list')
   })
 })
