@@ -220,6 +220,27 @@ a terminal that question needs `--yes`. `uninstall`, `clear` and `statusbar` nev
 (otherwise `google_apis`, then AOSP). In CI the emulator starts headless.
 `KIT_DEVICE_TIMEOUT_MS` changes the four minutes an emulator boot may take.
 
+**Emulator arguments.** kit starts the emulator as `emulator -avd <avd>`, the headless flags in CI, then
+any extra arguments from two places, in this order:
+
+```ts
+// kit.config.ts: an API 37 Play image plays no video without this
+devices: { android: { emulatorArgs: ['-feature', '-HardwareDecoder'] } },
+```
+
+```sh
+# this machine only: the shell, or the repo's .env (Bun loads it before kit starts)
+KIT_EMULATOR_ARGS='-packet-streamer-endpoint default'
+```
+
+The config holds what the project needs on every machine, so it is committed; `KIT_EMULATOR_ARGS` holds
+what this machine needs (a stale `netsimd` from another session) and stays out of the repo. It is split
+on whitespace, with `'…'` and `"…"` keeping an argument that has spaces together. kit picks the AVD, so
+`-avd` and `@name` are refused. The arguments apply to every command that boots the emulator
+(`kit device boot android`, `kit qa android`, `kit shots android`, `kit fixture load android`); an
+emulator that is already running keeps the ones it was started with, and kit says so. A boot that times
+out shows the last lines of the emulator's log and where the log is.
+
 **What gets built.** `kit app build <ios|android>` builds the debug variant (`--release` for release)
 and prints the artifact path on stdout:
 
