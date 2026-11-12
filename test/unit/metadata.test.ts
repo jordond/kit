@@ -90,11 +90,7 @@ describe('pushPlan', () => {
     put('fastlane/screenshots/en-US/0_APP_IPHONE_67_0.png')
     put('fastlane/screenshots/en-US/1_APP_IPHONE_67_1.JPG')
     put('fastlane/screenshots/README.txt')
-    const dirs = metadataDirs(
-      root,
-      parse({ ios: { ...ios, metadata: 'fastlane/metadata' } }),
-      'ios',
-    )
+    const dirs = metadataDirs(root, parse({ ios: { ...ios, metadata: 'fastlane/metadata' } }), 'ios')
     const text = [
       'fastlane/metadata/copyright.txt',
       'fastlane/metadata/en-US/description.txt',

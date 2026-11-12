@@ -87,9 +87,10 @@ Usage
   kit release <command> [options]
 
 Commands
-  ios      Build and upload iOS to a track
-  android  Build and upload Android to a track
-  certs    Install App Store signing with match; --add creates what is missing
+  ios       Build and upload iOS to a track
+  android   Build and upload Android to a track
+  certs     Install App Store signing with match; --add creates what is missing
+  metadata  Sync the store listing (text, screenshots) …
 
 Options
   -h, --help     Show help
@@ -733,6 +734,57 @@ Options
       --build <number>  Build number (default: max in App Store Connect + 1)
       --notes <string>  Release notes (default: commits since the last ios/v* tag); prod: What's New, required
       --skip <string>   Skip release.preflight checks by skipFlag (comma-separated)
+
+"
+`;
+
+exports[`help kit release metadata pull --help 1`] = `
+"Download the store listing into release.<platform>.metadata
+
+Usage
+  kit release metadata pull [options]
+
+Examples
+  kit release metadata pull ios
+  kit release metadata pull android
+  kit release metadata pull ios --force
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --force    Overwrite uncommitted changes in the metadata directory
+
+"
+`;
+
+exports[`help kit release metadata push --help 1`] = `
+"Upload the store listing text; --screenshots adds images. Never a binary or a review
+
+Usage
+  kit release metadata push [options]
+
+Examples
+  kit release metadata push ios
+  kit release metadata push android --screenshots
+  kit release metadata push ios --dry-run
+  kit release metadata push android --yes
+
+Options
+  -h, --help         Show help
+  -V, --version      Show kit version
+      --json         Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run      Plan and run read-only steps; skip mutations
+  -y, --yes          Accept confirmations (never skips prod)
+  -v, --verbose      Stream all child output
+  -q, --quiet        Errors and summary only
+      --bail         Stop at the first failure
+      --screenshots  Also replace the screenshots (Play: and the feature graphic and icon)
 
 "
 `;

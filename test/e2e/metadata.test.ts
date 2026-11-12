@@ -193,7 +193,9 @@ describe('kit release metadata push', () => {
     const r = await run(['release', 'metadata', 'push', 'android', '--screenshots', '--dry-run'], none)
     expect(r.code).toBe(0)
     expect(r.stdout).toBe(`${[...ANDROID_TEXT, ...ANDROID_IMAGES].join('\n')}\n`)
-    expect(r.stderr).toContain('would push 2 text files and 2 images to the Google Play listing of app.example')
+    expect(r.stderr).toContain(
+      'would push 2 text files and 2 images to the Google Play listing of app.example',
+    )
     expect(readFileSync(laneLog, 'utf8')).toBe('')
 
     const j = await run(['release', 'metadata', 'push', 'ios', '-n', '--json'], none)
@@ -342,6 +344,22 @@ describe('kit release metadata pull', () => {
     const r = await run(['release', 'metadata', 'pull', 'android'], { PLAY_SERVICE_ACCOUNT_BASE64: '' })
     expect(r.code).toBe(3)
     expect(r.stderr).toContain('Missing release secrets: PLAY_SERVICE_ACCOUNT_BASE64')
+    expect(lanes()).toEqual([])
+  })
+})
+
+describe('kit release metadata', () => {
+  test('the group lists pull and push, with or without --help', async () => {
+    for (const args of [
+      ['release', 'metadata'],
+      ['release', 'metadata', '--help'],
+    ]) {
+      const r = await run(args)
+      expect(r.code).toBe(0)
+      expect(r.stdout).toContain('kit release metadata <command> [options]')
+      expect(r.stdout).toMatch(/pull\s+Download the store listing/)
+      expect(r.stdout).toMatch(/push\s+Upload the store listing text/)
+    }
     expect(lanes()).toEqual([])
   })
 })
