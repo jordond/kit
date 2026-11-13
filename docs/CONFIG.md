@@ -419,6 +419,67 @@ shots: {
 Every font family a slide names must be in `fonts` (CSS generics aside), or export stops with exit 3.
 Output goes to `release.ios.metadata/../screenshots` and `release.android.metadata`.
 
+### The project file
+
+`shots.project` is a version 1 or a version 2 JSON file. Version 1 is the editor's file, one full slide
+per screenshot, and keeps loading and exporting as before. Version 2 holds the rules once:
+
+```jsonc
+{
+  "version": 2,
+  "style": {
+    "headline": { "fontFamily": "Baloo 2", "fontSize": 150, "color": "#2c1e14" },
+    "device": { "position": "full-bleed", "scale": 0.85, "yOffset": 6 },
+    "background": { "primaryColor": "#faf2e4", "secondaryColor": "#f1e1c7", "pattern": "warm-glow" },
+    "brand": { "show": true, "position": "top-center" }
+  },
+  "targets": { "ipad": { "device": { "scale": 0.7 } } },
+  "slides": [
+    { "shot": "01-you.png", "headline": "Find your favorite cup of coffee" },
+    { "shot": "02-map.png", "headline": "Every cafe you loved", "subheadline": "On one map",
+      "style": { "device": { "yOffset": 2 } } }
+  ],
+  "locales": { "fr": { "you": { "headline": "Trouvez votre café préféré" } } }
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `style` | Rules for every slide. Sections `headline`, `subheadline`, `badge`, `device`, `background`, `brand`, all optional, per field |
+| `targets.<ios\|ipad\|android>` | The same shape as `style`, for one target |
+| `slides[].shot` | File name of the raw shot (`01-you.png`) |
+| `slides[].headline`, `subheadline`, `badge` | The slide's text. `badge` is the badge text; `style.badge.enabled` shows it |
+| `slides[].id`, `name` | Optional. See the derived fields |
+| `slides[].style`, `slides[].targets` | Rules for this slide, and for this slide on one target |
+| `locales` | Text per locale and slide id, as in version 1 |
+
+Every object is strict in version 2: a key kit does not know fails with its path (exit 3).
+
+**Merge order.** A field resolves through kit's built-in style, `style`, `targets[target]`, the slide's
+`style`, the slide's `targets[target]`, then (text only) `locales`. Objects merge by field; nothing merges
+as an array.
+
+**Derived, never stored.**
+
+| Value | Comes from |
+| --- | --- |
+| order | Array position |
+| id | The shot name without its `NN-` prefix and extension (`01-you.png` is `you`), unless the slide sets `id`. Unique; the key into `locales` |
+| name (the file's slug) | `name`, else the id |
+| frame type and corner radius | The target (`iphone-pro` 56, `ipad-pro` 24, `android-pixel` 48), unless `device.frameType` is `clay-minimal`, `frameless` or `glass-card`. `device.cornerRadius` overrides the corner |
+| panorama index and count | The slide's position and the number of slides |
+
+**Removed from version 1:** `platform`, `dimensionId`, `imageSrc`, `order`, text `id`, `letterSpacing`,
+text `yOffset`, `background.blur`, `customNotes`, `savedAt` and `position: 'angled-3d'` (it always drew as
+`bottom-peek`). `brand.show` and `brand.position` replace `showMascot` and `mascotPosition`.
+
+**`kit shots migrate`** prints the version 2 file for the version 1 project. The value most slides share
+becomes `style`, a slide that differs keeps its own, and values equal to the built-in style are left out.
+Before anything is written, kit proves that every target and locale draws the same slides as before; a
+difference is named by slide and field (exit 4). `--write` replaces `shots.project`; with `--dry-run` it
+only proves. `--json` prints `{ dryRun, file, written, project }`. Keys of a version 1 file that kit does
+not know are dropped.
+
 ## `release`
 
 ```ts
