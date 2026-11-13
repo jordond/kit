@@ -31,7 +31,7 @@ export interface ShotsServer {
   stop(): Promise<void>
 }
 
-const CONTENT_TYPES: Record<string, string> = {
+export const CONTENT_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
@@ -64,15 +64,15 @@ addEventListener('error', (e) => {
 </html>
 `
 
-const NO_STORE = { 'cache-control': 'no-store' }
+export const NO_STORE = { 'cache-control': 'no-store' }
 
-const notFound = (): Response => new Response('Not found', { status: 404 })
+export const notFound = (): Response => new Response('Not found', { status: 404 })
 
-function body(data: string | Blob, type: string): Response {
+export function body(data: string | Blob, type: string): Response {
   return new Response(data, { headers: { 'content-type': type, ...NO_STORE } })
 }
 
-async function file(path: string, type: string): Promise<Response> {
+export async function file(path: string, type: string): Promise<Response> {
   const data = Bun.file(path)
   return (await data.exists()) ? body(data, type) : notFound()
 }
