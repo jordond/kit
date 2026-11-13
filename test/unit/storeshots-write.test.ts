@@ -21,6 +21,7 @@ import {
   type ExportPlan,
   MANIFEST_FILE,
   type PlanInput,
+  type ProjectV1,
   type ShotsManifest,
   type StoreDestination,
 } from '../../src/lib/storeshots/types'
@@ -29,7 +30,9 @@ import fixtureConfig from '../fixtures/shots-app/kit.config'
 
 const FIXTURE = join(import.meta.dir, '..', 'fixtures', 'shots-app')
 const config = configSchema.parse(fixtureConfig)
-const project = parseProject(JSON.parse(readFileSync(join(FIXTURE, 'brand', 'studio.json'), 'utf8')))
+const project = parseProject(
+  JSON.parse(readFileSync(join(FIXTURE, 'brand', 'studio.json'), 'utf8')),
+) as ProjectV1
 const RAW = new Set(['ios', 'ipad', 'android'].flatMap((t) => [`${t}/home.png`, `${t}/journal.png`]))
 
 /** A black PNG of this size: what sits in a store dir, as deliver and kit classify it. */

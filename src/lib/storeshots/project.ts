@@ -1,11 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { ExitCode, KitError } from '../errors'
-import type { LoadProject, Slide, SlideLocaleText, StudioProject } from './types'
+import { slideId } from './resolve'
+import type { LoadProject, Project } from './types'
 
 /**
- * The saved project of `kit shots export`: brewd's `studio.json` version 1, read as is, plus the
- * optional `locales` block. Every object is loose: a key the editor adds later is kept, not refused.
+ * The saved project of `kit shots export`. Version 1 is brewd's `studio.json` read as is, plus the
+ * optional `locales` block; every object is loose, a key the editor adds later is kept, not refused.
+ * Version 2 (`types-v2.ts`) is the rules once plus sparse slides; every object is strict, a key it
+ * does not know is an error with its path.
  */
 
 const target = z.enum(['ios', 'ipad', 'android'])
@@ -95,51 +98,168 @@ const localeTextSchema = z
   })
   .strict()
 
-/** The project file. `locales` is strict: a misspelt field there would silently export base text. */
-export const projectSchema = z
+const locales = z.record(z.string(), z.record(z.string(), localeTextSchema))
+
+/** Slide ids are unique, and every `locales` entry names a slide that exists. */
+function checkIds(
+  ids: string[],
+  locales: Record<string, Record<string, unknown>> | undefined,
+  ctx: z.RefinementCtx,
+  at: (index: number) => (string | number)[],
+): void {
+  const seen = new Set<string>()
+  ids.forEach((id, i) => {
+    if (seen.has(id)) ctx.addIssue({ code: 'custom', path: at(i), message: `Duplicate slide id "${id}"` })
+    seen.add(id)
+  })
+  for (const [locale, slides] of Object.entries(locales ?? {})) {
+    for (const id of Object.keys(slides)) {
+      if (!seen.has(id)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['locales', locale, id],
+          message: `No slide has the id "${id}"`,
+        })
+      }
+    }
+  }
+}
+
+/** A version 1 project. `locales` is strict: a misspelt field there would silently export base text. */
+const projectV1Schema = z
   .looseObject({
     version: z.literal(1),
     platform: target,
     dimensionId: z.string().optional(),
     slides: z.array(slide),
     savedAt: z.string().optional(),
-    locales: z.record(z.string(), z.record(z.string(), localeTextSchema)).optional(),
+    locales: locales.optional(),
   })
-  .superRefine((p, ctx) => {
-    const seen = new Set<string>()
-    p.slides.forEach((s, i) => {
-      if (seen.has(s.id)) {
-        ctx.addIssue({ code: 'custom', path: ['slides', i, 'id'], message: `Duplicate slide id "${s.id}"` })
-      }
-      seen.add(s.id)
-    })
-    for (const [locale, slides] of Object.entries(p.locales ?? {})) {
-      for (const id of Object.keys(slides)) {
-        if (!seen.has(id)) {
-          ctx.addIssue({
-            code: 'custom',
-            path: ['locales', locale, id],
-            message: `No slide has the id "${id}"`,
-          })
-        }
-      }
-    }
+  .superRefine((p, ctx) =>
+    checkIds(
+      p.slides.map((s) => s.id),
+      p.locales,
+      ctx,
+      (i) => ['slides', i, 'id'],
+    ),
+  )
+
+// Version 2. Every rule is optional; a value has the type of the version 1 field it replaces.
+
+const textRules = z
+  .strictObject({
+    fontFamily: z.string(),
+    fontSize: z.number(),
+    fontWeight: z.number(),
+    color: z.string(),
+    align: z.enum(['left', 'center', 'right']),
+    lineHeight: z.number(),
+    shadow: z.boolean(),
+    shadowColor: z.string(),
+    shadowBlur: z.number(),
   })
+  .partial()
+
+const badgeRules = z
+  .strictObject({
+    enabled: z.boolean(),
+    text: z.string(),
+    icon: badge.shape.icon,
+    backgroundColor: z.string(),
+    textColor: z.string(),
+    borderColor: z.string(),
+    fontSize: z.number(),
+  })
+  .partial()
+
+const deviceRules = z
+  .strictObject({
+    frameType: device.shape.frameType,
+    color: device.shape.color,
+    position: z.enum(['bottom-peek', 'center-float', 'top-peek', 'full-bleed']),
+    scale: z.number(),
+    yOffset: z.number(),
+    xOffset: z.number(),
+    rotation: z.number(),
+    perspectiveTilt: z.number(),
+    shadowElevation: device.shape.shadowElevation,
+    shadowColor: z.string(),
+    showReflection: z.boolean(),
+    cornerRadius: z.number(),
+  })
+  .partial()
+
+const backgroundRules = z
+  .strictObject({
+    type: background.shape.type,
+    primaryColor: z.string(),
+    secondaryColor: z.string(),
+    accentColor: z.string(),
+    angle: z.number(),
+    pattern: background.shape.pattern,
+  })
+  .partial()
+
+const brandRules = z
+  .strictObject({
+    show: z.boolean(),
+    position: slide.shape.mascotPosition,
+  })
+  .partial()
+
+const styleRules = z.strictObject({
+  headline: textRules.optional(),
+  subheadline: textRules.optional(),
+  badge: badgeRules.optional(),
+  device: deviceRules.optional(),
+  background: backgroundRules.optional(),
+  brand: brandRules.optional(),
+})
+
+const targetRules = z.strictObject({
+  ios: styleRules.optional(),
+  ipad: styleRules.optional(),
+  android: styleRules.optional(),
+})
+
+const slideV2 = z.strictObject({
+  shot: z.string().min(1),
+  id: z.string().min(1).optional(),
+  name: z.string().optional(),
+  headline: z.string(),
+  subheadline: z.string().optional(),
+  badge: z.string().optional(),
+  style: styleRules.optional(),
+  targets: targetRules.optional(),
+})
+
+/** A version 2 project: ids (own or derived) are unique, and `locales` names only slides that exist. */
+const projectV2Schema = z
+  .strictObject({
+    version: z.literal(2),
+    style: styleRules.optional(),
+    targets: targetRules.optional(),
+    slides: z.array(slideV2),
+    locales: locales.optional(),
+  })
+  .superRefine((p, ctx) => checkIds(p.slides.map(slideId), p.locales, ctx, (i) => ['slides', i, 'id']))
+
+/** The project file: a union on `version`. */
+export const projectSchema = z.discriminatedUnion('version', [projectV1Schema, projectV2Schema])
+
+const PROJECT_HINT =
+  'kit shots export reads a version 1 project (the JSON the screenshot editor saves) or a version 2 project (`kit shots migrate` writes one)'
 
 /** A parsed value as a project, or a KitError (exit 3) naming every bad field by its path. */
-export function parseProject(value: unknown, label = 'project'): StudioProject {
+export function parseProject(value: unknown, label = 'project'): Project {
   const result = projectSchema.safeParse(value)
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join('.') || '(root)'}: ${i.message}`)
       .join('\n')
-    throw new KitError(
-      `Invalid ${label}:\n${issues}`,
-      'kit shots export reads a version 1 project: the JSON the screenshot editor saves',
-      ExitCode.config,
-    )
+    throw new KitError(`Invalid ${label}:\n${issues}`, PROJECT_HINT, ExitCode.config)
   }
-  return result.data as StudioProject
+  return result.data as Project
 }
 
 /** Read and validate the saved project (`shots.project`). `file` is absolute. */
@@ -157,47 +277,11 @@ export const loadProject: LoadProject = async (file) => {
   } catch (e) {
     throw new KitError(
       `Invalid ${file}:\n  (root): not JSON (${e instanceof Error ? e.message : String(e)})`,
-      'kit shots export reads a version 1 project: the JSON the screenshot editor saves',
+      PROJECT_HINT,
       ExitCode.config,
     )
   }
   return parseProject(value, file)
 }
 
-/** The language of a locale code: `fr` of `fr-CA`, `fr_CA` and `fr`. */
-const language = (locale: string): string => locale.split(/[-_]/)[0]!.toLowerCase()
-
-/**
- * The text that replaces a slide's base text in `locale`. Each field is looked up on its own:
- * the exact code (`fr-CA`) first, then the entries of the same language (`fr`, `fr-FR`) in file
- * order; a field none of them sets is absent, which keeps the slide's base text.
- */
-export function localeText(project: StudioProject, locale: string, slideId: string): SlideLocaleText {
-  const locales = project.locales ?? {}
-  const lang = language(locale)
-  const chain = [
-    locales[locale]?.[slideId],
-    ...Object.entries(locales)
-      .filter(([code]) => code !== locale && language(code) === lang)
-      .map(([, slides]) => slides[slideId]),
-  ]
-  const out: SlideLocaleText = {}
-  for (const field of ['headline', 'subheadline', 'badge'] as const) {
-    const value = chain.find((entry) => entry?.[field] !== undefined)?.[field]
-    if (value !== undefined) out[field] = value
-  }
-  return out
-}
-
-/** The slide with its headline, subheadline and badge text in `locale`; the same slide when nothing changes. */
-export function localizeSlide(project: StudioProject, slide: Slide, locale: string): Slide {
-  const t = localeText(project, locale, slide.id)
-  if (t.headline === undefined && t.subheadline === undefined && t.badge === undefined) return slide
-  return {
-    ...slide,
-    headline: t.headline === undefined ? slide.headline : { ...slide.headline, text: t.headline },
-    subheadline:
-      t.subheadline === undefined ? slide.subheadline : { ...slide.subheadline, text: t.subheadline },
-    badge: t.badge === undefined ? slide.badge : { ...slide.badge, text: t.badge },
-  }
-}
+export { localeText, localizeSlide } from './resolve'

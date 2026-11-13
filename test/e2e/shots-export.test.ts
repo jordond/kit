@@ -13,7 +13,7 @@ import {
 import { dirname, join } from 'node:path'
 import { findChrome } from '../../src/lib/chrome'
 import { encodePng, imageInfo } from '../../src/lib/image/png'
-import type { ExportResult, StudioProject } from '../../src/lib/storeshots/types'
+import type { ExportResult, ProjectV1 } from '../../src/lib/storeshots/types'
 import { type FakeChrome, type FakeChromeMode, fakeChrome } from '../helpers/fake-chrome'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -70,9 +70,9 @@ function pngs(): string[] {
   return out.sort()
 }
 
-function editProject(change: (project: StudioProject) => void) {
+function editProject(change: (project: ProjectV1) => void) {
   const file = path('brand/studio.json')
-  const project = JSON.parse(readFileSync(file, 'utf8')) as StudioProject
+  const project = JSON.parse(readFileSync(file, 'utf8')) as ProjectV1
   change(project)
   writeFileSync(file, JSON.stringify(project, null, 2))
 }
