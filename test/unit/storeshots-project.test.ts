@@ -62,6 +62,19 @@ describe('loadProject', () => {
     expect(await loadProject(real)).toEqual(JSON.parse(readFileSync(real, 'utf8')))
   })
 
+  test('reads a version 2 project as it is saved', async () => {
+    const v2 = JSON.parse(readFileSync(join(FIXTURE, '..', 'studio.v2.json'), 'utf8'))
+    expect(await loadProject(join(FIXTURE, '..', 'studio.v2.json'))).toEqual(v2)
+  })
+
+  test('a version 2 project with an unknown key is refused with its path', async () => {
+    const v2 = JSON.parse(readFileSync(join(FIXTURE, '..', 'studio.v2.json'), 'utf8'))
+    v2.slides[0].style = { device: { scal: 1 } }
+    const e = await rejected(loadProject(save('v2-typo.json', v2)))
+    expect(e.exitCode).toBe(ExitCode.config)
+    expect(e.message).toContain('slides.0.style.device')
+  })
+
   test('a missing file is a config error', async () => {
     const e = await rejected(loadProject(join(tmp, 'nope.json')))
     expect(e.exitCode).toBe(ExitCode.config)
