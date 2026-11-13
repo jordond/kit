@@ -26,6 +26,13 @@ export default defineConfig({
     semi: false,
     trailingComma: 'all',
     sortPackageJson: false,
+    overrides: [
+      {
+        // The editor's classes are Tailwind's; sort them the way the Tailwind plugin does.
+        files: ['editor/**'],
+        options: { sortTailwindcss: { stylesheet: './editor/src/index.css', functions: ['clsx', 'cn'] } },
+      },
+    ],
   },
   lint: {
     ignorePatterns,
@@ -42,6 +49,15 @@ export default defineConfig({
       'typescript/no-base-to-string': 'off',
     },
     overrides: [
+      {
+        files: ['editor/**'],
+        plugins: ['react'],
+        env: { browser: true },
+        rules: {
+          // React 17+ transform: no `import React`.
+          'react/react-in-jsx-scope': 'off',
+        },
+      },
       {
         files: ['test/**'],
         rules: {
