@@ -3,7 +3,7 @@ import { type KitContext, requireProject } from '../../cli/command'
 import { CHROME_HINT, chromeBin } from '../chrome'
 import { ExitCode, KitError } from '../errors'
 import { emitJson } from '../log'
-import { type PageJob, planPages, type RenderedPage, renderPages } from './pages'
+import { checkSources, type PageJob, planPages, type RenderedPage, renderPages } from './pages'
 
 export interface PagesOptions {
   names: readonly string[]
@@ -46,6 +46,7 @@ export async function runPages(ctx: KitContext, opts: PagesOptions): Promise<voi
     )
   }
   const jobs = planPages(root, shots, opts.names, opts.out)
+  checkSources(root, jobs)
   const dryRun = ctx.flags.dryRun
   let pages = jobs.map((job) => rel(root, job))
   if (!dryRun) {

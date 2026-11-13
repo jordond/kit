@@ -418,7 +418,7 @@ shots: {
 | `sets.ipad` | `'ipad-13'` | `ipad-13` | Export size for iPad |
 | `sets.android` | `'phone'` | `phone` | Export size for Android |
 | `pages[].name` | `string` | | Names the page on the command line and in the default file name. Letters, digits, `.`, `_`, `-`; unique |
-| `pages[].file` | `string` | | The HTML file, relative to the repo root |
+| `pages[].file` | `string` | | The HTML file, relative to the repo root, not under a dot dir. The whole repo root is served while it renders |
 | `pages[].width` | `number` | | PNG width in pixels |
 | `pages[].height` | `number` | | PNG height in pixels |
 | `pages[].scale` | `number` | `2` | Device scale factor (1 to 4). The page is laid out at `width / scale` by `height / scale`, so both must be multiples of it |
@@ -448,11 +448,19 @@ shots: {
 
 Lay the page out at half the pixel size (1920x823 for the header at scale 2): Chrome shoots it at that
 viewport and device scale factor, so a page that scrolls or overflows still gives the declared size.
-kit serves the repo root on `127.0.0.1` under a random path token, so relative assets (`../logo.svg`) load; dot
-files and anything outside the root are not served. The `@font-face` rules for `shots.fonts` are added to
-every page, so a page can name those families without declaring them. Chrome runs with a 5 second virtual
-time budget before the shot, which lets web fonts and images load. A page that is not exactly the declared
-size, or that still has alpha after flattening, fails the command (exit 1) and writes nothing for that page.
+kit serves the whole repo root, not just the page's dir, on `127.0.0.1` under a random path token, so relative
+assets (`../brand/logo.svg`) load. A page can therefore read any file under the repo that is not under a dot
+path (a `.env` or `.git` is never served); symlinks are resolved and one that leaves the repo or reaches a dot
+path is refused. Only render pages you trust. The `file` itself must not sit under a dot dir (exit 3). The
+`@font-face` rules for `shots.fonts` are added to every page, so a page can name those families without
+declaring them. Chrome runs with a 5 second virtual time budget before the shot, which lets web fonts and
+images load.
+
+The command fails with exit 1, naming the page, when the PNG is not exactly the declared size, when alpha
+remains after flattening, or when the page asked for a file the server refused or could not find (a broken
+image or stylesheet link). A page's PNG is written only after it passes. A page's `out` must be inside the repo
+(`--out <dir>` may name any dir), two pages may not write the same file, and no page may write over an HTML
+source; each is exit 3, before Chrome starts.
 
 ### The project file
 

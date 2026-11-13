@@ -134,6 +134,10 @@ async function screenshot(
     console.error(`fake chrome: GET page answered ${res.status}`)
     return 1
   }
+  // Like Chrome, fetch what the page names (src and href); a refusal is the server's to record, not Chrome's to report.
+  for (const [, ref] of (await res.text()).matchAll(/\b(?:src|href)="([^"#]+)"/g)) {
+    await fetch(new URL(ref!, base)).then((r) => r.arrayBuffer())
+  }
   if (mode === 'missing') return 0
   const width = w * scale + (mode === 'wrong-size' ? 1 : 0)
   writeFileSync(file, png(width, h * scale, mode === 'rgba'))

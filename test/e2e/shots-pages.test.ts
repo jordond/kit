@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { findChrome } from '../../src/lib/chrome'
 import { imageInfo } from '../../src/lib/image/png'
+import type { ServedRequest } from '../../src/lib/storeshots/pages'
 import { type FakeChrome, type FakeChromeMode, fakeChrome } from '../helpers/fake-chrome'
 import { type Fixture, fixture } from '../helpers/fixture'
 
@@ -149,6 +150,33 @@ describe('kit shots pages', () => {
     expect(chrome.calls()).toEqual([])
   })
 
+  test('a page file under a dot dir is a config error, not a PNG of "Not found"', async () => {
+    setup()
+    mkdirSync(path('.art'))
+    copyFileSync(path('brand/pages/header.html'), path('.art/h.html'))
+    writeFileSync(
+      path('kit.config.ts'),
+      readFileSync(path('kit.config.ts'), 'utf8').replace('brand/pages/header.html', '.art/h.html'),
+    )
+    for (const extra of [[], ['--dry-run']]) {
+      const r = await run(['header', ...extra])
+      expect(r.code).toBe(3)
+      expect(r.stderr).toContain('dot path')
+    }
+    expect(chrome.calls()).toEqual([])
+  })
+
+  test('a page whose asset is refused or missing fails naming the page and the path', async () => {
+    setup()
+    writeFileSync(path('brand/pages/header.html'), '<!doctype html><img src="missing.png"><h1>x</h1>')
+    const r = await run(['header'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain(
+      'Page header requested /brand/pages/missing.png, which the server answered 404',
+    )
+    expect(existsSync(path('build'))).toBe(false)
+  })
+
   test('works with pages and no project; export then says shots.project is not set', async () => {
     setup()
     const config = readFileSync(path('kit.config.ts'), 'utf8').replace("project: 'brand/studio.json',", '')
@@ -195,5 +223,24 @@ describe.skipIf(process.env.KIT_CHROME_TEST !== '1')('kit shots pages with a rea
       alpha: false,
     })
     expect(info('build/art/search.png')).toMatchObject({ width: 1200, height: 800, alpha: false })
+  }, 120_000)
+
+  test('Chrome requests the page, its asset and the declared font, all answered 200', async () => {
+    const bin = findChrome()
+    if (bin === undefined) throw new Error('KIT_CHROME_TEST=1 needs Chrome: install it or set KIT_CHROME')
+    f = fixture('shots-app', [])
+    const { planPages, renderPages } = await import('../../src/lib/storeshots/pages')
+    const { shots } = (await import(path('kit.config.ts'))).default
+    const requests: ServedRequest[] = []
+    await renderPages(planPages(f.dir, shots, ['header'], undefined), {
+      chrome: bin,
+      root: f.dir,
+      shots,
+      requests,
+    })
+    expect(requests).toContainEqual({ path: 'brand/pages/header.html', status: 200 })
+    expect(requests).toContainEqual({ path: 'brand/mark.svg', status: 200 })
+    expect(requests).toContainEqual({ path: 'brand/fonts/fixture.ttf', status: 200 })
+    expect(requests.every((r) => r.status === 200)).toBe(true)
   }, 120_000)
 })

@@ -248,7 +248,10 @@ export const configSchema = z
                 /** woff2 or ttf, relative to the repo root. */
                 file: z.string(),
                 /** A CSS weight or range (`'400 800'`). */
-                weight: z.string().optional(),
+                weight: z
+                  .string()
+                  .regex(/^[\w .%-]+$/, 'Expected a CSS weight like 400 or "400 800"')
+                  .optional(),
               })
               .strict(),
           )
@@ -285,7 +288,11 @@ export const configSchema = z
                 name: z
                   .string()
                   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use letters, digits, ".", "_" and "-"'),
-                /** The HTML file, relative to the repo root. Its dir is served, so relative assets load. */
+                /**
+                 * The HTML file, relative to the repo root, not under a dot dir. The repo root is served to
+                 * Chrome while it renders, so relative assets (`../brand/logo.svg`) load, and the page can
+                 * read any non-dot file under the repo.
+                 */
                 file: z.string().min(1),
                 /** The PNG's size in pixels; the page is laid out at width/scale by height/scale. */
                 width: z.number().int().positive(),
@@ -293,7 +300,10 @@ export const configSchema = z
                 /** Device scale factor; default 2. Width and height must be multiples of it. */
                 scale: z.number().int().min(1).max(4).optional(),
                 /** Colour the PNG is flattened onto where the page is transparent; default `#ffffff`. */
-                background: hexColor.optional(),
+                background: z
+                  .string()
+                  .regex(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i, 'Expected #rgb or #rrggbb')
+                  .optional(),
                 /** The PNG, relative to the repo root; default `build/shots-pages/<name>-<w>x<h>.png`. */
                 out: z.string().min(1).optional(),
               })

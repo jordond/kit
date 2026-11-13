@@ -45,6 +45,7 @@ async function openBrowser(url: string): Promise<boolean> {
 export async function studioShots(ctx: KitContext, opts: { port?: number; open: boolean }): Promise<void> {
   const { root, config } = requireProject(ctx)
   const shots = requireShots(config)
+  const projectPath = requireProjectPath(shots)
   const rawDir = resolveRawDir(root, config, shots)
   const { fonts, brand, assets } = pageAssets(root, shots)
   const sets = resolveSets(config)
@@ -55,7 +56,7 @@ export async function studioShots(ctx: KitContext, opts: { port?: number; open: 
     }
   }
   const session: StudioSession = {
-    projectPath: repoPath(root, resolve(root, requireProjectPath(shots))),
+    projectPath: repoPath(root, resolve(root, projectPath)),
     rawPath: repoPath(root, rawDir),
     targets: ['ios', 'ipad', 'android'],
     sets: sizes,
@@ -72,7 +73,7 @@ export async function studioShots(ctx: KitContext, opts: { port?: number; open: 
   try {
     server = serveStudio({
       session,
-      projectFile: resolve(root, requireProjectPath(shots)),
+      projectFile: resolve(root, projectPath),
       rawDir,
       assets,
       editorDir: editorDir(),

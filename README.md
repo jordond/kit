@@ -379,7 +379,7 @@ size you declare and with the alpha channel flattened, which App Store Connect r
 `build/shots-pages/<name>-<width>x<height>.png` unless a page sets `out` or you pass `--out <dir>`. `--dry-run`
 lists the files without starting Chrome; `--json` prints them on stdout. A page sets `scale` (default 2, so
 a 3840x1646 page is laid out at 1920x823), and `background` for the colour under transparent areas. The repo
-root is served locally, so a page's relative assets load, and `shots.fonts` is available to every page. With
+root is served locally (the page can read any non-dot file under it), so a page's relative assets load, and `shots.fonts` is available to every page. With
 only `pages` set, `shots.project` may be left out. See [docs/CONFIG.md](docs/CONFIG.md#artwork-pages).
 
 ```sh
