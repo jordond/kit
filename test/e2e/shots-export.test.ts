@@ -159,9 +159,9 @@ describe('kit shots export', () => {
     const v1 = json((await run(['--json'])).stdout)
     const v1Sizes = pngs().map((file) => [file, readFileSync(path(file)).length])
     rmSync(path('fastlane/screenshots'), { recursive: true, force: true })
-    rmSync(path(GOOGLE + '/en-US/' + PHONE), { recursive: true, force: true })
-    rmSync(path(GOOGLE + '/fr-FR/' + PHONE), { recursive: true, force: true })
-    rmSync(path(GOOGLE + '/.kit-shots.json'), { force: true })
+    rmSync(path(`${GOOGLE}/en-US/${PHONE}`), { recursive: true, force: true })
+    rmSync(path(`${GOOGLE}/fr-FR/${PHONE}`), { recursive: true, force: true })
+    rmSync(path(`${GOOGLE}/.kit-shots.json`), { force: true })
 
     useVersion2()
     const r = await run(['--json'])
