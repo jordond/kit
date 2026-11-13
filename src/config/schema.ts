@@ -282,7 +282,9 @@ export const configSchema = z
             z
               .object({
                 /** Names the page on the command line and in the default file name. */
-                name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use letters, digits, ".", "_" and "-"'),
+                name: z
+                  .string()
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use letters, digits, ".", "_" and "-"'),
                 /** The HTML file, relative to the repo root. Its dir is served, so relative assets load. */
                 file: z.string().min(1),
                 /** The PNG's size in pixels; the page is laid out at width/scale by height/scale. */
@@ -445,7 +447,11 @@ export const configSchema = z
     const seen = new Set<string>()
     for (const [i, page] of (c.shots?.pages ?? []).entries()) {
       if (seen.has(page.name)) {
-        ctx.addIssue({ code: 'custom', path: ['shots', 'pages', i, 'name'], message: `Duplicate page "${page.name}"` })
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'pages', i, 'name'],
+          message: `Duplicate page "${page.name}"`,
+        })
       }
       seen.add(page.name)
       const scale = page.scale ?? 2

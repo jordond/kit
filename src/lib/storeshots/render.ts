@@ -50,7 +50,12 @@ export function openerTarget(html: string): string | undefined {
 }
 
 /** The Chrome command line for one render: a throwaway profile, any `extra` flags, then the URL to open last. */
-export function chromeArgv(chrome: string, profile: string, url: string, extra: readonly string[] = []): string[] {
+export function chromeArgv(
+  chrome: string,
+  profile: string,
+  url: string,
+  extra: readonly string[] = [],
+): string[] {
   return [
     chrome,
     '--headless=new',

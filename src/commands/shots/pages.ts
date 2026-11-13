@@ -5,7 +5,7 @@ export default defineCommand({
   group: 'Quality',
   examples: 'kit shots pages\nkit shots pages header search\nkit shots pages --out build/artwork --json',
   args: {
-    out: { type: 'string', description: 'Write the PNGs into <dir> instead of each page\'s own path' },
+    out: { type: 'string', description: "Write the PNGs into <dir> instead of each page's own path" },
   },
   async run(ctx) {
     const { ExitCode, KitError } = await import('../../lib/errors')

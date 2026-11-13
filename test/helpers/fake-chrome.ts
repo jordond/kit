@@ -120,7 +120,12 @@ function pageUrl(argv: string[]): string | undefined {
  * then write a PNG of `--window-size` times `--force-device-scale-factor`. `wrong-size`, `rgba` and
  * `missing` (writes no file) apply as for the export page; `exit` and `hang` are handled before.
  */
-async function screenshot(argv: string[], base: string, file: string, mode: string | undefined): Promise<number> {
+async function screenshot(
+  argv: string[],
+  base: string,
+  file: string,
+  mode: string | undefined,
+): Promise<number> {
   const flag = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
   const [w = 0, h = 0] = (flag('window-size') ?? '').split(',').map(Number)
   const scale = Number(flag('force-device-scale-factor') ?? 1)

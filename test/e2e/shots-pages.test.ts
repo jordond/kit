@@ -37,7 +37,11 @@ describe('kit shots pages', () => {
         { name: 'search', file: 'build/art/search.png', width: 1200, height: 800 },
       ],
     })
-    expect(info('build/shots-pages/header-1920x800.png')).toMatchObject({ width: 1920, height: 800, alpha: false })
+    expect(info('build/shots-pages/header-1920x800.png')).toMatchObject({
+      width: 1920,
+      height: 800,
+      alpha: false,
+    })
     expect(info('build/art/search.png')).toMatchObject({ width: 1200, height: 800, alpha: false })
 
     const calls = chrome.calls()
@@ -135,7 +139,10 @@ describe('kit shots pages', () => {
 
   test('a missing HTML file is a config error', async () => {
     setup()
-    writeFileSync(path('kit.config.ts'), readFileSync(path('kit.config.ts'), 'utf8').replace('header.html', 'gone.html'))
+    writeFileSync(
+      path('kit.config.ts'),
+      readFileSync(path('kit.config.ts'), 'utf8').replace('header.html', 'gone.html'),
+    )
     const r = await run(['header'])
     expect(r.code).toBe(3)
     expect(r.stderr).toContain('no HTML file')
@@ -154,7 +161,10 @@ describe('kit shots pages', () => {
 
   test('a config with a page whose size is not a multiple of its scale is refused', async () => {
     setup()
-    writeFileSync(path('kit.config.ts'), readFileSync(path('kit.config.ts'), 'utf8').replace('width: 1920', 'width: 1919'))
+    writeFileSync(
+      path('kit.config.ts'),
+      readFileSync(path('kit.config.ts'), 'utf8').replace('width: 1920', 'width: 1919'),
+    )
     const r = await run(['header'])
     expect(r.code).toBe(3)
     expect(r.stderr).toContain('not a multiple of the scale 2')

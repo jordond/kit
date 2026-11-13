@@ -205,6 +205,7 @@ Examples
 
 Commands
   export   Render the store screenshots from the raw shots and the saved project
+  pages    Render the HTML artwork pages in shots.pages to PNGs, without alpha
   migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
   studio   Edit the shots project in a browser: slides, styles, a live preview, export
 
@@ -1669,6 +1670,7 @@ Examples
 
 Commands
   export   Render the store screenshots from the raw shots and the saved project
+  pages    Render the HTML artwork pages in shots.pages to PNGs, without alpha
   migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
   studio   Edit the shots project in a browser: slides, styles, a live preview, export
 
@@ -1742,6 +1744,31 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --write    Replace shots.project with the version 2 file (default: print it)
+
+"
+`;
+
+exports[`help kit shots pages --help 1`] = `
+"Render the HTML artwork pages in shots.pages to PNGs, without alpha
+
+Usage
+  kit shots pages [options]
+
+Examples
+  kit shots pages
+  kit shots pages header search
+  kit shots pages --out build/artwork --json
+
+Options
+  -h, --help          Show help
+  -V, --version       Show kit version
+      --json          Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run       Plan and run read-only steps; skip mutations
+  -y, --yes           Accept confirmations (never skips prod)
+  -v, --verbose       Stream all child output
+  -q, --quiet         Errors and summary only
+      --bail          Stop at the first failure
+      --out <string>  Write the PNGs into <dir> instead of each page's own path
 
 "
 `;

@@ -292,7 +292,10 @@ export async function renderPages(
       clearTimeout(timer)
       if (interrupted()) throw new KitError('Interrupted', undefined, ExitCode.interrupted)
       if (outcome === 'timeout') {
-        throw new KitError(`Chrome did not finish page ${job.name} within ${duration(timeoutMs)}`, logTail(log))
+        throw new KitError(
+          `Chrome did not finish page ${job.name} within ${duration(timeoutMs)}`,
+          logTail(log),
+        )
       }
       if (!statSync(shot, { throwIfNoEntry: false })?.size) {
         throw new KitError(
@@ -303,7 +306,12 @@ export async function renderPages(
       const png = checkedPage(job, new Uint8Array(readFileSync(shot)))
       mkdirSync(dirname(job.target), { recursive: true })
       writeFileSync(job.target, png)
-      done.push({ name: job.name, file: repoRel(opts.root, job.target), width: job.width, height: job.height })
+      done.push({
+        name: job.name,
+        file: repoRel(opts.root, job.target),
+        width: job.width,
+        height: job.height,
+      })
     }
   } finally {
     off()

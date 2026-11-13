@@ -70,7 +70,7 @@ export default defineConfig({
 | [`devices`](#devices) | no | How kit boots devices |
 | [`maestro`](#maestro) | no | Maestro flows and suites: `kit qa`, `kit shots`, `kit maestro` |
 | [`fixtures`](#fixtures) | no | App state to load onto a device: `kit fixture` |
-| [`shots`](#shots) | no | Store screenshot export: `kit shots export` |
+| [`shots`](#shots) | no | Store screenshot export and artwork pages: `kit shots export`, `kit shots pages` |
 | [`release`](#release) | no | Store releases, services, store listing: `kit release` |
 
 ## `name`
@@ -405,8 +405,8 @@ shots: {
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `project` | `string` | required | The saved project JSON (slides, text, frames) |
-| `raw` | `string` | the `shots` suite's screenshots dir | Dir holding the raw shots, `<raw>/<target>/…`. Required when there is no `maestro` block |
+| `project` | `string` | required unless `pages` is set | The saved project JSON (slides, text, frames). `kit shots export`, `studio` and `migrate` exit 3 without it |
+| `raw` | `string` | the `shots` suite's screenshots dir | Dir holding the raw shots, `<raw>/<target>/…`. Required when `project` is set and there is no `maestro` block |
 | `fonts[].family` | `string` | | Family name the slides use |
 | `fonts[].file` | `string` | | woff2 or ttf |
 | `fonts[].weight` | `string` | | A CSS weight or range (`'400 800'`) |
@@ -417,11 +417,42 @@ shots: {
 | `sets.ios` | `'iphone-6.9' \| 'iphone-6.5' \| 'iphone-6.3'` | `iphone-6.9` | Export size for iPhone |
 | `sets.ipad` | `'ipad-13'` | `ipad-13` | Export size for iPad |
 | `sets.android` | `'phone'` | `phone` | Export size for Android |
+| `pages[].name` | `string` | | Names the page on the command line and in the default file name. Letters, digits, `.`, `_`, `-`; unique |
+| `pages[].file` | `string` | | The HTML file, relative to the repo root |
+| `pages[].width` | `number` | | PNG width in pixels |
+| `pages[].height` | `number` | | PNG height in pixels |
+| `pages[].scale` | `number` | `2` | Device scale factor (1 to 4). The page is laid out at `width / scale` by `height / scale`, so both must be multiples of it |
+| `pages[].background` | `string` | `#ffffff` | Hex colour the PNG is flattened onto where the page is transparent |
+| `pages[].out` | `string` | `build/shots-pages/<name>-<width>x<height>.png` | The PNG, relative to the repo root |
 | `presets` | `Record<string, StyleRules>` | none | Style presets the editor offers after its own. The rules are checked with the same strict schema as the project's `style`, so a misspelt key is an error with its path |
 | `palette` | `string[] \| Record<string, string>` | none | Hex colours (`#rgb`, `#rrggbb`, `#rrggbbaa`) shown as swatches beside every colour control in the editor; a map gives each swatch a name |
 
 Every font family a slide names must be in `fonts` (CSS generics aside), or export stops with exit 3.
 Output goes to `release.ios.metadata/../screenshots` and `release.android.metadata`.
+
+### Artwork pages
+
+`shots.pages` lists HTML pages that are store artwork but not a framed screenshot, such as the App Store
+product page header (3840x1646) and search results artwork (3840x2560). `kit shots pages` renders each with
+headless Chrome and writes a PNG of exactly `width` by `height` with no alpha channel, which App Store
+Connect requires. Upload the files by hand (Header and Search Results tab, or the Asset Library).
+
+```ts
+shots: {
+  pages: [
+    { name: 'header', file: 'brand/creative/header.html', width: 3840, height: 1646, background: '#f5e9d2' },
+    { name: 'search', file: 'brand/creative/search.html', width: 3840, height: 2560, out: 'build/store/search-results.png' },
+  ],
+},
+```
+
+Lay the page out at half the pixel size (1920x823 for the header at scale 2): Chrome shoots it at that
+viewport and device scale factor, so a page that scrolls or overflows still gives the declared size.
+kit serves the repo root on `127.0.0.1` under a random path token, so relative assets (`../logo.svg`) load; dot
+files and anything outside the root are not served. The `@font-face` rules for `shots.fonts` are added to
+every page, so a page can name those families without declaring them. Chrome runs with a 5 second virtual
+time budget before the shot, which lets web fonts and images load. A page that is not exactly the declared
+size, or that still has alpha after flattening, fails the command (exit 1) and writes nothing for that page.
 
 ### The project file
 
@@ -644,7 +675,7 @@ Per-machine settings that sit beside the config. Set them in the shell or the re
 | `KIT_ROOT` | The repo root, instead of walking up from the working directory |
 | `KIT_EMULATOR_ARGS` | Extra emulator arguments for this machine, after `devices.android.emulatorArgs`. Split on whitespace; quotes keep an argument together |
 | `KIT_DEVICE_TIMEOUT_MS` | How long an emulator boot may take. Default four minutes |
-| `KIT_CHROME` | The Chrome binary `kit shots export` uses |
+| `KIT_CHROME` | The Chrome binary `kit shots export` and `kit shots pages` use |
 | `KIT_OUTPUT_DIR` | Where `kit release ios` writes `release.ios.output`. Default the repo root |
 
 ## Examples
