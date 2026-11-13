@@ -20,9 +20,8 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { installDir } = await import('../config/load')
     const { ExitCode, KitError } = await import('../lib/errors')
-    const { bumpPin, isVersion, KIT_PACKAGE, latestVersion, repinWorkflow, tagSha } = await import(
-      '../lib/kitref'
-    )
+    const { bumpPin, isVersion, KIT_PACKAGE, latestVersion, repinWorkflow, tagSha } =
+      await import('../lib/kitref')
     const { emitJson } = await import('../lib/log')
     const { detectPackageManager } = await import('../lib/pm')
     const { run, runQuiet } = await import('../lib/proc')

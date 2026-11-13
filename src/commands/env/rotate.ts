@@ -19,12 +19,10 @@ export default defineCommand({
     const { requireProject } = await import('../../cli/command')
     const { loadEnv, assertValid } = await import('../../lib/env/load')
     const { outputs, writeAtomic, writeOutputs } = await import('../../lib/env/render')
-    const { destinationsFor, generateValue, pushSelections, rewriteKey } = await import(
-      '../../lib/env/rotate'
-    )
-    const { executePreflight, mergePreflights, preflightPush, pushCommand } = await import(
-      '../../lib/env/push-run'
-    )
+    const { destinationsFor, generateValue, pushSelections, rewriteKey } =
+      await import('../../lib/env/rotate')
+    const { executePreflight, mergePreflights, preflightPush, pushCommand } =
+      await import('../../lib/env/push-run')
     const { redact } = await import('../../lib/secrets')
     const { suggest } = await import('../../lib/targets')
     const { confirm } = await import('../../lib/prompt')

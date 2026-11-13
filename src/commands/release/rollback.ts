@@ -23,9 +23,8 @@ export default defineCommand({
     const { emitJson } = await import('../../lib/log')
     const { runLines, runPiped } = await import('../../lib/proc')
     const { confirm } = await import('../../lib/prompt')
-    const { gradualRollout, listArgs, pickRollback, rollbackArgs, serviceDeployTarget } = await import(
-      '../../lib/worker'
-    )
+    const { gradualRollout, listArgs, pickRollback, rollbackArgs, serviceDeployTarget } =
+      await import('../../lib/worker')
     const { root, config } = requireProject(ctx)
     const services = config.release?.services ?? {}
     const [name, ...more] = ctx.positionals

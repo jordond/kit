@@ -133,7 +133,7 @@ export const CLOSERS: Record<string, string> = { '{': '}', '[': ']', '(': ')' }
 /** Index of the bracket closing the one at `open`; -1 when the text does not balance. */
 export function matchClose(text: string, open: number): number {
   const stack: string[] = []
-  for (let i = open; i < text.length; ) {
+  for (let i = open; i < text.length;) {
     const j = skip(text, i)
     if (j < 0) return -1
     if (j !== i) {
@@ -269,7 +269,7 @@ function appendProperty(
 
 /** The object literal `export default` evaluates to: bare, or the argument of `defineConfig(`. */
 function configObject(text: string): ObjectShape | undefined {
-  for (let i = 0; i < text.length; ) {
+  for (let i = 0; i < text.length;) {
     const j = skip(text, i)
     if (j < 0) return undefined
     if (j !== i) {

@@ -32,7 +32,9 @@ export default defineCommand({
     const found = await Promise.all(entries.map((e) => e.run()))
     const wantFix = ctx.args.fix === true
     const fixes = wantFix
-      ? await (await import('../lib/doctor/repair')).repair({
+      ? await (
+          await import('../lib/doctor/repair')
+        ).repair({
           root,
           entries,
           found,

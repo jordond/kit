@@ -248,9 +248,8 @@ export default defineCommand({
     'kit init --template gradle --name MyApp',
   ].join('\n'),
   async run(ctx) {
-    const { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } = await import(
-      'node:fs'
-    )
+    const { appendFileSync, chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } =
+      await import('node:fs')
     const { homedir, tmpdir } = await import('node:os')
     const { basename, normalize, relative } = await import('node:path')
     const pc = (await import('picocolors')).default

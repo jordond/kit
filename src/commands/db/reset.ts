@@ -12,9 +12,8 @@ export default defineCommand({
   async run(ctx) {
     const { relative } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
-    const { d1Args, pinCloudflareAccount, resolveD1, seedFile, wrangler } = await import(
-      '../../lib/cloudflare'
-    )
+    const { d1Args, pinCloudflareAccount, resolveD1, seedFile, wrangler } =
+      await import('../../lib/cloudflare')
     const { locateLocalD1, removeLocalD1, requireLocalD1 } = await import('../../lib/d1-local')
     const { ExitCode, KitError } = await import('../../lib/errors')
     const { emitJson } = await import('../../lib/log')

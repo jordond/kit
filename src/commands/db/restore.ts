@@ -13,9 +13,8 @@ export default defineCommand({
     const { accessSync, constants, existsSync } = await import('node:fs')
     const { relative, resolve } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
-    const { d1Args, d1Tables, pinCloudflareAccount, resolveD1, runD1, TABLES_SQL, wrangler } = await import(
-      '../../lib/cloudflare'
-    )
+    const { d1Args, d1Tables, pinCloudflareAccount, resolveD1, runD1, TABLES_SQL, wrangler } =
+      await import('../../lib/cloudflare')
     const { locateLocalD1, removeLocalD1, requireLocalD1 } = await import('../../lib/d1-local')
     const { ExitCode, KitError } = await import('../../lib/errors')
     const { emitJson } = await import('../../lib/log')

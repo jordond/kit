@@ -205,13 +205,11 @@ const WRITERS: Writer[] = [
   { name: 'dotenvLine env', format: 'env', write: (k, v) => `${dotenvLine(k, v, 'env')}\n` },
   { name: 'setKey append', format: 'env', write: (k, v) => setKey('A=1\n', k, v) },
   { name: 'setKey replace', format: 'env', write: (k, v) => setKey(`# c\n${k}="old"\nZ=9\n`, k, v) },
-  ...rewriteStarts.map(
-    (start, i): Writer => ({
-      name: `rewriteKey ${JSON.stringify(start('K'))} #${i}`,
-      format: 'env',
-      write: (k, v) => rewriteKey(start(k), k, v),
-    }),
-  ),
+  ...rewriteStarts.map((start, i): Writer => ({
+    name: `rewriteKey ${JSON.stringify(start('K'))} #${i}`,
+    format: 'env',
+    write: (k, v) => rewriteKey(start(k), k, v),
+  })),
   { name: 'dotenvLine vars', format: 'vars', write: (k, v) => `${dotenvLine(k, v, 'vars')}\n` },
   {
     name: 'render pick',

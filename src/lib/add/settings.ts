@@ -42,7 +42,7 @@ function includeStatements(settings: string): IncludeStatement[] | undefined {
     return i
   }
   let depth = 0
-  for (let i = 0; i < settings.length; ) {
+  for (let i = 0; i < settings.length;) {
     const j = skip(settings, i)
     if (j < 0) return undefined
     if (j !== i) {
@@ -67,7 +67,7 @@ function includeStatements(settings: string): IncludeStatement[] | undefined {
     if (settings[args] === '(') {
       const close = matchClose(settings, args)
       if (close < 0) return undefined
-      for (let k = args + 1; k < close; ) {
+      for (let k = args + 1; k < close;) {
         const after = skip(settings, k)
         if (after < 0) return undefined
         if (after !== k && quoted(k)) paths.push(projectPath(settings.slice(k + 1, after - 1)))

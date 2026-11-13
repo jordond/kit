@@ -233,16 +233,14 @@ export async function listAllDevices(
     return (await listSimulators())
       .filter((sim) => sim.isAvailable && isIpadName(sim.name) === (target === 'ipad'))
       .filter((sim) => isIosRuntime(sim.runtime))
-      .map(
-        (sim): DeviceInfo => ({
-          id: sim.udid,
-          name: sim.name,
-          platform: 'ios',
-          kind: 'simulator',
-          state: sim.state === 'Booted' ? 'booted' : 'shutdown',
-          os: runtimeVersion(sim.runtime),
-        }),
-      )
+      .map((sim): DeviceInfo => ({
+        id: sim.udid,
+        name: sim.name,
+        platform: 'ios',
+        kind: 'simulator',
+        state: sim.state === 'Booted' ? 'booted' : 'shutdown',
+        os: runtimeVersion(sim.runtime),
+      }))
       .sort((a, b) => Number(b.state === 'booted') - Number(a.state === 'booted'))
   }
   const running: DeviceInfo[] = []
@@ -265,15 +263,13 @@ export async function listAllDevices(
     ...running,
     ...avds
       .filter((avd) => !up.has(avd))
-      .map(
-        (avd): DeviceInfo => ({
-          id: avd,
-          name: avd,
-          platform: 'android',
-          kind: 'emulator',
-          state: 'shutdown',
-        }),
-      ),
+      .map((avd): DeviceInfo => ({
+        id: avd,
+        name: avd,
+        platform: 'android',
+        kind: 'emulator',
+        state: 'shutdown',
+      })),
   ]
 }
 

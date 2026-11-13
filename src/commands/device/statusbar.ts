@@ -12,9 +12,8 @@ export default defineCommand({
   async run(ctx) {
     const { requireProject } = await import('../../cli/command')
     const { adb, listDevices, parseTarget, resolveDevice } = await import('../../lib/devices')
-    const { androidStatusBarCommands, iosStatusBarCommands, runStatusBarCommands } = await import(
-      '../../lib/devices/statusbar'
-    )
+    const { androidStatusBarCommands, iosStatusBarCommands, runStatusBarCommands } =
+      await import('../../lib/devices/statusbar')
     const { ExitCode, KitError } = await import('../../lib/errors')
     const { emitJson } = await import('../../lib/log')
     const { root, config } = requireProject(ctx)
