@@ -508,9 +508,8 @@ writes the file only when you confirm.
 
 **Presets and palette.** The Presets group of the panel lists kit's three built-in presets (`light`,
 `dark`, `bold-colour`) and then those of `shots.presets`; a preset named like a built-in one replaces it.
-Applying one is a single undoable edit that **merges** into the project's `style` (the All slides layer):
-the fields the preset names replace the same fields there and the rest stay, so a colour preset keeps your
-fonts. It never touches `targets` or a slide's own overrides, which still win over it. A preset is a set of
+Applying one is a single undoable edit that **replaces** the project's `style` (the All slides layer):
+fields the preset does not name go back to the default, so a colour preset also clears fonts set there. It never touches `targets` or a slide's own overrides, which still win over it. A preset is a set of
 style rules, the same shape as `style`:
 
 ```ts

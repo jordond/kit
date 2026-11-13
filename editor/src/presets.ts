@@ -1,5 +1,4 @@
 import { BUILT_IN_PRESETS } from '../../src/lib/storeshots/presets'
-import { mergeRules } from '../../src/lib/storeshots/resolve'
 import type { ProjectV2, StyleRules } from '../../src/lib/storeshots/types'
 
 /** One preset the panel lists. */
@@ -20,12 +19,12 @@ export function presetList(repo: Record<string, StyleRules>): PresetItem[] {
 }
 
 /**
- * Applies a preset to the project's `style` (the All slides layer): the preset's fields replace
- * the same fields there, and fields it does not mention stay, so a colour preset keeps the fonts.
- * Overrides on a target or a slide still win over it. An empty result drops `style`.
+ * Applies a preset to the project's `style` (the All slides layer): the preset's rules replace
+ * the layer, so fields it does not mention go back to the default. Overrides on a target or a
+ * slide still win over it. An empty preset drops `style`.
  */
 export function applyPreset(project: ProjectV2, rules: StyleRules): ProjectV2 {
-  const style = mergeRules(project.style, rules)
+  const style = structuredClone(rules)
   if (JSON.stringify(style) === JSON.stringify(project.style ?? {})) return project
   const next = { ...project }
   if (Object.keys(style).length > 0) next.style = style

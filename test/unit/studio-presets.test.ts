@@ -33,15 +33,14 @@ describe('presets', () => {
     })
   })
 
-  test('applying merges into the project style: preset fields win, the rest stay', () => {
+  test('applying replaces the project style: fields the preset does not set are dropped', () => {
     const before = project({ headline: { fontFamily: 'Serif', color: '#000000' }, device: { scale: 0.9 } })
     const after = applyPreset(before, {
       headline: { color: '#ffffff' },
       background: { primaryColor: '#111111' },
     })
     expect(after.style).toEqual({
-      headline: { fontFamily: 'Serif', color: '#ffffff' },
-      device: { scale: 0.9 },
+      headline: { color: '#ffffff' },
       background: { primaryColor: '#111111' },
     })
     // The argument is not changed, and slide overrides are untouched.
@@ -58,5 +57,6 @@ describe('presets', () => {
     expect(applyPreset(p, { headline: { color: '#fff' } })).toBe(p)
     expect(applyPreset(project(), {})).toEqual(project())
     expect('style' in applyPreset(project(), {})).toBe(false)
+    expect('style' in applyPreset(project({ headline: { color: '#fff' } }), {})).toBe(false)
   })
 })

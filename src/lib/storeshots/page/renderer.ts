@@ -3,6 +3,7 @@
 import { fontStack } from '../fonts'
 import type { PageBrand, Slide } from '../types'
 import { drawBackground } from './background'
+import { deviceLinear } from './device-transform'
 import { drawDeviceFrame, roundedRectPath } from './device-frames'
 
 /** What a slide is drawn from besides its own settings. */
@@ -391,11 +392,9 @@ export async function renderSlideToCanvas(
     const centerX = devX + devW / 2
     const centerY = devY + devH / 2
     ctx.translate(centerX, centerY)
-    ctx.rotate((slide.device.rotation * Math.PI) / 180)
-    if (slide.device.perspectiveTilt !== 0) {
-      // Subtle 3D tilt skew
-      ctx.transform(1, 0, (slide.device.perspectiveTilt / 100) * 0.3, 1, 0, 0)
-    }
+    // Rotation then a subtle 3D tilt skew; `deviceLinear` is also what the editor hit-tests with.
+    const m = deviceLinear(slide.device.rotation, slide.device.perspectiveTilt)
+    ctx.transform(m.a, m.b, m.c, m.d, 0, 0)
     ctx.translate(-centerX, -centerY)
   }
 

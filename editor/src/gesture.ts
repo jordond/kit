@@ -1,3 +1,4 @@
+import { deviceLinear, toDeviceFrame } from '../../src/lib/storeshots/page/device-transform'
 import type { SlideLayout } from '../../src/lib/storeshots/page/renderer'
 
 /**
@@ -53,21 +54,17 @@ export function toCanvas(point: Point, box: Box, layout: Pick<SlideLayout, 'widt
 }
 
 /**
- * Whether a point (CSS pixels over the canvas) is on the device the renderer drew. A rotated
- * device is tested in its own frame; the perspective tilt, a small skew, is ignored.
+ * Whether a point (CSS pixels over the canvas) is on the device the renderer drew: the point is
+ * taken back through the rotation and tilt the renderer drew with (`deviceLinear`) into the
+ * device's own frame, where the device is its plain rect.
  */
-export function hitsDevice(point: Point, box: Box, layout: SlideLayout, rotation = 0): boolean {
+export function hitsDevice(point: Point, box: Box, layout: SlideLayout, rotation = 0, tilt = 0): boolean {
   if (box.width <= 0 || box.height <= 0) return false
   const p = toCanvas(point, box, layout)
   const { x, y, width, height } = layout.device
-  const cx = x + width / 2
-  const cy = y + height / 2
-  const a = (-rotation * Math.PI) / 180
-  const dx = p.x - cx
-  const dy = p.y - cy
-  const rx = dx * Math.cos(a) - dy * Math.sin(a)
-  const ry = dx * Math.sin(a) + dy * Math.cos(a)
-  return Math.abs(rx) <= width / 2 && Math.abs(ry) <= height / 2
+  const local = toDeviceFrame(p.x - (x + width / 2), p.y - (y + height / 2), deviceLinear(rotation, tilt))
+  if (!local) return false
+  return Math.abs(local.x) <= width / 2 && Math.abs(local.y) <= height / 2
 }
 
 /** The offsets after dragging `delta` CSS pixels from where the gesture began. */

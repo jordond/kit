@@ -226,7 +226,7 @@ describe('undo and redo', () => {
 })
 
 describe('presets', () => {
-  test('a preset merges into the project style in one undoable edit', async () => {
+  test('a preset replaces the project style in one undoable edit', async () => {
     const t = setup({
       ...project(),
       style: { headline: { fontFamily: 'Serif', color: '#000000' }, device: { scale: 0.9 } },
@@ -234,8 +234,7 @@ describe('presets', () => {
     await t.s().loadAll()
     t.s().applyPresetRules({ headline: { color: '#ffffff' }, background: { primaryColor: '#111111' } })
     expect((t.s().project as ProjectV2).style).toEqual({
-      headline: { fontFamily: 'Serif', color: '#ffffff' },
-      device: { scale: 0.9 },
+      headline: { color: '#ffffff' },
       background: { primaryColor: '#111111' },
     })
     expect(t.s().past).toHaveLength(1)
