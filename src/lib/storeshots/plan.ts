@@ -58,7 +58,7 @@ function outputFile(
 }
 
 /** `shots.fonts` and `shots.brand` as the page loads them, with the files they point at. */
-function pageAssets(
+export function pageAssets(
   root: string,
   shots: NonNullable<Parameters<PlanExport>[0]['config']['shots']>,
 ): Pick<ExportPlan, 'fonts' | 'brand' | 'assets'> {
