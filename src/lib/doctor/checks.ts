@@ -45,16 +45,32 @@ export function checkBun(version: string): Check {
  * layouts of its own release, so its launcher can miss this repo's copy and run itself.
  * `onPath` is undefined when there is no `kit` on PATH or it is this very copy.
  */
-export function checkPathKit(onPath: string | undefined, running: string, older: boolean): Check | undefined {
+export function checkPathKit(
+  onPath: string | undefined,
+  running: string,
+  older: boolean,
+  latest?: string,
+): Check | undefined {
   if (onPath === undefined) return undefined
-  if (!older) return { id: 'kit', label: 'kit on PATH', status: 'ok', detail: onPath }
-  return {
-    id: 'kit',
-    label: 'kit on PATH',
-    status: 'warn',
-    detail: `${onPath}, older than this repo's ${running}`,
-    hint: `Its launcher may run itself instead of the repo's kit: bun add -g @jordond/kit@${running}`,
+  if (older) {
+    return {
+      id: 'kit',
+      label: 'kit on PATH',
+      status: 'warn',
+      detail: `${onPath}, older than this repo's ${running}`,
+      hint: `Its launcher may run itself instead of the repo's kit: bun add -g @jordond/kit@${running}`,
+    }
   }
+  if (latest !== undefined) {
+    return {
+      id: 'kit',
+      label: 'kit on PATH',
+      status: 'warn',
+      detail: `${onPath}, latest is ${latest}`,
+      hint: 'kit upgrade --global',
+    }
+  }
+  return { id: 'kit', label: 'kit on PATH', status: 'ok', detail: onPath }
 }
 
 /** `java -version` → '21.0.2' (and '1.8.0_292' → '8'). */

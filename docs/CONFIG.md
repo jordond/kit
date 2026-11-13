@@ -696,6 +696,8 @@ Per-machine settings that sit beside the config. Set them in the shell or the re
 | `KIT_DEVICE_TIMEOUT_MS` | How long an emulator boot may take. Default four minutes                                                                               |
 | `KIT_CHROME`            | The Chrome binary `kit shots export` and `kit shots pages` use                                                                         |
 | `KIT_OUTPUT_DIR`        | Where `kit release ios` writes `release.ios.output`. Default the repo root                                                             |
+| `KIT_NO_UPDATE_CHECK`   | Any value turns off the notice that the global kit is behind, and its daily npm lookup                                                 |
+| `KIT_CACHE_DIR`         | Where kit keeps what it remembers between runs (`update.json`). Default `$XDG_CACHE_HOME/kit`, else `~/.cache/kit`                     |
 
 ## Examples
 

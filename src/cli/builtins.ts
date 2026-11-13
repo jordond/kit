@@ -394,7 +394,7 @@ export const builtins: BuiltinEntry[] = [
   },
   {
     path: ['upgrade'],
-    description: 'Move the @jordond/kit pin and the workflow SHAs to a kit release',
+    description: 'Move the repo to a kit release (npm pin, workflow SHAs); --global updates the kit on PATH',
     group: 'Setup',
     load: () => import('../commands/upgrade'),
   },

@@ -168,11 +168,39 @@ async function ensureRepoCopy(root: string, argv: string[]): Promise<number | un
   throw new KitError(message, hint, ExitCode.precondition)
 }
 
+/** Set when the repo's own kit ran the command: that copy speaks for the run, this one stays quiet. */
+let handedOff = false
+
+/** Commands the update notice stays out of: they print scripts, or are the update itself. */
+const NO_NOTICE = ['upgrade', 'completion', 'complete']
+
+/** Tell the user when the kit on PATH is behind. Never fails or delays a command. */
+async function updateNotice(argv: string[]): Promise<void> {
+  const dashdash = argv.indexOf('--')
+  const own = dashdash < 0 ? argv : argv.slice(0, dashdash)
+  if (handedOff || own.includes('--json') || NO_NOTICE.includes(commandTokens(argv)[0] ?? '')) return
+  try {
+    const { notifyUpdate } = await import('../lib/self-update')
+    notifyUpdate(pkg.version, (msg, hint) => {
+      log.warn(msg)
+      log.dim(`  › ${hint}`)
+    })
+  } catch {}
+}
+
 async function main(argv: string[]): Promise<number> {
+  // The background child `notifyUpdate` starts: ask npm for the latest version, record it, exit.
+  if (argv[0] === '__refresh-update-state') {
+    await (await import('../lib/self-update')).refreshUpdateState()
+    return 0
+  }
   const root = findRoot()
   if (root) {
-    const handedOff = await ensureRepoCopy(root, argv)
-    if (handedOff !== undefined) return handedOff
+    const code = await ensureRepoCopy(root, argv)
+    if (code !== undefined) {
+      handedOff = true
+      return code
+    }
   }
   let config: KitConfig | undefined
   if (root) {
@@ -307,6 +335,7 @@ async function main(argv: string[]): Promise<number> {
 installSignalHandlers()
 try {
   process.exitCode = await main(process.argv.slice(2))
+  await updateNotice(process.argv.slice(2))
 } catch (e) {
   // --json promises exactly one document on stdout, failures included.
   const argv = process.argv.slice(2)

@@ -4,11 +4,13 @@ import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
 import { findChrome } from '../chrome'
 import { compareVersions, kitCopyAt, pathKit } from '../kit-copy'
+import { latestVersion } from '../kitref'
 import { androidSdkDir, findSdkTool, hostAbi, installedSystemImages, SDK_TOOLS } from '../devices'
 import { preferredSystemImage, systemImagePackage } from '../devices/pick'
 import { findMaestro } from '../maestro/bin'
 import { detectPackageManager, installRoot, pmExec } from '../pm'
 import { runQuiet } from '../proc'
+import { globalInstaller, newerThan, readUpdateState, updateCheckOff } from '../self-update'
 import { onGitHubActions, releaseSecrets, renameHints } from '../release/creds'
 import { androidVersionDrift, iosVersionDrift } from '../release/version'
 import { parseToml, readToml } from '../toml'
@@ -213,11 +215,19 @@ export function doctorEntries(
     { id: 'bun', run: () => checkBun(Bun.version) },
     {
       id: 'kit',
-      run: () => {
+      run: async () => {
         const own = kitCopyAt(import.meta.dir)
         const onPath = pathKit()
-        if (!own || !onPath || realpathSync(onPath.dir) === realpathSync(own.dir)) return undefined
-        return checkPathKit(onPath.version, own.version, compareVersions(onPath.version, own.version) < 0)
+        if (!own || !onPath) return undefined
+        const same = realpathSync(onPath.dir) === realpathSync(own.dir)
+        // A release newer than the global kit: asked of npm now, else what the last lookup found.
+        const latest =
+          updateCheckOff() || !globalInstaller(onPath.dir)
+            ? undefined
+            : newerThan(onPath.version, (await latestVersion(3_000)) ?? readUpdateState().latest)
+        if (same && !latest) return undefined
+        const older = !same && compareVersions(onPath.version, own.version) < 0
+        return checkPathKit(onPath.version, own.version, older, latest)
       },
     },
     { id: 'java', run: async () => checkJava(await java(), gradle) },

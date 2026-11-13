@@ -63,10 +63,10 @@ export const isVersion = (v: string): boolean =>
   /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/.test(v)
 
 /** Latest published version, from the npm registry (`KIT_REGISTRY` overrides the URL for tests). */
-export async function latestVersion(): Promise<string | undefined> {
+export async function latestVersion(timeoutMs = 15_000): Promise<string | undefined> {
   const registry = (process.env.KIT_REGISTRY || 'https://registry.npmjs.org').replace(/\/+$/, '')
   try {
-    const res = await fetch(`${registry}/${KIT_PACKAGE}/latest`, { signal: AbortSignal.timeout(15_000) })
+    const res = await fetch(`${registry}/${KIT_PACKAGE}/latest`, { signal: AbortSignal.timeout(timeoutMs) })
     if (!res.ok) return undefined
     const version = ((await res.json()) as { version?: unknown }).version
     return typeof version === 'string' && isVersion(version) ? version : undefined

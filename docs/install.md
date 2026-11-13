@@ -18,9 +18,35 @@ the wrong copy:
 - A kit whose version the repo's pin excludes, in a repo whose copy is not installed, stops with exit 4
   and names the install to run. `kit doctor`, `kit upgrade`, `kit init`, `--help` and `-V` still run,
   with a warning.
-- `kit doctor` warns when the `kit` on `PATH` is older than the repo's (`bun add -g @jordond/kit@<version>`).
+- `kit doctor` warns when the `kit` on `PATH` is older than the repo's, or than the latest release on npm.
 
 Kits before this guard cannot check themselves: update a global kit older than 0.8 by hand.
+
+### Updating the global kit
+
+```sh
+kit upgrade --global         # the latest release on npm
+kit upgrade --global 0.9.0
+kit upgrade --global --dry-run
+```
+
+Runs the install with the package manager that owns the `kit` on `PATH` (`bun add -g`, `npm install -g`,
+`pnpm add -g` or `yarn global add`, read from where the copy lives). Outside a repo, plain `kit upgrade`
+does the same. In a repo, `kit upgrade` only moves the repo's pin, then says so when the global kit is
+older than the release it moved to. A `kit` on `PATH` that no package manager installed (a linked
+checkout) is left alone.
+
+kit tells you when the global kit is behind: one line after a command, at most once a day per release.
+
+```
+▲ kit 0.9.0 is out; the kit on PATH is 0.8.1
+  › kit upgrade --global
+```
+
+It compares the `kit` on `PATH` with the latest release on npm and with the kit that is running (a
+repo's copy can be newer). npm is asked once a day, from a background process, so no command waits on
+the network; the answer is kept in `~/.cache/kit/update.json` (`XDG_CACHE_HOME` and `KIT_CACHE_DIR` move
+it). There is no notice in CI, without a terminal, with `--json`, or when `KIT_NO_UPDATE_CHECK` is set.
 
 ## Install dir: the root or `.kit/`
 

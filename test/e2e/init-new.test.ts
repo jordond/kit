@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -7,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -427,5 +429,93 @@ describe('kit upgrade', () => {
     const r = await run(['upgrade', NEXT])
     expect(r.code).toBe(3)
     expect(r.stderr).toContain('not a version range')
+  })
+})
+
+describe('kit upgrade --global', () => {
+  // A kit that `bun add -g` installed, first on PATH; the fake bun "installs" by rewriting its version.
+  let global = ''
+  const version = () =>
+    (JSON.parse(readFileSync(join(global, 'package.json'), 'utf8')) as { version: string }).version
+  beforeEach(() => {
+    global = join(home, '.bun/install/global/node_modules/@jordond/kit')
+    mkdirSync(join(global, 'bin'), { recursive: true })
+    writeFileSync(join(global, 'package.json'), '{"name":"@jordond/kit","version":"0.1.0"}')
+    writeFileSync(join(global, 'bin/kit'), '#!/bin/sh\n')
+    chmodSync(join(global, 'bin/kit'), 0o755)
+    symlinkSync(join(global, 'bin/kit'), join(f.dir, '.fakebin/kit'))
+    f.script(
+      'bun',
+      `echo "$(basename "$PWD") $*" >> "$KIT_BUN_LOG"
+[ "$1" = add ] || exit 0
+v=\${3##*@}
+printf '{"name":"@jordond/kit","version":"%s"}' "$v" > "${global}/package.json"`,
+    )
+    writeFileSync(join(f.dir, '.bun.log'), '')
+  })
+  const installed = (v: string) => [`${home.split('/').pop()} add -g @jordond/kit@${v}`]
+
+  test('outside a repo: installs the version over the kit on PATH, from home', async () => {
+    const r = await run(['upgrade', NEXT])
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain(`kit on PATH: 0.1.0 → ${NEXT}`)
+    expect(r.stderr).toContain(`kit ${NEXT}`)
+    expect(lines('.bun.log')).toEqual(installed(NEXT))
+    expect(version()).toBe(NEXT)
+    const again = await run(['upgrade', NEXT])
+    expect(again.stderr).toContain(`already on kit ${NEXT}`)
+    expect(lines('.bun.log')).toEqual(installed(NEXT))
+  })
+
+  test('no version: the latest on npm; a global kit ahead of it stays', async () => {
+    const server = Bun.serve({ port: 0, fetch: () => Response.json({ version: '0.5.0' }) })
+    const env = { KIT_REGISTRY: `http://localhost:${server.port}` }
+    try {
+      const r = await run(['upgrade', '--global', '--json'], { env })
+      expect(JSON.parse(r.stdout)).toEqual({
+        ok: true,
+        global: true,
+        from: '0.1.0',
+        to: '0.5.0',
+        command: 'bun add -g @jordond/kit@0.5.0',
+      })
+      writeFileSync(join(global, 'package.json'), '{"name":"@jordond/kit","version":"0.6.0-rc.1"}')
+      const ahead = await run(['upgrade', '--global'], { env })
+      expect(ahead.stderr).toContain('already on kit 0.6.0-rc.1')
+      expect(lines('.bun.log')).toEqual(installed('0.5.0'))
+    } finally {
+      await server.stop(true)
+    }
+  })
+
+  test('in a repo: --global leaves the repo alone, and a repo upgrade points at it', async () => {
+    expect((await run(['init', '--yes', '--js-only'])).code).toBe(0)
+    writeFileSync(join(f.dir, '.bun.log'), '')
+    const before = read('.kit/package.json')
+    const dry = await run(['upgrade', NEXT, '--global', '--dry-run'])
+    expect(dry.code).toBe(0)
+    expect(dry.stderr).toContain(`bun add -g @jordond/kit@${NEXT}`)
+    expect(lines('.bun.log')).toEqual([])
+    expect(read('.kit/package.json')).toBe(before)
+    const repo = await run(['upgrade', NEXT, '--dry-run'])
+    expect(repo.stderr).toContain('The kit on PATH is still 0.1.0')
+    expect(repo.stderr).toContain('kit upgrade --global')
+  })
+
+  test('a failed install, and a kit no package manager installed', async () => {
+    f.script('bun', 'exit 1')
+    const r = await run(['upgrade', NEXT])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain(`bun add -g @jordond/kit@${NEXT} failed (exit 1)`)
+    const checkout = join(home, 'dev/kit')
+    mkdirSync(join(checkout, 'bin'), { recursive: true })
+    writeFileSync(join(checkout, 'package.json'), '{"name":"@jordond/kit","version":"0.1.0"}')
+    writeFileSync(join(checkout, 'bin/kit'), '#!/bin/sh\n')
+    chmodSync(join(checkout, 'bin/kit'), 0o755)
+    rmSync(join(f.dir, '.fakebin/kit'))
+    symlinkSync(join(checkout, 'bin/kit'), join(f.dir, '.fakebin/kit'))
+    const linked = await run(['upgrade', NEXT])
+    expect(linked.code).toBe(4)
+    expect(linked.stderr).toContain('was not installed by a package manager')
   })
 })

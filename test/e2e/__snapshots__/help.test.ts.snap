@@ -46,7 +46,7 @@ Setup
   init        Set up a fresh clone, or add kit to a new repo
   add         Scaffold a module, a target or the Maestro flows into this repo …
   deps        List or update npm dependencies (catalog-aware)
-  upgrade     Move the @jordond/kit pin and the workflow SHAs to a kit release
+  upgrade     Move the repo to a kit release (npm pin, workflow SHAs); --global updates the kit on PATH
   config      Print the resolved kit.config.ts
   completion  Print a shell completion script
 
@@ -1879,7 +1879,7 @@ Options
 `;
 
 exports[`help kit upgrade --help 1`] = `
-"Move the @jordond/kit pin and the workflow SHAs to a kit release
+"Move the repo to a kit release (npm pin, workflow SHAs); --global updates the kit on PATH
 
 Usage
   kit upgrade [options]
@@ -1888,6 +1888,7 @@ Examples
   kit upgrade           # the latest release on npm
   kit upgrade 0.6.0
   kit upgrade --dry-run
+  kit upgrade --global  # the kit on PATH; the default outside a repo
 
 Options
   -h, --help     Show help
@@ -1898,6 +1899,7 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
+  -g, --global   Update the kit on PATH (the global install) instead of this repo
 
 "
 `;
