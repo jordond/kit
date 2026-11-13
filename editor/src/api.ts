@@ -84,9 +84,9 @@ export const putProject = (save: StudioSave): Promise<StudioSaved> =>
 
 export const getShots = (): Promise<StudioShots> => json('api/shots')
 
-/** URL of a raw shot's PNG. */
-export const shotUrl = (target: DeviceTarget, shot: Pick<StudioShot, 'path'>): string =>
-  apiUrl(`api/shot/${encodeURIComponent(target)}/${encodePath(shot.path)}`)
+/** URL of a raw shot's PNG; `rev` changes after an upload so a replaced file is fetched again. */
+export const shotUrl = (target: DeviceTarget, shot: Pick<StudioShot, 'path'>, rev = 0): string =>
+  apiUrl(`api/shot/${encodeURIComponent(target)}/${encodePath(shot.path)}${rev > 0 ? `?rev=${rev}` : ''}`)
 
 /** Uploads a PNG into the target's raw dir; throws `ApiError` 409 when it exists and `replace` is not set. */
 export const uploadShot = (

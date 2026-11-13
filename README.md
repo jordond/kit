@@ -390,6 +390,17 @@ the shot name (`01-you.png` is `you`), and `locales` is keyed by them. Version 1
 has proved that every target and locale draws the same slides (`--dry-run` only proves). The merge order,
 derived fields and the file's shape are in [docs/CONFIG.md](docs/CONFIG.md#the-project-file).
 
+**`kit shots studio`** edits the version 2 project in a browser, previewing with the same renderer the
+export uses. It serves on `127.0.0.1` under a random path token and prints the URL (`--port` fixes the
+port, `--no-open` leaves the browser alone). A version 1 project opens read-only with the migrate command
+to run. Every edit is written at a scope: all slides, one target, one slide, or one slide on one target;
+each control shows where its value comes from and can reset it, and a value equal to what the layers below
+give removes the override, so the file stays small. Changes autosave (Cmd/Ctrl+S saves now, Cmd/Ctrl+Z
+undoes); if the file changed on disk the editor asks whether to reload or overwrite. Slides are added from
+the raw shots (a PNG can be uploaded into the raw dir), reordered by dragging and deleted, undoably. With
+no project file it offers one slide per raw shot and writes nothing until you confirm. See
+[docs/CONFIG.md](docs/CONFIG.md#shots).
+
 **Fonts and brand.** Every font family a slide names has to be in `shots.fonts` (the CSS generics
 `sans-serif`, `serif`, `monospace` and `system-ui` aside): Chrome would draw an unknown family in a
 fallback font without complaint, so export stops first (exit 3). `brand` is the lockup drawn on slides

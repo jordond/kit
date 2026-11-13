@@ -9,7 +9,8 @@ import { type Fixture, fixture } from '../helpers/fixture'
 /**
  * The built editor in a real Chrome, served by a real `kit shots studio` over a copy of
  * `test/fixtures/shots-app` (its version 2 project): `KIT_CHROME_TEST=1 bun test test/e2e/shots-editor.test.ts` after
- * `bun run build`. The three target canvases must draw something. Set `KIT_EDITOR_SHOT=<file.png>`
+ * `bun run build`. The three target canvases must draw something, and an edit made through the
+ * panel must reach the project file on disk, minimal. Set `KIT_EDITOR_SHOT=<file.png>`
  * to keep a screenshot of the page.
  */
 
@@ -58,6 +59,17 @@ const probe = `(() => [...document.querySelectorAll('[data-target] canvas')].map
   return { target: c.closest('[data-target]').dataset.target, width: c.width, height: c.height, colours: colours.size }
 }))()`
 
+/** Sets a number input the way a user typing would, so React sees the change. */
+const setNumber = (field: string, value: number): string => `(() => {
+  const input = document.querySelector('[data-field="${field}"] input[type=number]')
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '${value}')
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+})()`
+
+const click = (selector: string): string => `document.querySelector(${JSON.stringify(selector)}).click()`
+
+const status = `document.querySelector('[role=status]')?.textContent ?? ''`
+
 describe.skipIf(!enabled)('the built shots editor in a real Chrome', () => {
   let f: Fixture
   let studio: Bun.Subprocess<'ignore', 'pipe', 'pipe'>
@@ -91,7 +103,7 @@ describe.skipIf(!enabled)('the built shots editor in a real Chrome', () => {
         '--hide-scrollbars',
         '--no-first-run',
         '--no-default-browser-check',
-        '--window-size=1500,900',
+        '--window-size=1500,1500',
         '--remote-debugging-port=0',
         `--user-data-dir=${profile}`,
         'about:blank',
@@ -135,6 +147,58 @@ describe.skipIf(!enabled)('the built shots editor in a real Chrome', () => {
 
       // Preview resolution: well under the export size.
       expect(canvases[0]!.width).toBeLessThan(SET_SIZES[DEFAULT_SETS.ios].width)
+    } finally {
+      const out = process.env.KIT_EDITOR_SHOT
+      if (out) {
+        const shot = await page.send('Page.captureScreenshot', { format: 'png' })
+        writeFileSync(out, Buffer.from(shot.result.data, 'base64'))
+      }
+      page.close()
+    }
+  }, 60_000)
+
+  test('an edit through the panel is saved to the file, and the file stays minimal', async () => {
+    const file = join(f.dir, 'brand/studio.v2.json')
+    const original = JSON.parse(readFileSync(file, 'utf8'))
+    const page = await connect(await debugPort(), studioUrl)
+    const waitFor = async (expression: string): Promise<void> => {
+      for (let i = 0; i < 100; i++) {
+        if (await page.evaluate<boolean>(expression)) return
+        await Bun.sleep(100)
+      }
+      throw new Error(`Timed out waiting for: ${expression}`)
+    }
+    const saved = () => JSON.parse(readFileSync(file, 'utf8'))
+    try {
+      await waitFor(`!!document.querySelector('[data-field="device.scale"]')`)
+
+      // All slides: the project style gets the value; no slide is touched.
+      await page.evaluate(setNumber('device.scale', 0.5))
+      await waitFor(`(${status}) === 'Saved'`)
+      const edited = saved()
+      expect(edited.style.device).toEqual({ ...original.style.device, scale: 0.5 })
+      expect(edited.slides).toEqual(original.slides)
+
+      // Back to the built-in value: the override goes, the file is as it was.
+      await page.evaluate(setNumber('device.scale', 0.76))
+      await waitFor(
+        `(${status}) === 'Saved' && !document.querySelector('[data-field="device.scale"] [title^="Set for all"]')`,
+      )
+      expect(saved()).toEqual(original)
+
+      // This slide: the override is on the slide; its reset removes it and the empty object.
+      await page.evaluate(
+        `[...document.querySelectorAll('[role=radio]')].find((b) => b.textContent === 'This slide').click()`,
+      )
+      await page.evaluate(setNumber('background.angle', 90))
+      await waitFor(`(${status}) === 'Saved'`)
+      expect(saved().slides[0].style).toEqual({ background: { angle: 90 } })
+      expect(saved().style).toEqual(original.style)
+      await page.evaluate(click('[aria-label="Reset Angle"]'))
+      await waitFor(
+        `(${status}) === 'Saved' && !document.querySelector('[aria-label="Reset Angle"]:not([disabled])')`,
+      )
+      expect(saved()).toEqual(original)
     } finally {
       const out = process.env.KIT_EDITOR_SHOT
       if (out) {

@@ -1,8 +1,11 @@
 import { useEffect } from 'react'
+import { ConflictBanner, SaveErrorBanner } from './components/Banners'
 import { Filmstrip } from './components/Filmstrip'
 import { Header } from './components/Header'
 import { Stage } from './components/Stage'
 import { Loading, LoadError, MigrateNotice, NoProject } from './components/States'
+import { Panel } from './panel/Panel'
+import { useShortcuts } from './shortcuts'
 import { useEditor } from './store'
 
 export function App() {
@@ -11,6 +14,7 @@ export function App() {
   const project = useEditor((s) => s.project)
   const loadAll = useEditor((s) => s.loadAll)
 
+  useShortcuts()
   useEffect(() => {
     void loadAll()
   }, [loadAll])
@@ -24,9 +28,12 @@ export function App() {
       {load.status === 'ready' && session && project && (
         <>
           {project.version !== 2 && <MigrateNotice />}
+          <ConflictBanner />
+          <SaveErrorBanner />
           <div className="flex min-h-0 flex-1">
             <Filmstrip />
             <Stage />
+            {project.version === 2 && <Panel />}
           </div>
         </>
       )}

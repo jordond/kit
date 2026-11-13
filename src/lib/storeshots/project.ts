@@ -2,7 +2,18 @@ import { existsSync, readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { ExitCode, KitError } from '../errors'
 import { slideId } from './resolve'
-import type { LoadProject, Project } from './types'
+import {
+  BACKGROUND_PATTERNS,
+  BACKGROUND_TYPES,
+  BADGE_ICONS,
+  DEVICE_POSITIONS,
+  FRAME_COLORS,
+  FRAME_TYPES,
+  type LoadProject,
+  MASCOT_POSITIONS,
+  type Project,
+  SHADOW_ELEVATIONS,
+} from './types'
 
 /**
  * The saved project of `kit shots export`. Version 1 is brewd's `studio.json` read as is, plus the
@@ -32,7 +43,7 @@ const text = z.looseObject({
 const badge = z.looseObject({
   enabled: z.boolean(),
   text: z.string(),
-  icon: z.enum(['cup', 'star', 'sparkles', 'map', 'heart', 'check', 'none']),
+  icon: z.enum(BADGE_ICONS),
   backgroundColor: z.string(),
   textColor: z.string(),
   borderColor: z.string(),
@@ -40,35 +51,28 @@ const badge = z.looseObject({
 })
 
 const device = z.looseObject({
-  frameType: z.enum(['iphone-pro', 'ipad-pro', 'android-pixel', 'clay-minimal', 'frameless', 'glass-card']),
-  color: z.enum([
-    'titanium-natural',
-    'titanium-black',
-    'titanium-desert',
-    'titanium-silver',
-    'espresso',
-    'cream',
-  ]),
-  position: z.enum(['bottom-peek', 'center-float', 'top-peek', 'angled-3d', 'full-bleed']),
+  frameType: z.enum(FRAME_TYPES),
+  color: z.enum(FRAME_COLORS),
+  position: z.enum(DEVICE_POSITIONS),
   scale: z.number(),
   yOffset: z.number(),
   xOffset: z.number(),
   rotation: z.number(),
   perspectiveTilt: z.number(),
-  shadowElevation: z.enum(['none', 'subtle', 'medium', 'deep', 'dramatic']),
+  shadowElevation: z.enum(SHADOW_ELEVATIONS),
   shadowColor: z.string(),
   showReflection: z.boolean(),
   cornerRadius: z.number(),
 })
 
 const background = z.looseObject({
-  type: z.enum(['solid', 'linear-gradient', 'radial-gradient', 'mesh-glow', 'panorama']),
+  type: z.enum(BACKGROUND_TYPES),
   primaryColor: z.string(),
   secondaryColor: z.string(),
   accentColor: z.string(),
   angle: z.number(),
   blur: z.number(),
-  pattern: z.enum(['none', 'coffee-beans', 'warm-glow', 'subtle-grid', 'rings']),
+  pattern: z.enum(BACKGROUND_PATTERNS),
   panoramaTotalSlides: z.number().optional(),
   panoramaSlideIndex: z.number().optional(),
 })
@@ -86,7 +90,7 @@ const slide = z.looseObject({
   device,
   background,
   showMascot: z.boolean(),
-  mascotPosition: z.enum(['top-center', 'top-left', 'top-right', 'bottom-left', 'bottom-right']),
+  mascotPosition: z.enum(MASCOT_POSITIONS),
   customNotes: z.string().optional(),
 })
 

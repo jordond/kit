@@ -9,7 +9,7 @@ const LABEL: Record<DeviceTarget, string> = { ios: 'iPhone', ipad: 'iPad', andro
 
 /** One target's column: the active slide drawn for it, or what is missing to draw it. */
 function TargetPreview({ target }: { target: DeviceTarget }) {
-  const { project, session, shots, locale, activeSlide } = useEditor()
+  const { project, session, shots, shotsRev, locale, activeSlide, target: focus, setTarget } = useEditor()
   const slides = useMemo(() => (project ? slidesFor(project, target, locale) : []), [project, target, locale])
   if (!session || !shots) return null
 
@@ -20,7 +20,17 @@ function TargetPreview({ target }: { target: DeviceTarget }) {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2" aria-label={LABEL[target]}>
       <header className="flex items-baseline justify-between px-1 text-[11px] text-zinc-400">
-        <span className="font-medium text-zinc-200">{LABEL[target]}</span>
+        <button
+          type="button"
+          aria-pressed={focus === target}
+          title="Put this target in focus: This target and This slide on this target edit it"
+          onClick={() => setTarget(target)}
+          className={`rounded px-1.5 py-0.5 font-medium outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
+            focus === target ? 'bg-sky-500/20 text-sky-100' : 'text-zinc-200 hover:bg-zinc-800'
+          }`}
+        >
+          {LABEL[target]}
+        </button>
         <span className="tabular-nums">
           {set.id} · {set.width}×{set.height}
         </span>
@@ -28,7 +38,7 @@ function TargetPreview({ target }: { target: DeviceTarget }) {
       <div className="min-h-0 flex-1" data-target={target}>
         <SlideCanvas
           size={set}
-          draw={slide && shot ? { slide, shot: shotUrl(target, shot), brand: session.brand } : null}
+          draw={slide && shot ? { slide, shot: shotUrl(target, shot, shotsRev), brand: session.brand } : null}
           empty={
             slide && (
               <div className="flex flex-col gap-1 text-[11px] text-zinc-400">
