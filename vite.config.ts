@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite-plus'
 
-// Only src, test and the root JSON files are linted and formatted; the rest is generated output,
-// Gradle and fastlane sources, or `kit init` template files that are not ours to reformat.
+// Everything is linted and formatted except generated output, Gradle and fastlane sources,
+// `kit init` template files that are not ours to reformat, and local notes.
 const ignorePatterns = [
   'dist/**',
   'gradle/**',
@@ -9,13 +9,13 @@ const ignorePatterns = [
   'templates/**',
   'renovate/**',
   '.claude/**',
-  // Biome never formatted these; oxfmt would, and fixtures must stay byte-for-byte what tests expect.
-  '**/*.md',
-  '**/*.yaml',
-  '**/*.yml',
-  '**/*.toml',
-  // oxfmt adds trailing commas to .jsonc; wrangler and kit read these files as they are written.
-  '**/*.jsonc',
+  'scratchpad/**',
+  // Fixtures are inputs the tests compare byte for byte.
+  'test/fixtures/**/*.md',
+  'test/fixtures/**/*.yaml',
+  'test/fixtures/**/*.yml',
+  'test/fixtures/**/*.toml',
+  'test/fixtures/**/*.jsonc',
 ]
 
 export default defineConfig({
@@ -38,7 +38,7 @@ export default defineConfig({
     ignorePatterns,
     options: { typeAware: true, typeCheck: true },
     rules: {
-      // Biome had this off too: kit narrows with `!` after its own checks, and tests lean on it.
+      // kit narrows with `!` after its own checks, and tests lean on it.
       'typescript/no-non-null-assertion': 'off',
       // `...[a, b]` is how long argv and language lists are wrapped under the 110-column width.
       'unicorn/no-useless-spread': 'off',
