@@ -231,4 +231,46 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(`${r.stdout}${r.stderr}`).toBe('')
     expect(r.code).toBe(0)
   })
+
+  // A global kit older than a repo's pin: its launcher may not know the repo's layout and run itself.
+  describe('a kit that is not the repo copy', () => {
+    const cli = () => join(app, 'node_modules/@jordond/kit/dist/cli.js')
+    const other = (name: string, range: string): string => {
+      const root = join(tmp, name)
+      mkdirSync(join(root, '.kit'), { recursive: true })
+      writeFileSync(join(root, '.kit/kit.config.ts'), "export default { name: 'other' }\n")
+      writeFileSync(
+        join(root, '.kit/package.json'),
+        JSON.stringify({ devDependencies: { '@jordond/kit': range } }),
+      )
+      return root
+    }
+
+    test('refuses to run when the repo pins another version that is not installed', async () => {
+      const root = other('pinned', '^99.0.0')
+      const r = await sh(['bun', cli(), 'build', '--dry-run'], root)
+      expect(r.code).toBe(4)
+      expect(r.stderr).toContain('"^99.0.0"')
+      expect(r.stderr).toContain('.kit')
+      const version = await sh(['bun', cli(), '-V'], root)
+      expect(version.code).toBe(0)
+      expect(version.stdout).toContain(pkg.version)
+      expect(version.stderr).toContain('not installed')
+    })
+
+    test('hands off to the copy the repo has installed', async () => {
+      const root = other('installed', '^99.0.0')
+      const copy = join(root, '.kit/node_modules/@jordond/kit')
+      mkdirSync(join(copy, 'dist'), { recursive: true })
+      writeFileSync(join(copy, 'package.json'), JSON.stringify({ name: '@jordond/kit', version: '99.0.0' }))
+      writeFileSync(
+        join(copy, 'dist/cli.js'),
+        'console.log(`repo copy: ${process.argv.slice(2).join(" ")} root=${process.env.KIT_ROOT}`); process.exit(7)\n',
+      )
+      const r = await sh(['bun', cli(), 'build', '--dry-run'], root)
+      expect(r.stdout).toContain('repo copy: build --dry-run')
+      expect(r.stdout).toContain(`root=`)
+      expect(r.code).toBe(7)
+    })
+  })
 })

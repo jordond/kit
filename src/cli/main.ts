@@ -1,5 +1,6 @@
 import type { Args, Command } from 'gunshi'
 import { cli } from 'gunshi/bone'
+import { dirname } from 'node:path'
 import pc from 'picocolors'
 import pkg from '../../package.json' with { type: 'json' }
 import { findRoot, loadConfig, loadDotEnv } from '../config/load'
@@ -125,8 +126,54 @@ function suggest(token: string, candidates: string[]): string | undefined {
   return best && best[1] <= 2 ? best[0] : undefined
 }
 
+/** Commands that must work with any kit: they inspect or repair the install, or never touch the repo. */
+const ANY_COPY = ['doctor', 'upgrade', 'init', 'completion', 'complete']
+
+/**
+ * The launcher hands off to the repo's own kit, but only for the layouts its release knows: an
+ * older global kit can end up running itself in a repo pinned to a newer one. Before anything of
+ * the repo loads, run the repo's copy instead when there is one, and refuse to run a copy the
+ * repo's pin excludes. A source checkout (`KIT_DEV`, `bun src/cli.ts`) is always left alone.
+ * Returns the exit code of the handed-off run, or undefined to carry on in this process.
+ */
+async function ensureRepoCopy(root: string, argv: string[]): Promise<number | undefined> {
+  if (process.env.KIT_DEV || process.env.KIT_HANDOFF || import.meta.path.endsWith('.ts')) return undefined
+  const { copyVerdict, kitCopyAt } = await import('../lib/kit-copy')
+  const own = kitCopyAt(import.meta.dir)
+  if (!own) return undefined
+  const verdict = copyVerdict(root, own)
+  if (verdict.kind === 'ok') return undefined
+  if (verdict.kind === 'handoff') {
+    const child = Bun.spawn([process.execPath, '--no-env-file', verdict.cli, ...argv], {
+      stdio: ['inherit', 'inherit', 'inherit'],
+      env: { ...process.env, KIT_ROOT: root, KIT_HANDOFF: '1' },
+    })
+    return child.exited
+  }
+  const tokens = commandTokens(argv)
+  const message = `This repo pins ${pkg.name} "${verdict.range}" (${verdict.manifest}) but it is not installed, and this kit is ${own.version}`
+  const hint = `Install the repo's kit: run the package manager's install in ${dirname(verdict.manifest) === '.' ? 'the repo root' : dirname(verdict.manifest)}`
+  if (
+    tokens.length === 0 ||
+    ANY_COPY.includes(tokens[0]!) ||
+    argv.includes('--version') ||
+    argv.includes('-V')
+  ) {
+    if (tokens[0] !== 'complete' && tokens[0] !== 'completion') {
+      log.warn(message)
+      log.dim(`  › ${hint}`)
+    }
+    return undefined
+  }
+  throw new KitError(message, hint, ExitCode.precondition)
+}
+
 async function main(argv: string[]): Promise<number> {
   const root = findRoot()
+  if (root) {
+    const handedOff = await ensureRepoCopy(root, argv)
+    if (handedOff !== undefined) return handedOff
+  }
   let config: KitConfig | undefined
   if (root) {
     await loadDotEnv(root)

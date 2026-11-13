@@ -1,8 +1,9 @@
-import { accessSync, constants, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { accessSync, constants, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
 import { findChrome } from '../chrome'
+import { compareVersions, kitCopyAt, pathKit } from '../kit-copy'
 import { androidSdkDir, findSdkTool, hostAbi, installedSystemImages, SDK_TOOLS } from '../devices'
 import { preferredSystemImage, systemImagePackage } from '../devices/pick'
 import { findMaestro } from '../maestro/bin'
@@ -30,6 +31,7 @@ import {
   checkMaestro,
   checkMaestroJava,
   checkMise,
+  checkPathKit,
   checkReleaseSecrets,
   checkRuby,
   checkSimulator,
@@ -209,6 +211,15 @@ export function doctorEntries(
 
   const entries: Entry[] = [
     { id: 'bun', run: () => checkBun(Bun.version) },
+    {
+      id: 'kit',
+      run: () => {
+        const own = kitCopyAt(import.meta.dir)
+        const onPath = pathKit()
+        if (!own || !onPath || realpathSync(onPath.dir) === realpathSync(own.dir)) return undefined
+        return checkPathKit(onPath.version, own.version, compareVersions(onPath.version, own.version) < 0)
+      },
+    },
     { id: 'java', run: async () => checkJava(await java(), gradle) },
     { id: 'ruby', run: async () => checkRuby(await ruby(), fastlane) },
     {

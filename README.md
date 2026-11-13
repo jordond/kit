@@ -11,6 +11,18 @@ kit --help
 Install it globally too (`bun add -g @jordond/kit`) to get `kit` on your `PATH`: the global launcher finds
 the nearest `kit.config.ts` and runs that repo's own pinned copy.
 
+Keep the global kit at least as new as the repos it is used in. A launcher only knows the repo layouts
+of its own release, so an older global kit can miss a newer repo's copy. kit guards against running
+the wrong copy:
+
+- A kit that finds the repo's own copy installed, and is not that copy, runs the repo's copy instead.
+- A kit whose version the repo's pin excludes, in a repo whose copy is not installed, stops with exit 4
+  and names the install to run. `kit doctor`, `kit upgrade`, `kit init`, `--help` and `-V` still run,
+  with a warning.
+- `kit doctor` warns when the `kit` on `PATH` is older than the repo's (`bun add -g @jordond/kit@<version>`).
+
+Kits before this guard cannot check themselves: update a global kit older than 0.8 by hand.
+
 Every `kit.config.ts` field, with defaults and full examples: [docs/CONFIG.md](docs/CONFIG.md).
 
 ### Install dir: the root or `.kit/`
