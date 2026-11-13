@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
-import {
-  createEditorStore,
-  type EditorApi,
-  type EditorState,
-} from '../../editor/src/store-core'
+import { createEditorStore, type EditorApi, type EditorState } from '../../editor/src/store-core'
 import { BUILT_IN_STYLE } from '../../src/lib/storeshots/resolve'
 import type { StudioSave, StudioSession, StudioShots } from '../../src/lib/storeshots/studio-api'
 import type { Project, ProjectV2 } from '../../src/lib/storeshots/types'
@@ -116,8 +112,6 @@ describe('loading', () => {
   })
 
   test('a failed load is an error, not a default project', async () => {
-    const t = setup()
-    t.store.setState({})
     const failing = createEditorStore({
       api: {
         ...({} as EditorApi),

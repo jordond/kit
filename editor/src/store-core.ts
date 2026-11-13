@@ -101,6 +101,8 @@ export interface EditorState {
   /** The hash the file had when it was loaded or last saved; `null` when there is no file. */
   loadedHash: string | null
   shots: StudioShots | null
+  /** Counts uploads: part of a shot's URL so a replaced PNG is fetched again. */
+  shotsRev: number
   /** The selected slide by id (`slideId`): stable across reordering and edits elsewhere. */
   activeId: string | null
   /** The selected slide's position, kept in step with `activeId`. */
@@ -183,7 +185,8 @@ const idAt = (project: Project | null, index: number): string | null => {
 /** The position of `id` in the project, else `fallback` clamped into range. */
 function indexOfId(project: Project | null, id: string | null, fallback: number): number {
   const slides = project?.slides ?? []
-  const found = id === null || project?.version !== 2 ? -1 : project.slides.findIndex((s) => slideId(s) === id)
+  const found =
+    id === null || project?.version !== 2 ? -1 : project.slides.findIndex((s) => slideId(s) === id)
   return found >= 0 ? found : Math.min(Math.max(fallback, 0), Math.max(0, slides.length - 1))
 }
 
@@ -214,7 +217,11 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
     }
 
     /** Sets a new project and keeps `activeId`, `activeSlide` and `dirty` in step with it. */
-    const adopt = (project: Project | null, activeId: string | null, extra: Partial<EditorState> = {}): void => {
+    const adopt = (
+      project: Project | null,
+      activeId: string | null,
+      extra: Partial<EditorState> = {},
+    ): void => {
       const s = get()
       const activeSlide = indexOfId(project, activeId, s.activeSlide)
       set({
@@ -276,6 +283,7 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       savedProject: null,
       loadedHash: null,
       shots: null,
+      shotsRev: 0,
       activeId: null,
       activeSlide: 0,
       target: 'ios',
@@ -293,7 +301,11 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         stopTimer()
         set({ load: { status: 'loading' } })
         try {
-          const [session, file, shots] = await Promise.all([api.getSession(), api.getProject(), api.getShots()])
+          const [session, file, shots] = await Promise.all([
+            api.getSession(),
+            api.getProject(),
+            api.getShots(),
+          ])
           // Fonts before the first draw: a canvas draws an unloaded face as the fallback, silently.
           await deps.loadFonts(session.fonts)
           if (mine !== loadToken) return
@@ -335,7 +347,8 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         const next = change(project)
         if (next === project) return
         const now = deps.now()
-        const joins = options.coalesce !== undefined && options.coalesce === lastKey && now - lastAt < coalesceMs
+        const joins =
+          options.coalesce !== undefined && options.coalesce === lastKey && now - lastAt < coalesceMs
         lastKey = options.coalesce ?? null
         lastAt = now
         const past =
@@ -427,7 +440,7 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
 
       async uploadShot(name, png, options = {}) {
         const shot = await api.uploadShot(get().target, name, png, options)
-        set({ shots: await api.getShots() })
+        set({ shots: await api.getShots(), shotsRev: get().shotsRev + 1 })
         return shot
       },
     }

@@ -47,17 +47,35 @@ export const FRAME_COLORS = [
 ] as const
 export type FrameColor = (typeof FRAME_COLORS)[number]
 
-export const DEVICE_POSITIONS = ['bottom-peek', 'center-float', 'top-peek', 'angled-3d', 'full-bleed'] as const
+export const DEVICE_POSITIONS = [
+  'bottom-peek',
+  'center-float',
+  'top-peek',
+  'angled-3d',
+  'full-bleed',
+] as const
 export type DevicePosition = (typeof DEVICE_POSITIONS)[number]
 export const SHADOW_ELEVATIONS = ['none', 'subtle', 'medium', 'deep', 'dramatic'] as const
 export type ShadowElevation = (typeof SHADOW_ELEVATIONS)[number]
-export const BACKGROUND_TYPES = ['solid', 'linear-gradient', 'radial-gradient', 'mesh-glow', 'panorama'] as const
+export const BACKGROUND_TYPES = [
+  'solid',
+  'linear-gradient',
+  'radial-gradient',
+  'mesh-glow',
+  'panorama',
+] as const
 export type BackgroundType = (typeof BACKGROUND_TYPES)[number]
 export const BACKGROUND_PATTERNS = ['none', 'coffee-beans', 'warm-glow', 'subtle-grid', 'rings'] as const
 export type BackgroundPattern = (typeof BACKGROUND_PATTERNS)[number]
 export const BADGE_ICONS = ['cup', 'star', 'sparkles', 'map', 'heart', 'check', 'none'] as const
 export type BadgeIcon = (typeof BADGE_ICONS)[number]
-export const MASCOT_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
+export const MASCOT_POSITIONS = [
+  'top-center',
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+] as const
 export type MascotPosition = (typeof MASCOT_POSITIONS)[number]
 
 export interface SlideBackground {

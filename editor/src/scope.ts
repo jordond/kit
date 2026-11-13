@@ -1,11 +1,6 @@
 import type { DeviceTarget } from '../../src/lib/devices'
 import { BUILT_IN_STYLE, mergeRules, slideId, STYLE_SECTIONS } from '../../src/lib/storeshots/resolve'
-import type {
-  ProjectV2,
-  SlideLocaleText,
-  SlideV2,
-  StyleRules,
-} from '../../src/lib/storeshots/types'
+import type { ProjectV2, SlideLocaleText, SlideV2, StyleRules } from '../../src/lib/storeshots/types'
 
 /**
  * Reading and writing one field of a version 2 project at a scope. Pure: no DOM, no React, no
@@ -126,7 +121,11 @@ function inherited(project: ProjectV2, scope: Scope, place: Place, field: FieldR
 }
 
 /** `rules` with `field` set (or removed for `undefined`); an emptied section is dropped; `undefined` when nothing is left. */
-function withField(rules: StyleRules | undefined, field: FieldRef, value: StyleValue): StyleRules | undefined {
+function withField(
+  rules: StyleRules | undefined,
+  field: FieldRef,
+  value: StyleValue,
+): StyleRules | undefined {
   const section = { ...(rules?.[field.section] as Record<string, unknown> | undefined) }
   if (value === undefined) delete section[field.key]
   else section[field.key] = value
@@ -142,7 +141,7 @@ function withKey<K extends string, V>(
   key: K,
   value: V | undefined,
 ): Partial<Record<K, V>> | undefined {
-  const next = { ...map }
+  const next: Partial<Record<K, V>> = { ...map }
   if (value === undefined) delete next[key]
   else next[key] = value
   return Object.keys(next).length > 0 ? next : undefined
@@ -150,7 +149,7 @@ function withKey<K extends string, V>(
 
 /** An object with `key` set, or without it when `value` is `undefined`. */
 function setOrDrop<T extends object>(obj: T, key: string, value: unknown): T {
-  const next: Record<string, unknown> = { ...obj }
+  const next = { ...obj } as Record<string, unknown>
   if (value === undefined) delete next[key]
   else next[key] = value
   return next as T
@@ -225,12 +224,7 @@ export const mergedRules = (project: ProjectV2, target: DeviceTarget, slide: num
 export type ContentField = 'name' | 'headline' | 'subheadline' | 'badge'
 
 /** Sets a content field. Empty text removes an optional one; a headline stays (an empty string). */
-export function setContent(
-  project: ProjectV2,
-  index: number,
-  field: ContentField,
-  value: string,
-): ProjectV2 {
+export function setContent(project: ProjectV2, index: number, field: ContentField, value: string): ProjectV2 {
   const slide = project.slides[index]
   if (!slide) return project
   const keep = field === 'headline' || value !== ''
@@ -258,7 +252,9 @@ export function setLocaleText(
 
 /** A readable first headline from a shot's file name: `02-my-map.png` is `My map`. */
 export function titleOf(shot: string): string {
-  const words = slideId({ shot }).replace(/[-_.]+/g, ' ').trim()
+  const words = slideId({ shot })
+    .replace(/[-_.]+/g, ' ')
+    .trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
