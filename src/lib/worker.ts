@@ -114,7 +114,7 @@ export interface VersionUpload {
   url?: string
 }
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: strips terminal colour codes
+// oxlint-disable-next-line no-control-regex -- strips terminal colour codes
 const ANSI = /\x1b\[[0-9;]*m/g
 
 /** Version id and preview URL from `wrangler versions upload` output. */

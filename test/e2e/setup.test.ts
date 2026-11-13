@@ -367,7 +367,7 @@ esac`,
       expect(r.stderr).toContain('bun install out')
     } finally {
       bun.cleanup()
-      server.stop(true)
+      void server.stop(true)
     }
   })
 

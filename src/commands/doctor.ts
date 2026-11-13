@@ -28,6 +28,7 @@ export default defineCommand({
 
     const root = ctx.root ?? process.cwd()
     const { entries, refresh } = doctorEntries(root, ctx.config, { strictCi: ctx.args.ci === true })
+    // oxlint-disable-next-line typescript/await-thenable -- a check may answer synchronously or with a promise
     const found = await Promise.all(entries.map((e) => e.run()))
     const wantFix = ctx.args.fix === true
     const fixes = wantFix

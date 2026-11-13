@@ -149,7 +149,7 @@ export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): KitG
     description: cmd.description,
     examples: cmd.examples,
     // A passthrough parses no flags of its own; gunshi only sees it for `kit <path> --help`.
-    args: cmd.passthrough ? {} : { ...globalArgs, ...(cmd.args ?? {}) },
+    args: cmd.passthrough ? {} : { ...globalArgs, ...cmd.args },
     group: cmd.group,
     passthrough: cmd.passthrough,
     run: async (ctx) => {

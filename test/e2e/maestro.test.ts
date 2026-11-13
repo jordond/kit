@@ -17,7 +17,7 @@ const log = (): string[] =>
     ? readFileSync(join(f.dir, '.maestro.log'), 'utf8').split('\n').filter(Boolean)
     : []
 /** Calls other than the adb device probes. */
-const acts = () => log().filter((l) => !/^adb devices/.test(l))
+const acts = () => log().filter((l) => !l.startsWith('adb devices'))
 const maestroCalls = () => log().filter((l) => l.startsWith('maestro '))
 
 /**

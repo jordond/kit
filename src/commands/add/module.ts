@@ -84,11 +84,14 @@ export default defineCommand({
       }
       // The plugin reads `app-name` from the catalog for the namespace: the package starts the same way.
       const catalog = read(join(gradleRoot, 'gradle/libs.versions.toml'))
-      let appName: unknown
+      let catalogName: unknown
       try {
-        appName = catalog === undefined ? undefined : getTomlValue(catalog, 'versions', 'app-name')
+        catalogName = catalog === undefined ? undefined : getTomlValue(catalog, 'versions', 'app-name')
       } catch {}
-      if (typeof appName !== 'string' || !appName) {
+      let appName: string
+      if (typeof catalogName === 'string' && catalogName) {
+        appName = catalogName
+      } else {
         appName = placeholderId(config.name)
         if (!ctx.flags.json) {
           ctx.log.warn(`no app-name in ${join(gradleRoot, 'gradle/libs.versions.toml')}: using ${appName}`)
@@ -98,7 +101,7 @@ export default defineCommand({
         ...common,
         segments,
         root: gradleRoot,
-        appName: appName as string,
+        appName,
         settings,
       })
       const path = segments.join(':')
