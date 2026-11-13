@@ -125,7 +125,7 @@ export function parseHexColor(value: string): Rgb {
   if (!hex) {
     throw new KitError(`"${value}" is not a hex colour`, 'Use #rgb or #rrggbb, e.g. #ffffff', ExitCode.usage)
   }
-  const full = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex
+  const full = hex.length === 3 ? Array.from(hex, (c) => c + c).join('') : hex
   return [0, 2, 4].map((i) => Number.parseInt(full.slice(i, i + 2), 16)) as unknown as Rgb
 }
 

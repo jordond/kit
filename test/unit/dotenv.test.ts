@@ -1,4 +1,3 @@
-// biome-ignore-all lint/suspicious/noTemplateCurlyInString: `${X}` here is a dotenv value under test, not a template
 import { describe, expect, test } from 'bun:test'
 import { type DotenvFormat, dotenvEncode, dotenvLine, dotenvValue } from '../../src/lib/dotenv'
 import { setKey } from '../../src/lib/env/init'
@@ -252,7 +251,7 @@ function rows(format: DotenvFormat): Row[] {
     for (const w of WRITERS.filter((x) => x.format === format)) {
       const key = `K${out.length}`
       const text = w.write(key, value)
-      out.push({ key, writer: w.name, value, text: /\n$/.test(text) ? text : `${text}\n` })
+      out.push({ key, writer: w.name, value, text: text.endsWith('\n') ? text : `${text}\n` })
     }
   }
   return out

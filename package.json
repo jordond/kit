@@ -33,9 +33,10 @@
     "dev": "bun src/cli.ts",
     "test": "bun test",
     "test:pack": "KIT_PACK_TEST=1 bun test test/pack",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check .",
-    "format": "biome format --write ."
+    "check": "vp check --deny-warnings",
+    "typecheck": "vp check --no-fmt --no-lint",
+    "lint": "vp lint",
+    "format": "vp fmt"
   },
   "publishConfig": {
     "access": "public"
@@ -52,7 +53,6 @@
     "smol-toml": "^1.9.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.6",
     "@types/bun": "^1.4.4",
     "typescript": "^7.0.2",
     "vite-plus": "1.6.0",

@@ -33,6 +33,7 @@ export function emitJson(value: unknown): void {
  * --json stdout must hold only the one document.
  */
 export async function withStdoutOnStderr<T>(fn: () => Promise<T>): Promise<T> {
+  // oxlint-disable-next-line typescript/unbound-method -- saved only to be put back, never called detached
   const saved = { log: console.log, info: console.info, debug: console.debug, write: process.stdout.write }
   console.log = console.info = console.debug = (...a: unknown[]) => console.error(...a)
   process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write

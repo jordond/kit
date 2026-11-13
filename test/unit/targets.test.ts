@@ -265,6 +265,7 @@ describe('config', () => {
   })
   test('every `kit release <name>` built-in is a reserved service name', () => {
     const names = new Set(builtins.filter((b) => b.path[0] === 'release').map((b) => b.path[1]))
+    // oxlint-disable-next-line typescript/require-array-sort-compare -- plain strings, default order on both sides
     expect([...names].sort()).toEqual([...RESERVED_SERVICE_NAMES].sort())
   })
 })

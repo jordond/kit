@@ -104,7 +104,7 @@ describe('templates/gradle', () => {
       stdout: 'pipe',
       stderr: 'pipe',
     })
-    expect(`${tsc.stdout}${tsc.stderr}`).toBe('')
+    expect(`${tsc.stdout.toString()}${tsc.stderr.toString()}`).toBe('')
     expect(tsc.exitCode).toBe(0)
     const parsed = configSchema.safeParse((await import(config)).default)
     expect(parsed.error).toBeUndefined()
@@ -224,7 +224,7 @@ describe('templates/add', () => {
       stdout: 'pipe',
       stderr: 'pipe',
     })
-    expect(`${tsc.stdout}${tsc.stderr}`).toBe('')
+    expect(`${tsc.stdout.toString()}${tsc.stderr.toString()}`).toBe('')
     expect(tsc.exitCode).toBe(0)
   })
 })

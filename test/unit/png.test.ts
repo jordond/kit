@@ -13,7 +13,7 @@ function chunk(type: string, data: number[] | Uint8Array): number[] {
     (len >>> 16) & 0xff,
     (len >>> 8) & 0xff,
     len & 0xff,
-    ...[...type].map((c) => c.charCodeAt(0)),
+    ...Array.from(type, (c) => c.charCodeAt(0)),
     ...data,
     0,
     0,
