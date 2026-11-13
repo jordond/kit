@@ -105,6 +105,8 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(readdirSync(join(installed, 'dist'))).toContain('cli.js')
     // The page headless Chrome runs for `kit shots export`, built for the browser.
     expect(readdirSync(join(installed, 'dist'))).toContain('shots-page.js')
+    // The built editor of `kit shots studio`, served as static files.
+    expect(readdirSync(join(installed, 'dist/shots-editor'))).toContain('index.html')
     // zod is a peer: kit's bundle must use the app's copy, never a nested one.
     expect(readdirSync(installed)).not.toContain('node_modules')
   })

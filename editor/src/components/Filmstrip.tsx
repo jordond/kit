@@ -65,9 +65,7 @@ export function Filmstrip() {
             cssWidth={THUMB_WIDTH}
             empty={<span className="text-[9px] text-zinc-500">no shot</span>}
           />
-          <span className="w-full truncate text-center text-[10px] text-zinc-400">
-            {index + 1}. {item.name}
-          </span>
+          <span className="w-full truncate text-center text-[10px] text-zinc-400">{item.name}</span>
         </button>
       ))}
     </nav>
