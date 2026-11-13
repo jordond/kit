@@ -44,8 +44,8 @@ function start(editorDir?: string) {
       android: { id: 'phone', store: 'google', width: 1440, height: 2560 },
     },
     locales: { apple: ['en-US'], google: ['en-US'] },
-    fonts: [{ family: 'Kit Fixture', url: 'asset/0', weight: '400 800' }],
-    brand: { mark: 'asset/1' },
+    fonts: [{ family: 'Kit Fixture', url: 'api/asset/0', weight: '400 800' }],
+    brand: { mark: 'api/asset/1' },
     builtIn: BUILT_IN_STYLE,
   }
   server = serveStudio({
@@ -114,7 +114,7 @@ describe('session', () => {
     expect(session.projectPath).toBe('brand/studio.json')
     expect(session.targets).toEqual(['ios', 'ipad', 'android'])
     expect(session.sets.android).toEqual({ id: 'phone', store: 'google', width: 1440, height: 2560 })
-    expect(session.fonts[0]?.url).toBe('asset/0')
+    expect(session.fonts[0]?.url).toBe('api/asset/0')
     expect(session.builtIn.headline.fontSize).toBe(BUILT_IN_STYLE.headline.fontSize)
   })
 })

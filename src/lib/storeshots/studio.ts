@@ -52,8 +52,9 @@ export async function studioShots(ctx: KitContext, opts: { port?: number; open: 
     targets: ['ios', 'ipad', 'android'],
     sets: sizes,
     locales: storeLocales(root, config),
-    fonts,
-    brand: brand ?? null,
+    // `pageAssets` numbers the files as the export page fetches them (`asset/<n>`); here they sit under `api/`.
+    fonts: fonts.map((font) => ({ ...font, url: `api/${font.url}` })),
+    brand: brand ? { ...brand, mark: `api/${brand.mark}` } : null,
     builtIn: BUILT_IN_STYLE,
   }
 

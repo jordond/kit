@@ -62,8 +62,8 @@ describe('kit shots studio', () => {
     expect(session.rawPath).toBe('maestro/screenshots')
     expect(session.sets.ios).toMatchObject({ id: 'iphone-6.9', store: 'apple', width: 1320, height: 2868 })
     expect(session.locales.apple).toEqual(['en-US', 'fr-FR'])
-    expect(session.fonts).toEqual([{ family: 'Kit Fixture', url: 'asset/0', weight: '400 800' }])
-    expect(session.brand).toMatchObject({ mark: 'asset/1', wordmark: 'shots' })
+    expect(session.fonts).toEqual([{ family: 'Kit Fixture', url: 'api/asset/0', weight: '400 800' }])
+    expect(session.brand).toMatchObject({ mark: 'api/asset/1', wordmark: 'shots' })
 
     const file = (await (await fetch(`${url}api/project`)).json()) as StudioProjectFile
     expect(file.project.version).toBe(1)
