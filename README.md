@@ -940,7 +940,13 @@ installs Node itself.
 | `bun run format` | Rewrite files with the formatter (`vp fmt`) |
 | `bun run lint` | Lint only (`vp lint`) |
 | `bun test` | Tests. They run on Bun, not on `vp test` |
-| `bun run build` | Bundle `dist/` and its declarations (`vp pack`) |
+| `bun run build` | Bundle `dist/` and its declarations (`vp pack`), then build the screenshot editor into `dist/shots-editor` |
+| `bun run dev:studio` | The studio server on the shots fixture (`KIT_STUDIO_ROOT` picks another repo) plus the editor's dev server |
 | `bun run test:pack` | Install the packed tarball into a temp app and run it |
 
 `KIT_DEV=<checkout>` makes the `kit` launcher run that checkout's sources.
+
+The screenshot editor lives in `editor/` (React, built by `vp build`). It imports kit's renderer and
+project code from `src/lib/storeshots` by relative path, so those files must stay free of Node and Bun
+imports. `KIT_CHROME_TEST=1 bun test test/e2e/shots-editor.test.ts` checks the built editor in headless
+Chrome; run `bun run build` first.
