@@ -7,6 +7,7 @@ import { ExitCode, KitError } from '../errors'
 import { runQuiet } from '../proc'
 import { requireShots, resolveRawDir, runExport, storeLocales } from './command'
 import { pageAssets, repoPath } from './plan'
+import { requireProjectPath } from './project'
 import { BUILT_IN_STYLE } from './resolve'
 import { resolveSets, SET_SIZES, STORE_TARGETS, storeOf } from './sizes'
 import type { PaletteColor, StudioSession } from './studio-api'
@@ -54,7 +55,7 @@ export async function studioShots(ctx: KitContext, opts: { port?: number; open: 
     }
   }
   const session: StudioSession = {
-    projectPath: repoPath(root, resolve(root, shots.project)),
+    projectPath: repoPath(root, resolve(root, requireProjectPath(shots))),
     rawPath: repoPath(root, rawDir),
     targets: ['ios', 'ipad', 'android'],
     sets: sizes,
@@ -71,7 +72,7 @@ export async function studioShots(ctx: KitContext, opts: { port?: number; open: 
   try {
     server = serveStudio({
       session,
-      projectFile: resolve(root, shots.project),
+      projectFile: resolve(root, requireProjectPath(shots)),
       rawDir,
       assets,
       editorDir: editorDir(),

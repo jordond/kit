@@ -49,8 +49,8 @@ export function openerTarget(html: string): string | undefined {
   return target === undefined ? undefined : (JSON.parse(target) as string)
 }
 
-/** The Chrome command line for one render: a throwaway profile, then the URL to open last. */
-export function chromeArgv(chrome: string, profile: string, url: string): string[] {
+/** The Chrome command line for one render: a throwaway profile, any `extra` flags, then the URL to open last. */
+export function chromeArgv(chrome: string, profile: string, url: string, extra: readonly string[] = []): string[] {
   return [
     chrome,
     '--headless=new',
@@ -59,21 +59,22 @@ export function chromeArgv(chrome: string, profile: string, url: string): string
     '--no-first-run',
     '--no-default-browser-check',
     `--user-data-dir=${profile}`,
+    ...extra,
     url,
   ]
 }
 
-function duration(ms: number): string {
+export function duration(ms: number): string {
   if (ms % 60_000 === 0) return `${ms / 60_000} minute${ms === 60_000 ? '' : 's'}`
   return ms % 1000 === 0 ? `${ms / 1000}s` : `${ms}ms`
 }
 
-function logTail(file: string): string | undefined {
+export function logTail(file: string): string | undefined {
   if (!existsSync(file)) return undefined
   return readFileSync(file, 'utf8').trim().split('\n').slice(-5).join('\n') || undefined
 }
 
-const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+export const reason = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** The job's PNG, checked against the job's size and without alpha. */
 function checked(job: Job, bytes: Uint8Array | undefined): Uint8Array {

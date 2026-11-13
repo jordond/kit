@@ -10,7 +10,7 @@ import { metadataDirs } from '../release/metadata'
 import { isGenericFamily } from './fonts'
 import { pageBundle } from './page-bundle'
 import { isLocale, planExport, repoPath } from './plan'
-import { loadProject } from './project'
+import { loadProject, requireProjectPath } from './project'
 import { renderJobs } from './render'
 import { APPLE_MAX_PER_CLASS, PLAY_MAX_PER_TYPE, type Store } from './sizes'
 import type { ExportOptions, ExportPlan, ExportResult, ExportShots, Project, StoreDestination } from './types'
@@ -316,7 +316,7 @@ export async function runExport(
   run: ExportRun,
 ): Promise<ExportResult> {
   const shots = requireShots(config)
-  const projectFile = resolve(root, shots.project)
+  const projectFile = resolve(root, requireProjectPath(shots))
   const project = await loadProject(projectFile)
   const destinations = resolveDestinations(root, config, opts)
   const rawDir = resolveRawDir(root, config, shots)

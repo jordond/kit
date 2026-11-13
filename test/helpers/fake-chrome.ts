@@ -1,5 +1,5 @@
 /**
- * A fake Chrome for `kit shots export` tests: it plays the page's side of the protocol documented
+ * A fake Chrome for `kit shots export` and `kit shots pages` tests: it plays the page's side of the protocol documented
  * at `PagePlan` in `src/lib/storeshots/types.ts`, without a browser.
  *
  * `fakeChrome(dir)` writes an executable to `dir` (use it as `KIT_CHROME` or `RenderOptions.chrome`)
@@ -115,6 +115,26 @@ function pageUrl(argv: string[]): string | undefined {
   return existsSync(file) ? openerTarget(readFileSync(file, 'utf8')) : undefined
 }
 
+/**
+ * `kit shots pages` mode (`--screenshot=<file>`): fetch the page from the server like Chrome would,
+ * then write a PNG of `--window-size` times `--force-device-scale-factor`. `wrong-size`, `rgba` and
+ * `missing` (writes no file) apply as for the export page; `exit` and `hang` are handled before.
+ */
+async function screenshot(argv: string[], base: string, file: string, mode: string | undefined): Promise<number> {
+  const flag = (name: string) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+  const [w = 0, h = 0] = (flag('window-size') ?? '').split(',').map(Number)
+  const scale = Number(flag('force-device-scale-factor') ?? 1)
+  const res = await fetch(base)
+  if (!res.ok) {
+    console.error(`fake chrome: GET page answered ${res.status}`)
+    return 1
+  }
+  if (mode === 'missing') return 0
+  const width = w * scale + (mode === 'wrong-size' ? 1 : 0)
+  writeFileSync(file, png(width, h * scale, mode === 'rgba'))
+  return 0
+}
+
 async function main(argv: string[]): Promise<number> {
   const log = process.env.FAKE_CHROME_LOG
   const base = pageUrl(argv)
@@ -133,6 +153,9 @@ async function main(argv: string[]): Promise<number> {
     setInterval(() => {}, 60_000)
     return await new Promise<number>(() => {})
   }
+
+  const shot = argv.find((a) => a.startsWith('--screenshot='))?.slice('--screenshot='.length)
+  if (shot !== undefined && base?.startsWith('http://')) return await screenshot(argv, base, shot, mode)
 
   if (!base?.startsWith('http://')) {
     console.error('fake chrome: the last argument is not an opener file that leads to a URL')

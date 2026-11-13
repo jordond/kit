@@ -267,6 +267,16 @@ export function parseProject(value: unknown, label = 'project'): Project {
   return result.data as Project
 }
 
+/** `shots.project`, or a config error naming it when only `shots.pages` is set. */
+export function requireProjectPath(shots: { project?: string | undefined }): string {
+  if (shots.project !== undefined) return shots.project
+  throw new KitError(
+    'shots.project is not set',
+    'Set shots.project in kit.config.ts to the saved project JSON, relative to the repo root',
+    ExitCode.config,
+  )
+}
+
 /** Read and validate the saved project (`shots.project`). `file` is absolute. */
 export const loadProject: LoadProject = async (file) => {
   if (!existsSync(file)) {
