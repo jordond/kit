@@ -4,8 +4,15 @@ import type { KitConfig } from '../../config/schema'
 import type { DeviceEnv, Platform } from '../devices'
 import { ExitCode, KitError } from '../errors'
 import { runToStderr } from '../proc'
-import { moduleName, requireWrapper, WRAPPER } from '../toolchain'
-import { androidApp, iosApp } from './config'
+import {
+  appAndroidModule,
+  appIosModule,
+  requireModule,
+  type ResolvedModule,
+  toolchainTaskDir,
+} from '../module'
+import { requireWrapper, WRAPPER } from '../toolchain'
+import { iosApp } from './config'
 
 /**
  * Build the debug app (ported from brewd `lib/client-app.ts`): Gradle or the Kotlin toolchain for
@@ -29,6 +36,8 @@ export interface BuildPlan {
   artifactDir: string
   /** `.apk` or `.app`. */
   ext: '.apk' | '.app'
+  /** The module being built; absent for a plain xcodebuild. */
+  module?: ResolvedModule
 }
 
 const gradleRoot = (root: string, config: KitConfig): string => resolve(root, config.gradle?.root ?? '.')
@@ -41,55 +50,44 @@ export function buildPlan(
 ): BuildPlan {
   const variant = opts.release ? 'Release' : 'Debug'
   if (platform === 'android') {
-    const app = androidApp(config)
-    if (config.gradle) {
+    const module = appAndroidModule(root, config)
+    if (module.kind === 'gradle') {
       const cwd = gradleRoot(root, config)
-      const dir = moduleName(app.module)
       return {
         platform,
-        cmd: [
-          existsSync(join(cwd, 'gradlew')) ? './gradlew' : 'gradle',
-          `:${dir.replaceAll('/', ':')}:assemble${variant}`,
-        ],
+        cmd: [existsSync(join(cwd, 'gradlew')) ? './gradlew' : 'gradle', `${module.name}:assemble${variant}`],
         cwd,
-        artifactDir: join(cwd, dir, 'build', 'outputs', 'apk', variant.toLowerCase()),
+        artifactDir: resolve(root, module.dir, 'build', 'outputs', 'apk', variant.toLowerCase()),
         ext: '.apk',
+        module,
       }
     }
-    if (config.toolchain) {
-      const cwd = resolve(root, config.toolchain.root)
-      const module = moduleName(app.module)
-      return {
-        platform,
-        cmd: [WRAPPER, 'build', '-m', module, '-p', 'android', '-v', variant.toLowerCase()],
-        cwd,
-        artifactDir: join(cwd, 'build', 'tasks', `_${module}_buildAndroid${variant}`),
-        ext: '.apk',
-      }
+    const cwd = resolve(root, config.toolchain!.root)
+    return {
+      platform,
+      cmd: [WRAPPER, 'build', '-m', module.name, '-p', 'android', '-v', variant.toLowerCase()],
+      cwd,
+      artifactDir: toolchainTaskDir(cwd, module, `buildAndroid${variant}`),
+      ext: '.apk',
+      module,
     }
-    throw new KitError(
-      'kit.config.ts sets neither gradle nor toolchain',
-      'Set gradle.root or toolchain.root: kit builds Android with one of them',
-      ExitCode.config,
-    )
   }
 
   const app = iosApp(config)
   if (config.toolchain) {
     const cwd = resolve(root, config.toolchain.root)
+    const module = appIosModule(root, config, app.project)
     return {
       platform,
-      cmd: [WRAPPER, 'build', '-m', app.module, '-p', 'iosSimulatorArm64', '-v', variant.toLowerCase()],
+      cmd: [WRAPPER, 'build', '-m', module.name, '-p', 'iosSimulatorArm64', '-v', variant.toLowerCase()],
       cwd,
       artifactDir: join(
-        cwd,
-        'build',
-        'tasks',
-        `_${app.module}_buildIosAppIosSimulatorArm64${variant}`,
+        toolchainTaskDir(cwd, module, `buildIosAppIosSimulatorArm64${variant}`),
         'bin',
         `${variant}-iphonesimulator`,
       ),
       ext: '.app',
+      module,
     }
   }
   const derived = resolve(root, dirname(app.project), 'build', 'kit')
@@ -156,6 +154,7 @@ export async function buildApp(
   const plan = buildPlan(env.root, env.config, platform, opts)
   if (platform === 'ios') requireMac('Building the iOS app')
   if (env.config.toolchain && !env.config.gradle) requireWrapper(env.root, env.config)
+  if (plan.module) requireModule(env.root, env.config, plan.module)
   env.log.step(plan.cmd.join(' '))
   await runChecked(plan.cmd, plan.cwd)
   const artifact = findArtifact(plan.artifactDir, plan.ext)

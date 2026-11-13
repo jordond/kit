@@ -77,6 +77,30 @@ describe('toolchain project detection', () => {
     })
   })
 
+  test('modules under other directories: the config gets the path, `-m` the basename', () => {
+    const files = {
+      'project.yaml': 'modules:\n  - mobile/android\n  - mobile/*\n  - tools/licences\n',
+      'mobile/android/module.yaml':
+        'product: android/app\nsettings:\n  android:\n    applicationId: com.example\n',
+      'mobile/desktop/module.yaml': 'product: jvm/app\n',
+      'mobile/ios/module.yaml': 'product: ios/app\n',
+      'mobile/ios/module.xcodeproj/project.pbxproj': '',
+      'mobile/core/module.yaml': 'product:\n  type: kmp/lib\n  platforms: [jvm, android]\n',
+      'mobile/fastlane/Fastfile': '',
+      'tools/licences/module.yaml': 'product: jvm/lib\n',
+    }
+    const facts = detectToolchain(reader(files), lister(files))
+    expect(facts).toMatchObject({
+      android: { module: 'mobile/android', packageName: 'com.example' },
+      desktop: 'desktop',
+      ios: { module: 'mobile/ios', project: 'mobile/ios/module.xcodeproj' },
+    })
+    const text = toolchainConfig('App', facts)
+    expect(text).toContain("module: 'mobile/android',")
+    expect(text).toContain("dev: './kotlin run -m desktop'")
+    expect(text).toContain("project: 'mobile/ios/module.xcodeproj',")
+  })
+
   test('nothing to find: no release block, no platform filter', () => {
     const facts = detectToolchain(
       reader({ 'project.yaml': 'modules:\n  - lib\n', 'lib/module.yaml': 'product: jvm/lib\n' }),

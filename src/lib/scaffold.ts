@@ -1,4 +1,5 @@
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { expandProjectModules, projectModules } from './module'
 import { getTomlValue, parseToml } from './toml'
 import { ANDROID_VERSION_NAME, getYamlScalar } from './toolchain'
 
@@ -23,30 +24,7 @@ export function isToolchainRepo(exists: (repoPath: string) => boolean): boolean 
   return exists('kotlin') && exists('project.yaml')
 }
 
-/** Module dirs listed under `modules:` in project.yaml: a block or flow list of plain paths (no globs). */
-export function projectModules(projectYaml: string): string[] {
-  const lines = projectYaml.split('\n')
-  const start = lines.findIndex((l) => /^modules\s*:/.test(l))
-  if (start < 0) return []
-  const clean = (raw: string) =>
-    raw
-      .trim()
-      .replace(/^(['"])(.*)\1$/, '$2')
-      .replace(/^\.\//, '')
-      .replace(/\/+$/, '')
-  const plain = (v: string) => v !== '' && !/[*{:]/.test(v)
-  const flow = lines[start]!.match(/^modules\s*:\s*\[(.*)\]/)
-  if (flow) return flow[1]!.split(',').map(clean).filter(plain)
-  const out: string[] = []
-  for (const line of lines.slice(start + 1)) {
-    if (line.trim() === '' || line.trimStart().startsWith('#')) continue
-    const m = line.match(/^\s*-\s*(.+?)\s*$/)
-    if (!m) break
-    const value = clean(m[1]!.replace(/\s+#.*$/, ''))
-    if (plain(value)) out.push(value)
-  }
-  return out
-}
+export { projectModules }
 
 /** `product: jvm/app`, or `product: { type: kmp/lib, platforms: [...] }` in block or flow form. */
 export function moduleProduct(moduleYaml: string): { type?: string; platforms: string[] } {
@@ -82,7 +60,7 @@ const PRODUCT_PLATFORM: Record<string, string> = {
 const LINUX_PLATFORMS = ['jvm', 'android', 'wasmJs', 'js', 'linuxX64']
 
 export interface ToolchainFacts {
-  /** `android/app` module and its applicationId (or namespace) and versionName. */
+  /** `android/app` module (its path as project.yaml lists it), applicationId (or namespace) and versionName. */
   android?: { module: string; packageName?: string; versionName?: string }
   /** `ios/app` module: its Xcode project, scheme, bundle id, and the xcconfig with MARKETING_VERSION. */
   ios?: {
@@ -94,20 +72,22 @@ export interface ToolchainFacts {
     xcconfig?: string
     version?: string
   }
-  /** `jvm/app` module, run by `kit dev`. */
+  /** `jvm/app` module, run by `kit dev`: the toolchain's name for it (its directory's basename). */
   desktop?: string
   /** Non-Apple platforms across the modules, for the Linux CI job; empty runs everything. */
   ciPlatforms: string[]
 }
 
 /**
- * What the template needs from the project. `list(dir)` returns the repo-relative files under a
- * module dir (for the Xcode project, its schemes and xcconfigs).
+ * What the template needs from the project. Modules are found wherever project.yaml lists them
+ * (`mobile/android`, a glob), and `module` is that path: the config states the location and kit
+ * derives the toolchain's name from it. `list(dir)` returns the repo-relative files under a dir
+ * (for globs, and for the Xcode project, its schemes and xcconfigs).
  */
 export function detectToolchain(read: ReadFile, list: (dir: string) => string[]): ToolchainFacts {
   const facts: ToolchainFacts = { ciPlatforms: [] }
   const platforms = new Set<string>()
-  for (const module of projectModules(read('project.yaml') ?? '')) {
+  for (const module of expandProjectModules(read('project.yaml') ?? '', list)) {
     const yaml = read(join(module, 'module.yaml'))
     if (yaml === undefined) continue
     const product = moduleProduct(yaml)
@@ -124,7 +104,7 @@ export function detectToolchain(read: ReadFile, list: (dir: string) => string[])
         versionName: getYamlScalar(yaml, ANDROID_VERSION_NAME),
       }
     } else if (kind === 'jvm' && !facts.desktop) {
-      facts.desktop = module
+      facts.desktop = basename(module)
     } else if (kind === 'ios' && !facts.ios) {
       const files = list(module)
       const pbxproj = files.find((f) => f.endsWith('.xcodeproj/project.pbxproj'))

@@ -34,6 +34,18 @@ export const tracks = ['internal', 'alpha', 'beta', 'prod'] as const
 export type Track = (typeof tracks)[number]
 
 /** A command string, or a list run in order. `false` turns a kind's default off. */
+/**
+ * A module of the native build: its directory relative to the build root (`toolchain.root` or
+ * `gradle.root`), e.g. `mobile/android`. A Gradle project path (`:apps:android`) is a location too:
+ * the directory `apps/android`. The name the build tool is given follows from the location (Kotlin
+ * toolchain: the directory's basename; Gradle: the project path); `{ path, name }` states it when
+ * that rule is wrong for the project.
+ */
+const moduleRef = z.union([
+  z.string().min(1),
+  z.object({ path: z.string().min(1), name: z.string().min(1).optional() }).strict(),
+])
+
 const command = z.union([z.string(), z.array(z.string()), z.literal(false)])
 export type CommandValue = z.infer<typeof command>
 
@@ -157,16 +169,16 @@ export const configSchema = z
             bundleId: z.string().optional(),
             project: z.string().optional(),
             scheme: z.string().optional(),
-            /** Kotlin toolchain only: the iOS app module; default the dir holding `project`. */
-            module: z.string().optional(),
+            /** Kotlin toolchain only: the iOS app module (see `moduleRef`); default the dir holding `project`. */
+            module: moduleRef.optional(),
           })
           .strict()
           .optional(),
         android: z
           .object({
             packageName: z.string().optional(),
-            /** Gradle project path (`:android`), or the toolchain module name (`androidApp`). */
-            module: z.string().optional(),
+            /** The app module (see `moduleRef`); default `release.android.module`. */
+            module: moduleRef.optional(),
           })
           .strict()
           .optional(),
@@ -381,8 +393,8 @@ export const configSchema = z
         android: z
           .object({
             packageName: z.string(),
-            /** Gradle project path (`:android`), or the toolchain module name (`androidApp`). */
-            module: z.string(),
+            /** The app module: where it is, and optionally what the build tool calls it (see `moduleRef`). */
+            module: moduleRef,
             prodRollout: z.number().gt(0).lte(1).optional(),
             gates: z
               .array(

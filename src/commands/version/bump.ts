@@ -20,7 +20,7 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
     const { ExitCode, KitError } = await import('../../lib/errors')
-    const { moduleYamlPath } = await import('../../lib/toolchain')
+    const { moduleYaml, releaseAndroidModule, requireModule } = await import('../../lib/module')
     const {
       androidVersionDrift,
       bumpLevels,
@@ -72,10 +72,9 @@ export default defineCommand({
     }
     // Kotlin toolchain: keep the app module's versionName equal to the TOML, in the same commit.
     const androidChange = changes.find((c) => c.name === 'android')
-    const androidModule =
-      androidChange && config.toolchain && config.release?.android
-        ? moduleYamlPath(config, config.release.android.module)
-        : undefined
+    const releaseModule =
+      androidChange && config.toolchain ? releaseAndroidModule(root, config, 'toolchain') : undefined
+    const androidModule = releaseModule && moduleYaml(requireModule(root, config, releaseModule))
     if (androidModule) {
       const drift = androidVersionDrift(root, config)
       if (drift) {

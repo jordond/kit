@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import type { KitConfig } from '../config/schema'
 import { ExitCode, KitError } from './errors'
+import { moduleYaml, requireModule, type ResolvedModule, toolchainTaskDir } from './module'
 
 /**
  * JetBrains Kotlin Toolchain (formerly Amper) support: `toolchain.root` in kit.config.ts holds the
@@ -39,19 +40,6 @@ export function requireWrapper(root: string, config: KitConfig): string {
     )
   }
   return dir
-}
-
-/**
- * `release.android.module` as a toolchain module name. Gradle-style `:androidApp` is accepted; a
- * nested `:apps:android` becomes the path `apps/android`.
- */
-export function moduleName(module: string): string {
-  return module.replace(/^:/, '').replaceAll(':', '/')
-}
-
-/** Repo-relative path of the module's module.yaml. */
-export function moduleYamlPath(config: KitConfig, module: string): string {
-  return join(config.toolchain!.root, moduleName(module), 'module.yaml')
 }
 
 // ---- module.yaml editing ----------------------------------------------------------------------
@@ -241,13 +229,13 @@ export function aabFromOutput(output: string, cwd: string): string | undefined {
 }
 
 /**
- * Newest `.aab` under `<toolchain root>/build/tasks/_<module>_*`, written at or after `since`
+ * Newest `.aab` under `<toolchain root>/build/tasks/_<module name>_*`, written at or after `since`
  * (ms). The fallback when the output names no path: the toolchain calls this layout temporary.
  */
-export function findAab(toolchainDir: string, module: string, since = 0): string | undefined {
+export function findAab(toolchainDir: string, module: ResolvedModule, since = 0): string | undefined {
   const tasks = join(toolchainDir, 'build', 'tasks')
   if (!existsSync(tasks)) return undefined
-  const prefix = `_${moduleName(module).replaceAll('/', '_')}_`
+  const prefix = basename(toolchainTaskDir(toolchainDir, module))
   const hits: { path: string; mtime: number }[] = []
   for (const d of readdirSync(tasks)) {
     if (!d.startsWith(prefix)) continue
@@ -263,14 +251,11 @@ export function findAab(toolchainDir: string, module: string, since = 0): string
 }
 
 /** versionName in the app module's module.yaml, or undefined when it doesn't set one. */
-export function moduleVersionName(root: string, config: KitConfig, module: string): string | undefined {
-  const path = join(root, moduleYamlPath(config, module))
-  if (!existsSync(path)) {
-    throw new KitError(
-      `${moduleYamlPath(config, module)} not found`,
-      'release.android.module names the app module (its dir under toolchain.root)',
-      ExitCode.config,
-    )
-  }
-  return getYamlScalar(readFileSync(path, 'utf8'), ANDROID_VERSION_NAME)
+export function moduleVersionName(
+  root: string,
+  config: KitConfig,
+  module: ResolvedModule,
+): string | undefined {
+  requireModule(root, config, module)
+  return getYamlScalar(readFileSync(join(root, moduleYaml(module)), 'utf8'), ANDROID_VERSION_NAME)
 }

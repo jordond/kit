@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
 import { getTomlValue, setTomlValue } from '../toml'
-import { ANDROID_VERSION_NAME, moduleVersionName, moduleYamlPath, setYaml, yamlString } from '../toolchain'
+import { moduleYaml, releaseAndroidModule } from '../module'
+import { ANDROID_VERSION_NAME, moduleVersionName, setYaml, yamlString } from '../toolchain'
 
 /**
  * Version names live in the catalog TOML (`[versions]`), keyed by `versions.keys` (PLAN §9.2):
@@ -178,12 +179,13 @@ export function androidVersionDrift(
   root: string,
   config: KitConfig,
 ): { toml: string; module: string; file: string } | undefined {
-  const module = config.release?.android?.module
-  if (!config.toolchain || !module || !config.versions?.keys.android) return undefined
+  if (!config.toolchain || !config.versions?.keys.android) return undefined
+  const module = releaseAndroidModule(root, config, 'toolchain')
+  if (!module) return undefined
   const yaml = moduleVersionName(root, config, module)
   if (yaml === undefined) return undefined
   const toml = readVersion(root, config, 'android')
-  return yaml === toml ? undefined : { toml, module: yaml, file: moduleYamlPath(config, module) }
+  return yaml === toml ? undefined : { toml, module: yaml, file: moduleYaml(module) }
 }
 
 /** module.yaml text with `settings.android.versionName` set (added when missing). */

@@ -42,7 +42,7 @@ export function appFastlaneDir(root: string, config: KitConfig): string {
   const where = config.release?.fastlaneDir ?? native ?? '.'
   throw new KitError(
     `No fastlane/Fastfile in ${where}`,
-    `Create ${join(where, 'fastlane/Fastfile')} with: import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via \`kit fastlane ...\` or \`kit release ...\`") })`,
+    `Set release.fastlaneDir to the dir holding fastlane/, or create ${join(where, 'fastlane/Fastfile')} with: import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via \`kit fastlane ...\` or \`kit release ...\`") })`,
     ExitCode.config,
   )
 }

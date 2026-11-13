@@ -20,7 +20,9 @@ kit init --template toolchain --dry-run
   first (`kotlin init`). A plain `kit init` there offers the template (`--yes` accepts it).
 - It reads the project to fill the config: the `android/app` module and its `applicationId`, the `ios/app`
   module's Xcode project, scheme, bundle id, team and the xcconfig holding `MARKETING_VERSION`, and the
-  `jvm/app` module for `kit dev`. An id it cannot find is `com.example.<name>`: replace it before a release.
+  `jvm/app` module for `kit dev`. Modules are found wherever `project.yaml` lists them, globs included
+  (`mobile/android`, `mobile/*`): the config gets the module's path, and commands get the toolchain's name
+  for it. An id it cannot find is `com.example.<name>`: replace it before a release.
   CI tests the non-Apple platforms the modules declare (`--platform jvm --platform android …`).
 - Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
 - A file that already exists is kept; `.gitignore` and the catalog only gain lines. `renovate.json` is

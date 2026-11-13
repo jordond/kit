@@ -493,13 +493,22 @@ def kit_play_track
   tracks.fetch(track) { UI.user_error!("Unknown KIT_PLAY_TRACK '#{track}' (#{tracks.keys.join(', ')})") }
 end
 
-# Newest signed artifact under <gradle root>/<module dir>/build/outputs. Used
-# only when the gradle action did not report its outputs. Newest by mtime: the
-# dir can hold stale artifacts from older runs.
+# The app module's directory: KIT_ANDROID_MODULE_DIR (kit resolves it from the
+# config). Without it, Gradle's default for the project path KIT_ANDROID_MODULE
+# (`:apps:android` is <gradle root>/apps/android).
+def kit_android_module_dir
+  dir = kit_path("KIT_ANDROID_MODULE_DIR", required: false)
+  return dir if dir
+
+  File.join(kit_path("KIT_GRADLE_ROOT"), kit_env_opt("KIT_ANDROID_MODULE", ":android").delete_prefix(":").tr(":", "/"))
+end
+
+# Newest signed artifact under <module dir>/build/outputs. Used only when the
+# gradle action did not report its outputs. Newest by mtime: the dir can hold
+# stale artifacts from older runs.
 def kit_find_artifact(kind)
-  module_dir = kit_env_opt("KIT_ANDROID_MODULE", ":android").delete_prefix(":").tr(":", "/")
   sub = kind == "apk" ? "apk/release" : "bundle/release"
-  dir = File.join(kit_path("KIT_GRADLE_ROOT"), module_dir, "build/outputs", sub)
+  dir = File.join(kit_android_module_dir, "build/outputs", sub)
   Dir.glob(File.join(dir, "*.#{kind}")).reject { |f| f.include?("unsigned") }.max_by { |f| File.mtime(f) }
 end
 
@@ -550,7 +559,8 @@ platform :android do
   # ANDROID_KEYSTORE_ALIAS / ANDROID_KEYSTORE_PASSWORD from the inherited env.
   # Passwords never go on argv.
   desc "Build the signed release bundle (or APK) with Gradle."
-  desc "In: KIT_GRADLE_ROOT, KIT_ANDROID_MODULE (default :android), KIT_GRADLE_TASK (default <module>:bundleRelease), " \
+  desc "In: KIT_GRADLE_ROOT, KIT_ANDROID_MODULE (Gradle project path, default :android), KIT_ANDROID_MODULE_DIR " \
+       "(its dir; default from the project path), KIT_GRADLE_TASK (default <module>:bundleRelease), " \
        "KIT_ANDROID_VERSION, KIT_ANDROID_CODE, KIT_ANDROID_KEYSTORE_FILE. Out: KIT_ARTIFACT_AAB= or KIT_ARTIFACT_APK=."
   lane :build do
     module_path = kit_env_opt("KIT_ANDROID_MODULE", ":android")

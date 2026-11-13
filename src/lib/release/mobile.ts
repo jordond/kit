@@ -9,6 +9,7 @@ import { ExitCode, KitError } from '../errors'
 import { appFastlaneDir, runLane } from '../fastlane'
 import { currentBranch, dirtyFiles, push, tag } from '../git'
 import { emitJson, withStdoutOnStderr } from '../log'
+import { moduleKind, moduleYaml, releaseAndroidModule, requireModule } from '../module'
 import { ProcError, runLines } from '../proc'
 import { confirm, text } from '../prompt'
 import { secretFile } from '../secrets'
@@ -17,8 +18,6 @@ import {
   aabFromOutput,
   findAab,
   keystoreProperties,
-  moduleName,
-  moduleYamlPath,
   releaseModuleYaml,
   requireWrapper,
   WRAPPER,
@@ -129,6 +128,12 @@ function outputDir(): string {
   return dir
 }
 
+/** The build tool's name for the app module (the Gradle lanes' task prefix) and its absolute dir. */
+function moduleEnv(root: string, config: KitConfig): Record<string, string> {
+  const module = releaseAndroidModule(root, config)!
+  return { KIT_ANDROID_MODULE: module.name, KIT_ANDROID_MODULE_DIR: abs(root, module.dir) }
+}
+
 /** Config-derived lane inputs (bundle ids, team, package, Gradle root): shared with `kit fastlane`. */
 export function laneConfigEnv(root: string, config: KitConfig): Record<string, string> {
   const ios = config.release?.ios
@@ -143,7 +148,8 @@ export function laneConfigEnv(root: string, config: KitConfig): Record<string, s
           KIT_IOS_TEAM_ID: ios.teamId ?? '', // explicit: empty is "no team", an inherited one is not
         }
       : {}),
-    ...(android ? { KIT_ANDROID_PACKAGE: android.packageName, KIT_ANDROID_MODULE: android.module } : {}),
+    ...(android ? { KIT_ANDROID_PACKAGE: android.packageName } : {}),
+    ...(android && moduleKind(config) ? moduleEnv(root, config) : {}),
     ...(config.gradle ? { KIT_GRADLE_ROOT: abs(root, config.gradle.root) } : {}),
   }
 }
@@ -555,12 +561,12 @@ export function toolchainBuildStep(
     onArtifact: (aab: string) => void
   },
 ): Step {
-  const module = config.release!.android!.module
+  const module = releaseAndroidModule(root, config, 'toolchain')!
   return {
-    title: `build (kotlin package -m ${moduleName(module)})`,
+    title: `build (kotlin package -m ${module.name})`,
     task: async (update) => {
       const dir = requireWrapper(root, config)
-      const rel = moduleYamlPath(config, module)
+      const rel = moduleYaml(requireModule(root, config, module))
       const path = join(root, rel)
       const before = readFileSync(path, 'utf8')
       const props = secretFile(
@@ -580,13 +586,13 @@ export function toolchainBuildStep(
       const off = onCleanup(restore)
       writeFileSync(path, after)
       try {
-        const cmd = [WRAPPER, 'package', '-m', moduleName(module)]
+        const cmd = [WRAPPER, 'package', '-m', module.name]
         const { code, output } = await runLines(cmd, { cwd: dir, env: opts.env, onLine: update })
         if (code !== 0) throw new ProcError(cmd, code, output)
         const aab = aabFromOutput(output, dir) ?? findAab(dir, module)
         if (!aab) {
           throw new KitError(
-            `kotlin package -m ${moduleName(module)} reported no .aab`,
+            `kotlin package -m ${module.name} reported no .aab`,
             `Look under ${join(config.toolchain!.root, 'build/tasks')}; the toolchain's output layout may have changed`,
           )
         }

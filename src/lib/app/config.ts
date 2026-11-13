@@ -1,11 +1,11 @@
-import { dirname } from 'node:path'
 import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
 
 /**
  * The app `kit app …`, `kit qa` and `kit shots` build, install and drive: `app.*` in kit.config.ts,
  * each field falling back to `release.*`. Building and installing a debug app is not a release
- * concern, but a repo that already releases has every value kit needs.
+ * concern, but a repo that already releases has every value kit needs. The module that builds the
+ * app is resolved in `lib/module.ts` (`appAndroidModule`, `appIosModule`).
  */
 
 export interface IosApp {
@@ -13,14 +13,10 @@ export interface IosApp {
   /** Repo-relative `.xcodeproj` or `.xcworkspace`. */
   project: string
   scheme: string
-  /** Kotlin toolchain module that builds the app (`iosApp`). */
-  module: string
 }
 
 export interface AndroidApp {
   packageName: string
-  /** Gradle project path (`:android`), or the toolchain module name (`androidApp`). */
-  module: string
 }
 
 function need<T>(value: T | undefined, key: string, fallback: string): T {
@@ -42,7 +38,6 @@ export function iosApp(config: KitConfig): IosApp {
     bundleId: need(app?.bundleId ?? release?.bundleIds[0], 'app.ios.bundleId', 'release.ios.bundleIds'),
     project,
     scheme: need(app?.scheme ?? release?.scheme, 'app.ios.scheme', 'release.ios.scheme'),
-    module: app?.module ?? dirname(project).split('/').pop()!,
   }
 }
 
@@ -55,6 +50,5 @@ export function androidApp(config: KitConfig): AndroidApp {
       'app.android.packageName',
       'release.android.packageName',
     ),
-    module: need(app?.module ?? release?.module, 'app.android.module', 'release.android.module'),
   }
 }

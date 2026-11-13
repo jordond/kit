@@ -4,11 +4,12 @@ import { defineCommand } from '../cli/command'
 import type { KitConfig } from '../config/schema'
 
 /**
- * The iOS project to open, repo-relative: `release.ios.project`, else the first workspace (then
+ * The iOS project to open, repo-relative: `app.ios.project`, else `release.ios.project`, else the first workspace (then
  * project) under `<gradle root>/ios`. A workspace wins so CocoaPods setups open whole.
  */
 export function findIosProject(root: string, config: KitConfig): string | undefined {
-  if (config.release?.ios?.project) return config.release.ios.project
+  const project = config.app?.ios?.project ?? config.release?.ios?.project
+  if (project) return project
   if (!config.gradle) return undefined
   const ios = join(config.gradle.root, 'ios')
   if (!existsSync(join(root, ios))) return undefined

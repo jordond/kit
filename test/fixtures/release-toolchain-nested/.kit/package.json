@@ -1,0 +1,7 @@
+{
+  "name": "app-kit",
+  "private": true,
+  "devDependencies": {
+    "@jordond/kit": "^1.2.3"
+  }
+}

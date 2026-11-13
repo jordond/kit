@@ -1,0 +1,30 @@
+#!/bin/sh
+# Fake Kotlin toolchain wrapper for a nested layout. Like the real one it names a module by its
+# directory's basename: `-m mobile/android` fails, `-m android` works, and task output goes to
+# build/tasks/_<name>_<task>. Records argv, the app module.yaml and the keystore.properties.
+kotlin_cli_version=0.13.0
+bun -e 'const fs = require("fs")
+const yaml = fs.readFileSync("mobile/android/module.yaml", "utf8")
+const m = yaml.match(/propertiesFile: "(.*)"/)
+const props = m && fs.existsSync(m[1]) ? fs.readFileSync(m[1], "utf8") : null
+console.log(JSON.stringify({ argv: process.argv.slice(1), yaml, props }))' -- "$@" >> "${KIT_TEST_LOG:-/dev/null}"
+name=
+prev=
+for a in "$@"; do
+  [ "$prev" = -m ] && name=$a
+  prev=$a
+done
+if [ -n "$name" ] && ! grep -q "^  - .*/$name\$" project.yaml; then
+  echo "ERROR: Couldn't find module(s) named: $name"
+  exit 1
+fi
+case "$1" in
+  package)
+    mkdir -p "build/tasks/_${name}_bundleAndroid"
+    echo aab > "build/tasks/_${name}_bundleAndroid/gradle-project-release.aab"
+    echo "Build successful" ;;
+  build)
+    mkdir -p "build/tasks/_${name}_buildAndroidDebug"
+    echo apk > "build/tasks/_${name}_buildAndroidDebug/gradle-project-debug.apk" ;;
+esac
+exit 0

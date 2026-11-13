@@ -14,13 +14,13 @@ import { installDir } from '../../src/config/load'
 import { configSchema } from '../../src/config/schema'
 import { checkTools } from '../../src/lib/release/mobile'
 import { androidVersionDrift, setModuleVersion } from '../../src/lib/release/version'
+import type { ResolvedModule } from '../../src/lib/module'
 import { targetCommands } from '../../src/lib/targets'
 import {
   aabFromOutput,
   findAab,
   getYamlScalar,
   keystoreProperties,
-  moduleName,
   releaseModuleYaml,
   setYaml,
   wrapperVersion,
@@ -137,9 +137,7 @@ test('keystoreProperties: absolute storeFile, key password = store password', ()
   )
 })
 
-test('moduleName and wrapperVersion', () => {
-  expect(moduleName(':androidApp')).toBe('androidApp')
-  expect(moduleName(':apps:android')).toBe('apps/android')
+test('wrapperVersion', () => {
   expect(wrapperVersion('#!/bin/sh\nkotlin_cli_version=0.13.0\nkotlin_cli_sha256=ab\n')).toBe('0.13.0')
   expect(wrapperVersion('#!/bin/sh\n')).toBeUndefined()
 })
@@ -161,9 +159,16 @@ describe('artifacts', () => {
       aabFromOutput('Done.\nAAB: build/tasks/_androidApp_bundleAndroid/gradle-project-release.aab\n', dir),
     ).toBe(aab)
     expect(aabFromOutput('wrote /nope/missing.aab', dir)).toBeUndefined()
-    expect(findAab(dir, 'androidApp')).toBe(aab)
-    expect(findAab(dir, 'androidApp', Date.now() + 60_000)).toBeUndefined()
-    expect(findAab(join(dir, 'none'), 'androidApp')).toBeUndefined()
+    // The task dirs carry the module's name, wherever its directory is.
+    const module: ResolvedModule = {
+      kind: 'toolchain',
+      key: 'k',
+      dir: 'mobile/androidApp',
+      name: 'androidApp',
+    }
+    expect(findAab(dir, module)).toBe(aab)
+    expect(findAab(dir, module, Date.now() + 60_000)).toBeUndefined()
+    expect(findAab(join(dir, 'none'), module)).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -239,7 +244,9 @@ describe('androidVersionDrift', () => {
   test('a missing module.yaml is a config error', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kit-tc-'))
     writeFileSync(join(dir, 'libs.versions.toml'), '[versions]\napp-android-version = "1.2.0"\n')
-    expect(() => androidVersionDrift(dir, config)).toThrow('androidApp/module.yaml not found')
+    expect(() => androidVersionDrift(dir, config)).toThrow(
+      'Kotlin toolchain module not found: androidApp/module.yaml does not exist',
+    )
     rmSync(dir, { recursive: true, force: true })
   })
 })

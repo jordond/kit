@@ -179,9 +179,9 @@ command and sets `KIT_ENV` for every command of that target. An unknown env is a
   manager; a missing script means the verb is skipped. `wrangler` and `astro` run through the package
   manager's exec.
 - `worker` `dev` and `deploy` add `--env <env>`; `astro` deploy runs the `deploy:<env>` script.
-- `kit build <target> --release` on `gradle` runs `<release.android.module>:bundleRelease`
-  (`assembleRelease` for an APK); on `kotlin`, `./kotlin package -m <module>` (AAB only). Both need
-  `release.android.module`.
+- `kit build <target> --release` on `gradle` runs `<project path>:bundleRelease` (`assembleRelease` for an
+  APK); on `kotlin`, `./kotlin package -m <module name>` (AAB only). Both need `release.android.module`,
+  and take the name from it as [Modules](#modules) describes.
 - `kotlin` lint covers `**/*.kt` and `**/*.kts` outside `build/` and `node_modules/`; with `--staged`,
   only the staged Kotlin files.
 
@@ -291,11 +291,38 @@ app: {
 | `ios.bundleId`        | `release.ios.bundleIds[0]`    | Bundle id to install and launch                                     |
 | `ios.project`         | `release.ios.project`         | `.xcodeproj` or `.xcworkspace`                                      |
 | `ios.scheme`          | `release.ios.scheme`          | Xcode scheme                                                        |
-| `ios.module`          | the dir holding `project`     | Kotlin toolchain only: the iOS app module                           |
+| `ios.module`          | the dir holding `project`     | Kotlin toolchain only: the iOS app [module](#modules)               |
 | `android.packageName` | `release.android.packageName` | Application id                                                      |
-| `android.module`      | `release.android.module`      | Gradle project path (`:android`) or toolchain module (`androidApp`) |
+| `android.module`      | `release.android.module`      | The app [module](#modules): its directory, or a Gradle project path |
 
 A field set in neither place is a config error (exit 3) when a command needs it.
+
+### Modules
+
+`release.android.module`, `app.android.module` and `app.ios.module` say where a module of the native
+build is. kit works out what the build tool calls it, so the two never have to match:
+
+```ts
+module: 'mobile/android'                          // the directory, relative to toolchain.root or gradle.root
+module: ':apps:android'                           // a Gradle project path: the directory apps/android
+module: { path: 'apps/phone', name: 'android' }   // the directory, and the name stated
+```
+
+| Build            | Directory                                         | Name given to the build tool                                                 |
+| ---------------- | ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Kotlin toolchain | `<toolchain.root>/<path>`, where `module.yaml` is | The directory's basename: `mobile/android` is `./kotlin … -m android`        |
+| Gradle           | `<gradle.root>/<path>`; `:a:b` is the path `a/b`  | The project path: `:apps:android`, and `apps/android` is `:apps:android` too |
+
+The module can sit at any depth. Set `name` only when the rule gives the wrong answer: a Gradle project
+whose directory is remapped in `settings.gradle.kts` (`{ path: 'apps/android', name: ':app' }`), or a
+toolchain module the toolchain does not name after its directory. `./kotlin show modules` prints the
+toolchain's names.
+
+Every command reads both through one resolver: `module.yaml` (version drift, `kit version bump`, the
+release build) comes from the directory, and `-m`, the Gradle task prefix and the toolchain's
+`build/tasks/_<name>_*` output dirs come from the name. `app.ios.module` defaults to the directory holding
+the Xcode project. When a toolchain module's `module.yaml` is missing, the error names the path checked,
+the `-m` name and the config key, and lists the modules in `project.yaml`.
 
 ## `devices`
 
@@ -646,13 +673,13 @@ release: {
 
 ### `release.android`
 
-| Field         | Type                 | Required | Meaning                                                                                                                                                                                 |
-| ------------- | -------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packageName` | `string`             | yes      | Application id                                                                                                                                                                          |
-| `module`      | `string`             | yes      | Gradle project path (`:android`) or toolchain module (`androidApp`)                                                                                                                     |
-| `prodRollout` | number, `0 < n <= 1` |          | Staged rollout fraction for `prod`. Default `0.1`                                                                                                                                       |
-| `gates`       | `{ task, tracks }[]` |          | Tasks run before a release to the listed tracks. `task` is a Gradle task, or `./kotlin` arguments with a toolchain (`test -m shared`); `tracks` are `internal`, `alpha`, `beta`, `prod` |
-| `metadata`    | `string`             |          | Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`)                                                                                                             |
+| Field         | Type                          | Required | Meaning                                                                                                                                                                                 |
+| ------------- | ----------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packageName` | `string`                      | yes      | Application id                                                                                                                                                                          |
+| `module`      | `string` or `{ path, name? }` | yes      | The app [module](#modules): its directory relative to the build root (`mobile/android`), or a Gradle project path (`:android`)                                                          |
+| `prodRollout` | number, `0 < n <= 1`          |          | Staged rollout fraction for `prod`. Default `0.1`                                                                                                                                       |
+| `gates`       | `{ task, tracks }[]`          |          | Tasks run before a release to the listed tracks. `task` is a Gradle task, or `./kotlin` arguments with a toolchain (`test -m shared`); `tracks` are `internal`, `alpha`, `beta`, `prod` |
+| `metadata`    | `string`                      |          | Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`)                                                                                                             |
 
 ### `release.services`
 

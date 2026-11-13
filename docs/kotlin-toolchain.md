@@ -30,7 +30,7 @@ export default defineConfig({
 | ------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
 | `kit test` / `kit build`  | `./gradlew test` / `build`        | `./kotlin test` / `build`                                                          |
 | `kit lint` / `kit format` | `spotlessCheck` / `spotlessApply` | `ktlint` / `ktlint -F` over `**/*.kt` and `**/*.kts`, skipping `build/`            |
-| `kit build <t> --release` | `<module>:bundleRelease`          | `./kotlin package -m <module>` (AAB only)                                          |
+| `kit build <t> --release` | `<project path>:bundleRelease`    | `./kotlin package -m <module name>` (AAB only)                                     |
 | passthrough               | `kit gradle …`                    | `kit kotlin …`                                                                     |
 | `kit init`                | `gradle.init` tasks               | `toolchain.init` (default `./kotlin --version`, which downloads the toolchain)     |
 | `kit doctor`              | java, Android SDK, catalog keys   | the wrapper and its pinned `kotlin_cli_version`, and ktlint; no java or SDK needed |
@@ -39,7 +39,13 @@ The toolchain has no linter, so `kotlin` targets use the standalone `ktlint` bin
 (`ktlint = "1.8.0"`) and style it with `.editorconfig`. `kit lint --staged --fix` passes only the staged
 Kotlin files. Override with `lint:` / `format:` on the target, or `false` to turn one off.
 
-`kit release android` runs `./kotlin package -m <release.android.module>`. The toolchain takes no build
+`release.android.module` is the app module's directory relative to `toolchain.root`: `androidApp`, or
+`mobile/android` when the modules live under another directory, at any depth. The toolchain names a module
+after its directory's basename, so kit reads `mobile/android/module.yaml` and passes `-m android`; it looks
+for build output under `build/tasks/_android_*`. `app.ios.module` works the same way and defaults to the
+directory holding the Xcode project. See [Modules](CONFIG.md#modules) for stating the name yourself.
+
+`kit release android` runs `./kotlin package -m <module name>`. The toolchain takes no build
 properties, so kit writes `versionName`, `versionCode` and `signing` (a `keystore.properties` in kit's
 0600 temp dir, built from the `ANDROID_KEYSTORE_*` secrets) into the module's `module.yaml` for the build and
 restores the file afterwards, also on failure or Ctrl-C. `release.android.gates` tasks are `./kotlin`

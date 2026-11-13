@@ -37,8 +37,8 @@ describe('app config', () => {
       },
       app: { android: { packageName: 'app.pkg' } },
     })
-    expect(iosApp(c)).toMatchObject({ bundleId: 'rel.id', scheme: 'rel', module: 'a' })
-    expect(androidApp(c)).toEqual({ packageName: 'app.pkg', module: ':rel' })
+    expect(iosApp(c)).toMatchObject({ bundleId: 'rel.id', scheme: 'rel' })
+    expect(androidApp(c)).toEqual({ packageName: 'app.pkg' })
   })
 
   test('a missing key is a config error naming the key', () => {
@@ -97,6 +97,35 @@ describe('buildPlan', () => {
     expect(i.artifactDir).toBe(
       '/r/tk/build/tasks/_iosApp_buildIosAppIosSimulatorArm64Debug/bin/Debug-iphonesimulator',
     )
+  })
+
+  test('toolchain modules outside the toolchain root dir: -m and the task dir take the basename', () => {
+    const nested = cfg({
+      toolchain: { root: '.' },
+      app: {
+        ios: { ...ios, project: 'mobile/ios/module.xcodeproj' },
+        android: { packageName: 'p', module: 'mobile/android' },
+      },
+    })
+    const a = buildPlan('/r', nested, 'android')
+    expect(a.cmd).toEqual(['./kotlin', 'build', '-m', 'android', '-p', 'android', '-v', 'debug'])
+    expect(a.artifactDir).toBe('/r/build/tasks/_android_buildAndroidDebug')
+    expect(a.module).toMatchObject({ dir: 'mobile/android', name: 'android' })
+    const i = buildPlan('/r', nested, 'ios')
+    expect(i.cmd.slice(0, 4)).toEqual(['./kotlin', 'build', '-m', 'ios'])
+    expect(i.artifactDir).toBe(
+      '/r/build/tasks/_ios_buildIosAppIosSimulatorArm64Debug/bin/Debug-iphonesimulator',
+    )
+    expect(i.module).toMatchObject({ dir: 'mobile/ios', name: 'ios', key: 'app.ios.project' })
+  })
+
+  test('release.android.module is the fallback for the app module', () => {
+    const c = cfg({
+      toolchain: { root: '.' },
+      release: { android: { packageName: 'p', module: { path: 'apps/phone', name: 'android' } } },
+    })
+    expect(buildPlan('/r', c, 'android').cmd.slice(0, 4)).toEqual(['./kotlin', 'build', '-m', 'android'])
+    expect(exitOf(() => buildPlan('/r', cfg({ toolchain: { root: '.' } }), 'android'))).toBe(ExitCode.config)
   })
 
   test('android with neither gradle nor toolchain is a config error', () => {

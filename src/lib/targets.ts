@@ -5,7 +5,7 @@ import { ExitCode, KitError } from './errors'
 import { MAESTRO_GROUP, maestroLintGroup } from './maestro/lint'
 import { detectPackageManager, type PackageManager, packageScripts, pmExec, runScript } from './pm'
 import { shell } from './proc'
-import { moduleName } from './toolchain'
+import { releaseAndroidModule } from './module'
 
 /**
  * Targets and kinds (PLAN §6.4). A kind maps verbs to default commands; any verb on any target can
@@ -167,7 +167,7 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
   const env = c.opts.env
   switch (t.kind) {
     case 'gradle': {
-      const release = c.config.release?.android?.module
+      const release = releaseAndroidModule(c.root, c.config, 'gradle')
       if (verb === 'build' && c.opts.release) {
         if (!release) {
           throw new KitError(
@@ -178,7 +178,7 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
         }
         return [
           gradleCommand(c, t, [
-            `${release}:${c.opts.release === 'aab' ? 'bundleRelease' : 'assembleRelease'}`,
+            `${release.name}:${c.opts.release === 'aab' ? 'bundleRelease' : 'assembleRelease'}`,
           ]),
         ]
       }
@@ -189,7 +189,7 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
     }
     case 'kotlin': {
       if (verb === 'build' && c.opts.release) {
-        const module = c.config.release?.android?.module
+        const module = releaseAndroidModule(c.root, c.config, 'toolchain')
         if (c.opts.release === 'apk') {
           throw new KitError(
             'The Kotlin toolchain packages Android releases as an AAB only',
@@ -200,11 +200,11 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
         if (!module) {
           throw new KitError(
             'A release build needs release.android.module in kit.config.ts',
-            "e.g. release: { android: { module: 'androidApp', packageName: '…' } }",
+            "e.g. release: { android: { module: 'mobile/android', packageName: '…' } }",
             ExitCode.config,
           )
         }
-        return [kotlinCommand(c, t, ['package', '-m', moduleName(module)])]
+        return [kotlinCommand(c, t, ['package', '-m', module.name])]
       }
       if (verb === 'lint' || verb === 'format') return ktlintCommand(c, t, verb === 'format')
       const args = { test: ['test'], build: ['build'] }[verb as string]
