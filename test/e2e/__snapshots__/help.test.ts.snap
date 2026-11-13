@@ -206,6 +206,7 @@ Examples
 Commands
   export   Render the store screenshots from the raw shots and the saved project
   migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
+  studio   Edit the shots project in a browser: slides, styles, a live preview, export
 
 Options
   -h, --help              Show help
@@ -1669,6 +1670,7 @@ Examples
 Commands
   export   Render the store screenshots from the raw shots and the saved project
   migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
+  studio   Edit the shots project in a browser: slides, styles, a live preview, export
 
 Options
   -h, --help              Show help
@@ -1740,6 +1742,31 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --write    Replace shots.project with the version 2 file (default: print it)
+
+"
+`;
+
+exports[`help kit shots studio --help 1`] = `
+"Edit the shots project in a browser: slides, styles, a live preview, export
+
+Usage
+  kit shots studio [options]
+
+Examples
+  kit shots studio
+  kit shots studio --port 4173 --no-open
+
+Options
+  -h, --help           Show help
+  -V, --version        Show kit version
+      --json           Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run        Plan and run read-only steps; skip mutations
+  -y, --yes            Accept confirmations (never skips prod)
+  -v, --verbose        Stream all child output
+  -q, --quiet          Errors and summary only
+      --bail           Stop at the first failure
+      --port <string>  Listen on this port (default: one the OS picks)
+      --open           Open the browser (--no-open: do not)
 
 "
 `;

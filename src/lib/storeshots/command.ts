@@ -48,7 +48,7 @@ const IOS_NOT_LOCALES = new Set([
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
 const lines = (items: readonly string[]): string => items.map((item) => `  ${item}`).join('\n')
 
-function requireShots(config: KitConfig): Shots {
+export function requireShots(config: KitConfig): Shots {
   if (!config.shots) {
     throw new KitError(
       'No shots block in kit.config.ts',
@@ -78,11 +78,29 @@ function listingLocales(store: Store, dir: string): string[] {
 }
 
 /**
+ * The locales each store's metadata dir has, `['en-US']` for a store with none (or no metadata
+ * configured): the locales an export without `--locale` would use.
+ */
+export function storeLocales(root: string, config: KitConfig): Record<Store, string[]> {
+  const of = (store: Store): string[] => {
+    const platform = STORE_PLATFORM[store]
+    if (!config.release?.[platform]?.metadata) return ['en-US']
+    const listed = listingLocales(store, metadataDirs(root, config, platform).dir)
+    return listed.length > 0 ? listed : ['en-US']
+  }
+  return { apple: of('apple'), google: of('google') }
+}
+
+/**
  * Where each exported store's screenshots go and in which locales. A store's locales are the
  * locale dirs of its metadata dir narrowed by `--locale`; a store with no locale dir yet exports
  * the `--locale` ones as given, or `en-US`.
  */
-function resolveDestinations(root: string, config: KitConfig, opts: ExportOptions): StoreDestination[] {
+export function resolveDestinations(
+  root: string,
+  config: KitConfig,
+  opts: ExportOptions,
+): StoreDestination[] {
   // A blank value is a mistake (an unset variable), never the default: a blank `out` would resolve
   // to the repo root, or to a directory named " ". The command also scans its argv, because the
   // parser drops an empty value; this covers every other caller.
@@ -134,7 +152,7 @@ function resolveDestinations(root: string, config: KitConfig, opts: ExportOption
 }
 
 /** The absolute dir of the raw shots: `shots.raw`, else the `shots` suite's screenshots dir. */
-function resolveRawDir(root: string, config: KitConfig, shots: Shots): string {
+export function resolveRawDir(root: string, config: KitConfig, shots: Shots): string {
   const raw = shots.raw ?? (config.maestro ? resolveSuite(config, 'shots').screenshots : undefined)
   if (!raw) {
     throw new KitError(
@@ -278,9 +296,25 @@ function projectLabel(root: string, file: string, project: Project): string {
   return `${repoPath(root, file)} (${plural(project.slides.length, 'slide')})`
 }
 
-/** `kit shots export`: plan, render in headless Chrome, write to the store listing dirs. */
-export const exportShots: ExportShots = async (ctx, opts) => {
-  const { root, config } = requireProject(ctx)
+/** What one export run needs beyond the options: whether to render, and where to report progress. */
+export interface ExportRun {
+  dryRun: boolean
+  /** One line when rendering starts. */
+  step?: (message: string) => void
+  /** Chrome's own chatter, for `--verbose`. */
+  verbose?: (message: string) => void
+}
+
+/**
+ * Plan, render in headless Chrome and write to the store listing dirs. The body of `kit shots
+ * export` and of the studio's export route: it throws a KitError and prints nothing.
+ */
+export async function runExport(
+  root: string,
+  config: KitConfig,
+  opts: ExportOptions,
+  run: ExportRun,
+): Promise<ExportResult> {
   const shots = requireShots(config)
   const projectFile = resolve(root, shots.project)
   const project = await loadProject(projectFile)
@@ -303,26 +337,35 @@ export const exportShots: ExportShots = async (ctx, opts) => {
   // The dry pass does every ownership check, so a file in the way stops the run before Chrome starts.
   const planned = await writeExport(plan, { root, force: opts.force, dryRun: true })
   let outcome = planned
-  if (!ctx.flags.dryRun && plan.jobs.length > 0) {
+  if (!run.dryRun && plan.jobs.length > 0) {
     const chrome = requireChrome()
-    if (!ctx.flags.json)
-      ctx.log.step(`Rendering ${plural(plan.jobs.length, 'screenshot')} in headless Chrome`)
+    run.step?.(`Rendering ${plural(plan.jobs.length, 'screenshot')} in headless Chrome`)
     const images = await renderJobs(plan, {
       chrome,
       page: await pageBundle(),
       root,
-      verbose: ctx.flags.verbose ? (message) => ctx.log.dim(message) : undefined,
+      verbose: run.verbose,
     })
     outcome = await writeExport(plan, { root, images, force: opts.force, dryRun: false })
   }
 
-  const result: ExportResult = {
-    dryRun: ctx.flags.dryRun,
+  return {
+    dryRun: run.dryRun,
     stores: plan.stores,
     written: outcome.written,
     removed: outcome.removed,
     skipped: plan.skipped,
   }
+}
+
+/** `kit shots export`: `runExport`, then the report (or the `--json` document). */
+export const exportShots: ExportShots = async (ctx, opts) => {
+  const { root, config } = requireProject(ctx)
+  const result = await runExport(root, config, opts, {
+    dryRun: ctx.flags.dryRun,
+    step: ctx.flags.json ? undefined : (message) => ctx.log.step(message),
+    verbose: ctx.flags.verbose ? (message) => ctx.log.dim(message) : undefined,
+  })
   if (ctx.flags.json) emitJson(result)
   else report(ctx.log, result)
 }
