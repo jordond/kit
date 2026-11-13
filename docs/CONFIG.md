@@ -480,6 +480,28 @@ difference is named by slide and field (exit 4). `--write` replaces `shots.proje
 only proves. `--json` prints `{ dryRun, file, written, project }`. Keys of a version 1 file that kit does
 not know are dropped.
 
+**`kit shots studio`** `[--port <n>] [--no-open]` serves the screenshot editor from the built
+`dist/shots-editor/` (a source checkout without it says to run `bun run build`, or `bun run dev:studio`
+to work on it). The server listens on `127.0.0.1` only, on a port the OS picks unless `--port` is set, and
+every route sits under a random token in the URL it prints; stop it with Ctrl+C. It reads `shots.project`,
+`shots.raw`, `shots.fonts` and `shots.brand` from the config and edits `shots.project` only when that is a
+version 2 file: a version 1 file is shown read-only with `kit shots migrate --write` to run first.
+
+An edit writes one field at one scope and no other: **All slides** (`style`), **This target**
+(`targets.<target>`, the target in focus), **This slide** (the slide's `style`) or **This slide on this
+target** (the slide's `targets.<target>`). Each style control shows the layer its value comes from and a
+reset for the current scope; writing a value equal to what the layers below give removes the override and
+empty objects are dropped, so the file stays minimal. Text, shot and name belong to the slide whatever the
+scope, and the text of the locale picked in the header goes under `locales`.
+
+Edits autosave a moment after the last change, and Cmd/Ctrl+S saves at once. Each save is checked against
+the version 2 schema (a rejected save shows the bad fields and keeps your edits) and written atomically;
+if the file changed on disk since it was loaded the editor offers Reload (drop your edits) or Overwrite.
+The page warns before it is closed with unsaved changes. A new slide is picked from the raw shots
+(never copied from another slide), and a PNG can be uploaded into the raw dir of the target in focus;
+replacing an existing file asks first. With no project file the editor offers one slide per raw shot and
+writes the file only when you confirm.
+
 ## `release`
 
 ```ts
