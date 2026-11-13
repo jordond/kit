@@ -204,7 +204,8 @@ Examples
   kit shots android --dry-run --json
 
 Commands
-  export  Render the store screenshots from the raw shots and the saved project
+  export   Render the store screenshots from the raw shots and the saved project
+  migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
 
 Options
   -h, --help              Show help
@@ -1666,7 +1667,8 @@ Examples
   kit shots android --dry-run --json
 
 Commands
-  export  Render the store screenshots from the raw shots and the saved project
+  export   Render the store screenshots from the raw shots and the saved project
+  migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
 
 Options
   -h, --help              Show help
@@ -1713,6 +1715,31 @@ Options
       --out <string>     Write under <dir>/apple and <dir>/google instead of the store listing dirs
       --allow-missing    Skip slides whose raw shot is absent
       --force            Replace images in a set that kit did not write
+
+"
+`;
+
+exports[`help kit shots migrate --help 1`] = `
+"Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
+
+Usage
+  kit shots migrate [options]
+
+Examples
+  kit shots migrate
+  kit shots migrate --write
+  kit shots migrate --write --dry-run --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --write    Replace shots.project with the version 2 file (default: print it)
 
 "
 `;

@@ -1,7 +1,6 @@
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import type { DeviceTarget } from '../devices'
 import { ExitCode, KitError } from '../errors'
-import { localizeSlide } from './project'
+import { localizeSlide, resolveSlides } from './resolve'
 import { resolveSets, SET_SIZES, STORE_TARGETS, type Store } from './sizes'
 import type {
   ExportPlan,
@@ -11,35 +10,10 @@ import type {
   PlanExport,
   SkippedSlide,
   Slide,
-  SlideDevice,
   StoreDestination,
 } from './types'
 
-/** The frame that is the target's own device, and its screen corner in px of a 1320-wide canvas. */
-export const TARGET_FRAME: Record<DeviceTarget, Pick<SlideDevice, 'frameType' | 'cornerRadius'>> = {
-  ios: { frameType: 'iphone-pro', cornerRadius: 56 },
-  ipad: { frameType: 'ipad-pro', cornerRadius: 24 },
-  android: { frameType: 'android-pixel', cornerRadius: 48 },
-}
-
-const isTargetFrame = (frameType: SlideDevice['frameType']): boolean =>
-  Object.values(TARGET_FRAME).some((frame) => frame.frameType === frameType)
-
-/**
- * The slide as it is drawn for `target`. The layout is the slide's; only the raw shot, and the
- * frame when it was a target's own device, follow the target. A clay, glass or frameless choice
- * is deliberate and stays.
- */
-export function slideForTarget(slide: Slide, target: DeviceTarget): Slide {
-  if (slide.platform === target) return slide
-  return {
-    ...slide,
-    platform: target,
-    device: isTargetFrame(slide.device.frameType)
-      ? { ...slide.device, ...TARGET_FRAME[target] }
-      : slide.device,
-  }
-}
+export { slideForTarget, TARGET_FRAME } from './resolve'
 
 /**
  * The `<slug>` of an exported file name: the slide name lower-cased, every run of characters
@@ -120,8 +94,6 @@ export const planExport: PlanExport = (input) => {
     )
   }
   const sets = resolveSets(config)
-  // Array.prototype.sort is stable: slides with the same order keep their place in the file.
-  const slides = [...project.slides].sort((a, b) => a.order - b.order)
 
   const jobs: Job[] = []
   const skipped: SkippedSlide[] = []
@@ -132,6 +104,8 @@ export const planExport: PlanExport = (input) => {
     for (const target of STORE_TARGETS[store]) {
       const set = sets[target]
       const { width, height } = SET_SIZES[set]
+      // Version 1 slides sort by `order` (stable: ties keep their place in the file).
+      const slides = resolveSlides(project, target)
       for (const locale of destination.locales) {
         if (!isLocale(locale)) {
           throw new KitError(
@@ -162,7 +136,7 @@ export const planExport: PlanExport = (input) => {
             index,
             width,
             height,
-            slide: slideForTarget(localizeSlide(project, slide, locale), target),
+            slide: localizeSlide(project, slide, locale),
             shot: join(rawDir, ...found.split('/')),
             file: outputFile(destination, locale, job, slideSlug(slide)),
           })

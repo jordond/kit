@@ -13,14 +13,7 @@ import { isLocale, planExport, repoPath } from './plan'
 import { loadProject } from './project'
 import { renderJobs } from './render'
 import { APPLE_MAX_PER_CLASS, PLAY_MAX_PER_TYPE, type Store } from './sizes'
-import type {
-  ExportOptions,
-  ExportPlan,
-  ExportResult,
-  ExportShots,
-  StoreDestination,
-  StudioProject,
-} from './types'
+import type { ExportOptions, ExportPlan, ExportResult, ExportShots, Project, StoreDestination } from './types'
 import { statOrSkip, writeExport } from './write'
 
 type Shots = NonNullable<KitConfig['shots']>
@@ -281,7 +274,7 @@ function report(log: Logger, result: ExportResult): void {
 }
 
 /** The project file as an error names it. */
-function projectLabel(root: string, file: string, project: StudioProject): string {
+function projectLabel(root: string, file: string, project: Project): string {
   return `${repoPath(root, file)} (${plural(project.slides.length, 'slide')})`
 }
 

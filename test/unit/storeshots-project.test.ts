@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ExitCode, KitError } from '../../src/lib/errors'
 import { loadProject, localeText, localizeSlide, parseProject } from '../../src/lib/storeshots/project'
-import type { StudioProject } from '../../src/lib/storeshots/types'
+import type { ProjectV1 } from '../../src/lib/storeshots/types'
 
 const FIXTURE = join(import.meta.dir, '..', 'fixtures', 'shots-app', 'brand', 'studio.json')
 const fixture = (): Record<string, unknown> => JSON.parse(readFileSync(FIXTURE, 'utf8'))
@@ -30,8 +30,8 @@ async function rejected(promise: Promise<unknown>): Promise<KitError> {
 
 describe('loadProject', () => {
   test('reads a version 1 project as it is saved', async () => {
-    const project = await loadProject(FIXTURE)
-    expect(project).toEqual(fixture() as unknown as StudioProject)
+    const project = (await loadProject(FIXTURE)) as ProjectV1
+    expect(project).toEqual(fixture() as unknown as ProjectV1)
     expect(project.slides.map((s) => s.id)).toEqual(['slide-1', 'slide-2'])
     expect(project.locales?.['fr-FR']?.['slide-2']).toEqual({
       headline: 'Souvenez-vous de vos coups de cœur',
@@ -43,7 +43,7 @@ describe('loadProject', () => {
     const slides = saved.slides as Record<string, unknown>[]
     slides[0] = { ...slides[0], futureKey: { a: 1 } }
     const project = await loadProject(save('future.json', { ...saved, editor: 'next' }))
-    expect(project).toEqual({ ...saved, editor: 'next' } as unknown as StudioProject)
+    expect(project).toEqual({ ...saved, editor: 'next' } as unknown as ProjectV1)
   })
 
   test('a project without locales, imageSrc, dimensionId or savedAt is valid', async () => {
@@ -51,7 +51,7 @@ describe('loadProject', () => {
     const slides = (saved.slides as Record<string, unknown>[]).map(
       ({ imageSrc: _imageSrc, ...slide }) => slide,
     )
-    const project = await loadProject(save('bare.json', { ...saved, slides }))
+    const project = (await loadProject(save('bare.json', { ...saved, slides }))) as ProjectV1
     expect(project.locales).toBeUndefined()
     expect(project.slides[0]?.imageSrc).toBeUndefined()
   })
@@ -60,6 +60,19 @@ describe('loadProject', () => {
   const real = join(homedir(), 'dev', 'brewd', 'brand', 'screenshots', 'studio.json')
   test.skipIf(!existsSync(real))('reads the real brewd project unchanged', async () => {
     expect(await loadProject(real)).toEqual(JSON.parse(readFileSync(real, 'utf8')))
+  })
+
+  test('reads a version 2 project as it is saved', async () => {
+    const v2 = JSON.parse(readFileSync(join(FIXTURE, '..', 'studio.v2.json'), 'utf8'))
+    expect(await loadProject(join(FIXTURE, '..', 'studio.v2.json'))).toEqual(v2)
+  })
+
+  test('a version 2 project with an unknown key is refused with its path', async () => {
+    const v2 = JSON.parse(readFileSync(join(FIXTURE, '..', 'studio.v2.json'), 'utf8'))
+    v2.slides[0].style = { device: { scal: 1 } }
+    const e = await rejected(loadProject(save('v2-typo.json', v2)))
+    expect(e.exitCode).toBe(ExitCode.config)
+    expect(e.message).toContain('slides.0.style.device')
   })
 
   test('a missing file is a config error', async () => {
@@ -89,7 +102,7 @@ describe('loadProject', () => {
   })
 
   test('another version is refused', async () => {
-    const e = await rejected(loadProject(save('v2.json', { ...fixture(), version: 2 })))
+    const e = await rejected(loadProject(save('v3.json', { ...fixture(), version: 3 })))
     expect(e.exitCode).toBe(ExitCode.config)
     expect(e.message).toContain('  version: ')
   })
@@ -122,8 +135,8 @@ describe('locale text', () => {
       'fr-CA': { 'slide-1': { headline: 'Allo' } },
       'pt-BR': { 'slide-2': { headline: 'Olá' } },
     },
-  })
-  const [first, second] = project.slides as [StudioProject['slides'][0], StudioProject['slides'][0]]
+  }) as ProjectV1
+  const [first, second] = project.slides as [ProjectV1['slides'][0], ProjectV1['slides'][0]]
 
   test('the exact code wins', () => {
     expect(localeText(project, 'fr-CA', 'slide-1').headline).toBe('Allo')
@@ -169,7 +182,7 @@ describe('locale text', () => {
   })
 
   test('an empty string is a translation, not a gap', () => {
-    const p = parseProject({ ...fixture(), locales: { ja: { 'slide-1': { subheadline: '' } } } })
+    const p = parseProject({ ...fixture(), locales: { ja: { 'slide-1': { subheadline: '' } } } }) as ProjectV1
     expect(localizeSlide(p, p.slides[0]!, 'ja').subheadline.text).toBe('')
   })
 })

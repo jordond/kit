@@ -371,6 +371,13 @@ falls back to another `fr` entry before that:
 "locales": { "fr-FR": { "slide-1": { "headline": "…", "subheadline": "…", "badge": "…" } } }
 ```
 
+**Version 2 and `kit shots migrate`.** A version 2 project (`"version": 2`) holds the rules once: a
+`style`, per-target `targets`, and slides of just `shot`, `headline` and what differs. Slide ids come from
+the shot name (`01-you.png` is `you`), and `locales` is keyed by them. Version 1 files keep working.
+`kit shots migrate` prints the version 2 file; `kit shots migrate --write` replaces `shots.project` once it
+has proved that every target and locale draws the same slides (`--dry-run` only proves). The merge order,
+derived fields and the file's shape are in [docs/CONFIG.md](docs/CONFIG.md#the-project-file).
+
 **Fonts and brand.** Every font family a slide names has to be in `shots.fonts` (the CSS generics
 `sans-serif`, `serif`, `monospace` and `system-ui` aside): Chrome would draw an unknown family in a
 fallback font without complaint, so export stops first (exit 3). `brand` is the lockup drawn on slides

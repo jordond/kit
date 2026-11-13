@@ -5,7 +5,7 @@ import { configSchema, type KitConfig } from '../../src/config/schema'
 import { ExitCode, KitError } from '../../src/lib/errors'
 import { planExport, slideForTarget, slideSlug } from '../../src/lib/storeshots/plan'
 import { parseProject } from '../../src/lib/storeshots/project'
-import type { PlanInput, StoreDestination } from '../../src/lib/storeshots/types'
+import type { PlanInput, ProjectV1, StoreDestination } from '../../src/lib/storeshots/types'
 import fixtureConfig from '../fixtures/shots-app/kit.config'
 
 const ROOT = join(import.meta.dir, '..', 'fixtures', 'shots-app')
@@ -14,7 +14,9 @@ const APPLE = join(ROOT, 'fastlane', 'screenshots')
 const GOOGLE = join(ROOT, 'fastlane', 'metadata', 'android')
 
 const config = configSchema.parse(fixtureConfig)
-const project = parseProject(JSON.parse(readFileSync(join(ROOT, 'brand', 'studio.json'), 'utf8')))
+const project = parseProject(
+  JSON.parse(readFileSync(join(ROOT, 'brand', 'studio.json'), 'utf8')),
+) as ProjectV1
 
 /** The raw listing as `exportShots` passes it: every file under the raw dir, relative, `/`-separated. */
 const listing = (): Set<string> =>

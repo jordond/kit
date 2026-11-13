@@ -1,0 +1,69 @@
+{
+  "version": 2,
+  "style": {
+    "headline": {
+      "fontFamily": "Kit Fixture",
+      "fontSize": 150,
+      "color": "#2c1e14"
+    },
+    "subheadline": {
+      "fontFamily": "Kit Fixture",
+      "color": "#7a5a40",
+      "lineHeight": 1.12,
+      "shadowColor": "rgba(0, 0, 0, 0.15)",
+      "shadowBlur": 10
+    },
+    "badge": {
+      "enabled": true,
+      "text": "NEW",
+      "backgroundColor": "rgba(201, 123, 49, 0.12)",
+      "textColor": "#c97b31",
+      "borderColor": "rgba(201, 123, 49, 0.25)"
+    },
+    "device": {
+      "shadowColor": "rgba(44, 30, 20, 0.35)"
+    },
+    "background": {
+      "primaryColor": "#faf2e4",
+      "secondaryColor": "#f1e1c7",
+      "accentColor": "#c97b31"
+    }
+  },
+  "slides": [
+    {
+      "shot": "home.png",
+      "name": "1 - Home",
+      "headline": "Everything in one place",
+      "subheadline": "Your day at a glance"
+    },
+    {
+      "shot": "journal.png",
+      "name": "2 - Journal",
+      "headline": "Remember what you loved",
+      "style": {
+        "badge": {
+          "enabled": false
+        },
+        "device": {
+          "frameType": "clay-minimal",
+          "cornerRadius": 40
+        },
+        "brand": {
+          "show": false
+        }
+      }
+    }
+  ],
+  "locales": {
+    "fr-FR": {
+      "home": {
+        "headline": "Tout au même endroit",
+        "subheadline": "Votre journée en un coup d'œil",
+        "badge": "NOUVEAU"
+      },
+      "journal": {
+        "headline": "Souvenez-vous de vos coups de cœur"
+      }
+    }
+  }
+}

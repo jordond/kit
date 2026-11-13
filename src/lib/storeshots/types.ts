@@ -2,6 +2,7 @@ import type { KitContext } from '../../cli/command'
 import type { KitConfig } from '../../config/schema'
 import type { DeviceTarget } from '../devices'
 import type { SetId, Store } from './sizes'
+import type { ProjectV2 } from './types-v2'
 
 /**
  * The contract of `kit shots export`. Every module under `lib/storeshots/` codes against these
@@ -18,9 +19,11 @@ import type { SetId, Store } from './sizes'
  */
 
 export type { SetId, Size, Store } from './sizes'
+export type * from './types-v2'
 
 // ---------------------------------------------------------------------------------------------
-// The project file: brewd's `studio.json` version 1, read as is, plus an optional `locales` block.
+// The project file: version 1 is brewd's `studio.json` read as is, plus an optional `locales` block;
+// version 2 (`types-v2.ts`) holds the rules once and `resolveSlides` expands it into version 1 slides.
 // ---------------------------------------------------------------------------------------------
 
 export type FrameType =
@@ -111,7 +114,7 @@ export interface SlideDevice {
 
 /** One slide of the project (brewd's `ScreenshotSlide`). */
 export interface Slide {
-  /** Unique in the project; the key into `StudioProject.locales[locale]`. */
+  /** Unique in the project; the key into `ProjectV1.locales[locale]`. */
   id: string
   /** Position in the exported set, ascending; ties keep file order. */
   order: number
@@ -141,8 +144,8 @@ export interface SlideLocaleText {
   badge?: string
 }
 
-/** The saved project: brewd's `StudioProjectState` (`version: 1`) plus `locales`. */
-export interface StudioProject {
+/** The saved project, version 1: brewd's `StudioProjectState` plus `locales`. */
+export interface ProjectV1 {
   version: 1
   platform: DeviceTarget
   /** The editor's size choice. kit ignores it and uses its own set sizes. */
@@ -155,6 +158,9 @@ export interface StudioProject {
    */
   locales?: Record<string, Record<string, SlideLocaleText>>
 }
+
+/** A saved project of either version; `loadProject` returns one. */
+export type Project = ProjectV1 | ProjectV2
 
 // ---------------------------------------------------------------------------------------------
 // The plan
@@ -367,7 +373,7 @@ export interface PlanInput {
   root: string
   /** Read for `shots` (fonts, brand, sets); `shots` is set. */
   config: KitConfig
-  project: StudioProject
+  project: Project
   /** One per exported store, `STORES` order, locales already narrowed by `--locale`. */
   destinations: StoreDestination[]
   /** Absolute raw dir: `shots.raw`, or the resolved `shots` suite's screenshots dir. */
@@ -439,9 +445,9 @@ export type ExportShots = (ctx: KitContext, opts: ExportOptions) => Promise<void
 
 /**
  * `loadProject` in `project.ts`. `file` is absolute. A missing file or one that is not a version 1
- * project is a KitError with exit 3.
+ * or version 2 project is a KitError with exit 3.
  */
-export type LoadProject = (file: string) => Promise<StudioProject>
+export type LoadProject = (file: string) => Promise<Project>
 
 /**
  * `planExport` in `plan.ts`. Pure. Throws a KitError with exit 4 that lists every missing raw
