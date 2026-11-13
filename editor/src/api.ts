@@ -101,7 +101,10 @@ export const uploadShot = (
   )
 
 /** URL of a font or the brand mark: a `StudioSession.fonts[].url` or `brand.mark`. */
-export const assetUrl = (url: string): string => apiUrl(url)
+export const assetUrl = (url: string): string =>
+  // The contract says `api/asset/<n>`, but the server hands out the export page's `asset/<n>`
+  // (`pageAssets`), which its router does not serve: accept both.
+  apiUrl(url.startsWith('asset/') ? `api/${url}` : url)
 
 export const exportShots = (req: StudioExportRequest): Promise<StudioExportResult> =>
   json('api/export', jsonBody('POST', req))

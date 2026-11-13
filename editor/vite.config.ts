@@ -2,9 +2,11 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
 
-// The kit server `bun run dev:studio` starts. `/api` is proxied to it, so the editor's relative
-// `api/...` URLs resolve the same under the dev server as under the built page.
-const port = process.env.KIT_STUDIO_PORT ?? '4317'
+// `bun run dev:studio` starts a kit studio server and sets these. Its routes sit under a random
+// path token, so `/api` is proxied to `<origin>/<token>/api`: the editor's relative `api/...` URLs
+// then resolve the same under the dev server as under the built page.
+const origin = process.env.KIT_STUDIO_ORIGIN ?? 'http://127.0.0.1:4317'
+const token = process.env.KIT_STUDIO_TOKEN ?? ''
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -16,6 +18,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    proxy: { '/api': `http://127.0.0.1:${port}` },
+    proxy: {
+      '/api': { target: origin, rewrite: (path) => (token ? `/${token}${path}` : path) },
+    },
   },
 })
