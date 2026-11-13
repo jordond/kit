@@ -84,7 +84,7 @@ export function useDeviceGestures({ target, slide, box, layout }: Input) {
   const onDevice = (point: { x: number; y: number }): boolean => {
     const { slide: s, box: b } = latest.current
     const l = layout.current
-    return !!s && !!l && hitsDevice(point, b, l, s.device.rotation)
+    return !!s && !!l && hitsDevice(point, b, l, s.device.rotation, s.device.perspectiveTilt)
   }
 
   // A wheel listener has to be non-passive to keep the page from scrolling under a zoom.

@@ -11,6 +11,7 @@ import {
   toCanvas,
   wheelScale,
 } from '../../editor/src/gesture'
+import { deviceLinear } from '../../src/lib/storeshots/page/device-transform'
 import { STYLE_GROUPS } from '../../editor/src/panel/fields'
 import type { SlideLayout } from '../../src/lib/storeshots/page/renderer'
 
@@ -80,6 +81,32 @@ describe('placing the device by hand', () => {
     const p = { x: (500 + 300) / 5, y: 1000 / 5 }
     expect(hitsDevice(p, box, tall, 0)).toBe(false)
     expect(hitsDevice(p, box, tall, 90)).toBe(true)
+  })
+
+  test('a tilted device is hit on the quad the renderer drew, not on its untilted box', () => {
+    // Centre (500, 1450); tilt 100 shears x by 0.3 * dy: the top edge (dy -850) moves 255px left,
+    // the bottom edge 255px right.
+    const l: SlideLayout = { ...layout, device: { x: 100, y: 600, width: 800, height: 1700 } }
+    const at = (cx: number, cy: number) => ({ x: cx / 5, y: cy / 5 })
+    // Top-right corner of the untilted box: inside untilted, outside the tilted quad.
+    expect(hitsDevice(at(890, 610), box, l, 0, 0)).toBe(true)
+    expect(hitsDevice(at(890, 610), box, l, 0, 100)).toBe(false)
+    // Bottom-right, past the untilted box: outside untilted, inside the tilted quad.
+    expect(hitsDevice(at(1100, 2290), box, l, 0, 0)).toBe(false)
+    expect(hitsDevice(at(1100, 2290), box, l, 0, 100)).toBe(true)
+    // The top-left edge shifts left of the untilted box, off the canvas side: inside the quad only.
+    expect(hitsDevice(at(-100, 610), box, l, 0, 0)).toBe(false)
+    expect(hitsDevice(at(-100, 610), box, l, 0, 100)).toBe(true)
+    expect(hitsDevice(at(500, 1450), box, l, 0, 100)).toBe(true)
+  })
+
+  test('rotation and tilt together use the one shared matrix', () => {
+    const l: SlideLayout = { ...layout, device: { x: 450, y: 600, width: 100, height: 800 } }
+    const m = deviceLinear(30, 50)
+    // The device-frame corner (49, 399), taken through the draw's matrix, lands on the quad.
+    const p = { x: 500 + m.a * 49 + m.c * 399, y: 1000 + m.b * 49 + m.d * 399 }
+    expect(hitsDevice({ x: p.x / 5, y: p.y / 5 }, box, l, 30, 50)).toBe(true)
+    expect(hitsDevice({ x: p.x / 5, y: p.y / 5 }, box, l, 30, 0)).toBe(false)
   })
 
   test('wheel steps scale up and down, clamped, with a trackpad pinch moving faster', () => {
