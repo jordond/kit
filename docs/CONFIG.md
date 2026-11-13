@@ -360,7 +360,8 @@ Built-in suites exist without config, and a configured suite of the same name st
 it is missing), with a smoke flow tagged like the first stage of the `qa` suite. The reusable workflow
 `.github/workflows/mobile-qa.yml` runs `kit qa` in CI: it installs Maestro at `maestro.version`, collects
 `maestro.output` (default `<dir>/output`) as an artifact, and passes `devices.android.emulatorArgs` to the
-emulator it boots (its `emulator-args` input adds `KIT_EMULATOR_ARGS`). See the README, "Maestro in CI".
+emulator it boots (its `emulator-args` input adds `KIT_EMULATOR_ARGS`, `device-timeout-ms` sets
+`KIT_DEVICE_TIMEOUT_MS`), and honours `maestro.devices` when it boots a device. See the README, "Maestro in CI".
 
 ## `fixtures`
 

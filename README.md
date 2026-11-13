@@ -121,8 +121,12 @@ kit add maestro                                  # starter flows, settle subflow
 - App ids: `--ios` / `--android`, else `app.*` in the config, else `release.*`. With none and a terminal it
   asks once and uses the answer for both platforms; without a terminal it exits 2 naming the flags. Two
   different ids make the smoke flow launch the right one per platform (`when: platform:`).
-- A file that exists is kept, not an error: a second run writes nothing, and a deleted file comes back
-  without touching the others. `--force` overwrites them all.
+- A file that exists is kept, not an error: a second run prints `nothing to write` (`--json`: `unchanged: true`),
+  and a deleted file comes back without touching the others. `--force` overwrites them all. `--dir` cannot be
+  the repo root or a hidden directory (`.`, `.github`): exit 2.
+- The `.gitignore` entry follows `maestro.output` when it sits under the flows dir; otherwise the README says
+  to ignore it. The README also explains that `maestro.version` is pinned on purpose and how to change it.
+- Ids and tags are quoted in the YAML when needed (`null`, `yes`, a `:`).
 - `flows/smoke.yaml` gates on the placeholder `Replace with text from your first screen`, which is not on
   any screen, so it fails until you pick a string from your fixture. A gate that cannot fail is not a gate.
 
@@ -397,20 +401,20 @@ jobs:
 | `platform` | `both` | `ios`, `android` or `both` |
 | `suite` | empty | `kit qa --suite`; empty runs the `qa` suite |
 | `android-api` | `36` | API level of the Google Play system image the emulator uses |
-| `android-device` | `pixel_6` | avdmanager device definition for the AVD |
-| `ios-device` | empty | Simulator name; empty lets kit pick the newest, largest iPhone |
+| `ios-device` | empty | Simulator name to boot first. Empty skips the explicit boot, so `kit qa ios` uses `maestro.devices.ios`, else the newest, largest iPhone |
 | `emulator-args` | empty | Extra emulator arguments (`KIT_EMULATOR_ARGS`), after `devices.android.emulatorArgs` |
+| `device-timeout-ms` | `600000` | How long kit waits for a device to boot (`KIT_DEVICE_TIMEOUT_MS`) |
 | `maestro-version` | empty | Empty reads `maestro.version` from the config |
 | `bun-version`, `java-version` | `1.3.14`, `21` | Tool versions; Java serves Gradle and Maestro (17 or newer) |
 | `ios-runner`, `android-runner` | `macos-latest`, `ubuntu-latest` | Runner labels |
-| `artifact-name`, `timeout-minutes` | `qa`, `60` | Artifact prefix (`qa-ios`, `qa-android`), job timeout |
+| `artifact-name`, `timeout-minutes` | `qa`, `60` | Artifact prefix, job timeout. Artifacts are `<prefix>-<suite>-<platform>` (`qa-qa-ios`, `qa-nightly-android`), so calls with different suites do not collide |
 
 Each job installs the repo's dependencies and Java and Gradle, installs Maestro at the pinned version, then
-boots the device with `kit device boot` and runs `kit qa` in the same step. On Linux the AVD is created
-from a Google Play image (fixtures go through `run-as`, never `adb root`). Both jobs upload the Maestro run
-directories (`maestro.output`, default `<maestro.dir>/output`) and a JUnit report as an artifact, pass or
-fail; the Android artifact also holds the emulator log, which is what explains a boot that hung. The repo
-needs a `maestro` block in `kit.config.ts` and an app kit can build; the workflow takes no secrets, so a
+runs `kit qa`, which boots the device when none is running. On Linux the workflow installs only the chosen
+API's Google Play system image and kit creates the AVD on it (fixtures go through `run-as`, never `adb root`);
+`maestro.devices.android` names an AVD instead. Both jobs upload the Maestro run directories (`maestro.output`,
+default `<maestro.dir>/output`) and a JUnit report as an artifact, pass or fail; the Android artifact also holds
+the emulator log, which is what explains a boot that hung. The repo needs a `maestro` block in `kit.config.ts` and an app kit can build; the workflow takes no secrets, so a
 build that needs some is not covered yet. It has not been run on a hosted runner.
 
 ### Store screenshots
