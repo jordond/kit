@@ -1,6 +1,6 @@
 {
   "name": "@jordond/kit",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "One dev toolkit for every app: CLI, shared fastlane, Gradle conventions",
   "license": "MIT",
   "type": "module",
