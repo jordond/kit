@@ -11,6 +11,8 @@ kit --help
 Install it globally too (`bun add -g @jordond/kit`) to get `kit` on your `PATH`: the global launcher finds
 the nearest `kit.config.ts` and runs that repo's own pinned copy.
 
+Every `kit.config.ts` field, with defaults and full examples: [docs/CONFIG.md](docs/CONFIG.md).
+
 ### Install dir: the root or `.kit/`
 
 kit is a dev dependency in the root `package.json`, or in `.kit/package.json` for repos that must not have

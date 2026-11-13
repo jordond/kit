@@ -7,7 +7,7 @@ build/
 .DS_Store
 
 # local-only: planning docs, agent handoffs, spike notes
-docs/
+docs/agent/
 spikes/
 
 # agent worktrees
