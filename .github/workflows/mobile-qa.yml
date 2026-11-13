@@ -18,8 +18,8 @@ name: mobile-qa
 #
 # What the repo provides: a `maestro` block in kit.config.ts with flows (`kit add maestro` writes a
 # starter), an app kit can build (`app` or `release` in the config), and a fixture when the suite
-# loads one. kit does the rest: the device (an AVD kit's own code boots on a Google Play image,
-# so fixtures go through `run-as` and need no `adb root`), the debug build, the install, the flows.
+# loads one. kit does the rest: the device (kit creates and boots the AVD on the Google Play image
+# the workflow installs, so fixtures go through `run-as` and need no `adb root`), the debug build, the install, the flows.
 #
 # The setup is inlined rather than using kit's composite action: a reusable workflow cannot
 # reference its own repo's action at its own SHA.
@@ -44,13 +44,8 @@ on:
         required: false
         type: string
         default: '36'
-      android-device:
-        description: avdmanager device definition for the AVD this workflow creates and kit boots (maestro.devices.android does not apply)
-        required: false
-        type: string
-        default: pixel_6
       ios-device:
-        description: Simulator name to boot (empty = kit's newest, largest iPhone)
+        description: Simulator name to boot first (empty = no explicit boot; `kit qa ios` picks maestro.devices.ios, else the newest, largest iPhone)
         required: false
         type: string
         default: ''
@@ -59,6 +54,11 @@ on:
         required: false
         type: string
         default: ''
+      device-timeout-ms:
+        description: How long kit waits for a device to boot, KIT_DEVICE_TIMEOUT_MS (a cold boot on a hosted runner is slow)
+        required: false
+        type: string
+        default: '600000'
       maestro-version:
         description: Maestro CLI version (empty = maestro.version from kit.config.ts, else the installer's latest)
         required: false
@@ -83,7 +83,7 @@ on:
         type: string
         default: ubuntu-latest
       artifact-name:
-        description: Artifact name prefix; the platform is appended (qa-ios, qa-android)
+        description: Artifact name prefix; the suite and platform are appended (qa-qa-ios, qa-nightly-android), so two calls with different suites do not collide
         required: false
         type: string
         default: qa
@@ -105,7 +105,11 @@ jobs:
         env:
           PLATFORM: ${{ inputs.platform }}
           ANDROID_API: ${{ inputs.android-api }}
+          SUITE: ${{ inputs.suite }}
+          TIMEOUT_MS: ${{ inputs.device-timeout-ms }}
         run: |
+          case "$SUITE" in *[!A-Za-z0-9._-]*) echo "::error::suite may only hold letters, digits, . _ and -, got '$SUITE'"; exit 2 ;; esac
+          case "$TIMEOUT_MS" in ''|*[!0-9]*) echo "::error::device-timeout-ms must be a number, got '$TIMEOUT_MS'"; exit 2 ;; esac
           case "$PLATFORM" in ios|android|both) ;; *) echo "::error::platform must be ios, android or both, got '$PLATFORM'"; exit 2 ;; esac
           case "$ANDROID_API" in ''|*[!0-9]*) echo "::error::android-api must be a number, got '$ANDROID_API'"; exit 2 ;; esac
 
@@ -119,6 +123,7 @@ jobs:
       CI: 'true'
       SUITE: ${{ inputs.suite }}
       IOS_DEVICE: ${{ inputs.ios-device }}
+      KIT_DEVICE_TIMEOUT_MS: ${{ inputs.device-timeout-ms }}
       MAESTRO_VERSION_INPUT: ${{ inputs.maestro-version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -179,15 +184,14 @@ jobs:
           [ -n "$out" ] || { echo "::error::kit.config.ts sets no maestro block (kit add maestro writes one)"; exit 1; }
           echo "MAESTRO_OUTPUT=$out" >> "$GITHUB_ENV"
 
-      # Boot and run in one step: kit boots the simulator (creating one when the runner has none),
-      # `kit qa` builds, installs, loads the fixture and runs the suite on it.
+      # `kit qa ios` boots a simulator when none is running (maestro.devices.ios, else the newest,
+      # largest iPhone), then builds, installs, loads the fixture and runs the suite. An explicit
+      # boot only when ios-device names one: it would bypass maestro.devices.ios otherwise.
       - name: kit qa ios
         run: |
           mkdir -p qa-report
-          boot=(device boot ios --yes)
-          [ -z "$IOS_DEVICE" ] || boot+=(--device "$IOS_DEVICE")
-          kit "${boot[@]}"
-          qa=(qa ios --junit qa-report/ios.xml)
+          if [ -n "$IOS_DEVICE" ]; then kit device boot ios --device "$IOS_DEVICE" --yes; fi
+          qa=(qa ios --yes --junit qa-report/ios.xml)
           [ -z "$SUITE" ] || qa+=(--suite "$SUITE")
           kit "${qa[@]}"
 
@@ -196,7 +200,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: ${{ inputs.artifact-name }}-ios
+          name: ${{ inputs.artifact-name }}-${{ inputs.suite || 'qa' }}-ios
           path: |
             ${{ env.MAESTRO_OUTPUT }}
             qa-report
@@ -213,10 +217,9 @@ jobs:
       CI: 'true'
       SUITE: ${{ inputs.suite }}
       ANDROID_API: ${{ inputs.android-api }}
-      ANDROID_DEVICE: ${{ inputs.android-device }}
+      KIT_DEVICE_TIMEOUT_MS: ${{ inputs.device-timeout-ms }}
       KIT_EMULATOR_ARGS: ${{ inputs.emulator-args }}
       MAESTRO_VERSION_INPUT: ${{ inputs.maestro-version }}
-      AVD_NAME: kit_ci
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -279,41 +282,40 @@ jobs:
           [ -n "$out" ] || { echo "::error::kit.config.ts sets no maestro block (kit add maestro writes one)"; exit 1; }
           echo "MAESTRO_OUTPUT=$out" >> "$GITHUB_ENV"
 
-      # A Google Play image (kit's rule for every emulator it boots): app data is reached through
-      # `run-as` on the debug build, never `adb root`. The AVD gets the same disk and keyboard
-      # settings kit gives the ones it creates.
-      - name: Create the emulator
+      # Only the chosen API's Google Play image is installed (kit's rule for every emulator it
+      # boots: app data is reached through `run-as` on the debug build, never `adb root`), so the
+      # newest installed Play image kit picks when it creates the AVD is this one.
+      - name: Install the emulator and its system image
         run: |
           sdk=${ANDROID_HOME:-$ANDROID_SDK_ROOT}
           sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
-          avdmanager=$sdk/cmdline-tools/latest/bin/avdmanager
-          image="system-images;android-${ANDROID_API};google_apis_playstore;x86_64"
           yes | "$sdkmanager" --licenses > /dev/null || true
-          "$sdkmanager" --install platform-tools emulator "$image"
-          echo no | "$avdmanager" create avd --force -n "$AVD_NAME" -k "$image" -d "$ANDROID_DEVICE"
-          ini="$HOME/.android/avd/$AVD_NAME.avd/config.ini"
-          printf 'disk.dataPartition.size=8G\nhw.keyboard=yes\n' >> "$ini"
+          "$sdkmanager" --install platform-tools emulator "system-images;android-${ANDROID_API};google_apis_playstore;x86_64"
 
-      # Boot and run in one step so the emulator outlives nothing it should not. kit adds
-      # -no-window -no-audio -no-boot-anim on CI, then devices.android.emulatorArgs, then
-      # KIT_EMULATOR_ARGS, and waits for sys.boot_completed.
+      # `kit qa android` creates the AVD when there is none (kit's own code: Pixel definition, the
+      # Play image above, 8G data partition), boots it with -no-window -no-audio -no-boot-anim on CI,
+      # then devices.android.emulatorArgs, then KIT_EMULATOR_ARGS, waits for sys.boot_completed, and
+      # runs the suite on it. maestro.devices.android, when set, names the AVD instead.
       - name: kit qa android
         run: |
           mkdir -p qa-report
-          kit device boot android --device "$AVD_NAME" --yes
-          qa=(qa android --junit qa-report/android.xml)
+          qa=(qa android --yes --junit qa-report/android.xml)
           [ -z "$SUITE" ] || qa+=(--suite "$SUITE")
           kit "${qa[@]}"
 
-      # The emulator log is what explains a boot that hung (a stale netsimd, a flag the image needs).
+      # The emulator log explains a boot that hung (a stale netsimd, a flag the image needs). It is
+      # copied into qa-report so the artifact's root is the workspace, not /.
+      - name: Collect the emulator log
+        if: always()
+        run: cp "${TMPDIR:-/tmp}"/kit-emulator-*.log qa-report/ 2>/dev/null || true
+
       - name: Upload Maestro output
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: ${{ inputs.artifact-name }}-android
+          name: ${{ inputs.artifact-name }}-${{ inputs.suite || 'qa' }}-android
           path: |
             ${{ env.MAESTRO_OUTPUT }}
             qa-report
-            /tmp/kit-emulator-*.log
           if-no-files-found: warn
           retention-days: 14

@@ -18,10 +18,10 @@ describe('mobile-qa.yml', () => {
     expect(Object.keys(inputs).sort()).toEqual(
       [
         'android-api',
-        'android-device',
         'android-runner',
         'artifact-name',
         'bun-version',
+        'device-timeout-ms',
         'emulator-args',
         'ios-device',
         'ios-runner',
@@ -50,7 +50,11 @@ describe('mobile-qa.yml', () => {
     expect(runs).toContain('99-kvm4all.rules')
     expect(runs).toContain('google_apis_playstore')
     expect(runs).not.toContain('adb root')
-    expect(runs).toContain('kit device boot android --device "$AVD_NAME"')
+    expect(runs).toContain('kit "${qa[@]}"')
+    expect(runs).not.toContain('avdmanager')
+    expect(runs).not.toContain('config.ini')
+    expect(android.env?.KIT_DEVICE_TIMEOUT_MS).toBe('${{ inputs.device-timeout-ms }}')
+    expect(doc.on.workflow_call.inputs['device-timeout-ms']?.default).toBe('600000')
     expect(android.env?.KIT_EMULATOR_ARGS).toBe('${{ inputs.emulator-args }}')
     expect(android['runs-on']).toBe('${{ inputs.android-runner }}')
   })
@@ -59,7 +63,23 @@ describe('mobile-qa.yml', () => {
     const ios = doc.jobs.ios!
     expect(ios['runs-on']).toBe('${{ inputs.ios-runner }}')
     expect(doc.on.workflow_call.inputs['ios-runner']?.default).toBe('macos-latest')
-    expect(ios.steps.map((s) => s.run ?? '').join('\n')).toContain('kit "${boot[@]}"')
+    const runs = ios.steps.map((s) => s.run ?? '').join('\n')
+    // An explicit boot only when ios-device is set: otherwise `kit qa ios` honours maestro.devices.ios.
+    expect(runs).toContain(
+      'if [ -n "$IOS_DEVICE" ]; then kit device boot ios --device "$IOS_DEVICE" --yes; fi',
+    )
+    expect(runs).toContain('qa=(qa ios --yes')
+  })
+
+  test('artifacts are named by suite and carry the emulator log inside the report dir', () => {
+    for (const job of ['ios', 'android']) {
+      const upload = doc.jobs[job]!.steps.find((s) => s.uses?.startsWith('actions/upload-artifact@')) as {
+        with: { name: string; path: string }
+      }
+      expect(upload.with.name).toBe(`\${{ inputs.artifact-name }}-\${{ inputs.suite || 'qa' }}-${job}`)
+      expect(upload.with.path).not.toContain('/tmp')
+    }
+    expect(text).toContain('qa-report/ 2>/dev/null || true')
   })
 
   test('every action is pinned by a full SHA, and no input is interpolated into a script', () => {
