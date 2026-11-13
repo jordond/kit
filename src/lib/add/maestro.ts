@@ -1,8 +1,8 @@
-import { join } from 'node:path'
+import { isAbsolute, join, relative } from 'node:path'
 import { ExitCode, KitError } from '../errors'
 import { type FileAction, fill, type ReadFile } from '../scaffold'
 import { appendProperty, configObject, lineEndings } from './edits'
-import type { AddPlan } from './plan'
+import { type AddPlan, parseDir } from './plan'
 
 /**
  * Plan for `kit add maestro`: the starter flows directory (config.yaml, a smoke flow, the settle
@@ -26,6 +26,29 @@ export function validateAppId(id: string, flag: string): string {
   return id
 }
 
+/**
+ * The flows directory, repo-relative: never the repo root and never a hidden directory (`.`,
+ * `.git`, `.github`), since the scaffold writes a README, config.yaml and .gitignore into it.
+ */
+export function parseFlowsDir(dir: string, flag = '--dir'): string {
+  const clean = parseDir(dir, flag)
+  if (clean === '.' || clean.split('/').some((seg) => seg.startsWith('.'))) {
+    throw new KitError(
+      `${flag} "${dir}" cannot be the repo root or a hidden directory`,
+      'Use a directory of its own, e.g. maestro or apps/client/maestro',
+      ExitCode.usage,
+    )
+  }
+  return clean
+}
+
+/** A YAML scalar that reads back as the same string: plain when safe, else double-quoted. */
+export function yamlScalar(value: string): string {
+  const plain =
+    /^[A-Za-z][\w.-]*$/.test(value) && !/^(y|n|yes|no|true|false|null|on|off|nan|inf)$/i.test(value)
+  return plain ? value : JSON.stringify(value)
+}
+
 export interface MaestroInput {
   /** Repo-relative flows directory. */
   dir: string
@@ -33,6 +56,8 @@ export interface MaestroInput {
   android?: string
   /** Tags the smoke flow carries: the first stage of the `qa` suite. */
   tags: string[]
+  /** `maestro.output` as configured (repo-relative), when set. */
+  output?: string
   configFile: string
   /** True when the config already has a `maestro` block (nothing to add there). */
   hasBlock: boolean
@@ -86,7 +111,7 @@ export function launchBlock(ios: string | undefined, android: string | undefined
   const launch = (pad: string, appId?: string) =>
     [
       `${pad}- launchApp:`,
-      ...(appId ? [`${pad}    appId: ${appId}`] : []),
+      ...(appId ? [`${pad}    appId: ${yamlScalar(appId)}`] : []),
       `${pad}    stopApp: true`,
       `${pad}    permissions:`,
       `${pad}      all: allow`,
@@ -109,7 +134,7 @@ export function primaryAppId(ios: string | undefined, android: string | undefine
 function render(templates: Record<string, string>, file: string, vars: Record<string, string>): string {
   const text = templates[`maestro/${file}`]
   if (text === undefined) throw new Error(`kit template add/maestro/${file} is missing`)
-  const out = fill(text, vars)
+  const out = fill(text, vars).replace(/\n{3,}/g, '\n\n')
   const left = out.match(/\{\{\w+\}\}/)
   if (left) throw new Error(`kit template add/maestro/${file}: no value for ${left[0]}`)
   return out
@@ -121,8 +146,8 @@ const FILES = ['config.yaml', 'flows/smoke.yaml', 'subflows/settle.yaml', 'READM
 export function planMaestro(input: MaestroInput): AddPlan {
   const { dir, read } = input
   const vars = {
-    appId: primaryAppId(input.ios, input.android),
-    tags: input.tags.map((t) => `  - ${t}`).join('\n'),
+    appId: yamlScalar(primaryAppId(input.ios, input.android)),
+    tags: input.tags.map((t) => `  - ${yamlScalar(t)}`).join('\n'),
     launch: launchBlock(input.ios, input.android),
   }
   const actions: FileAction[] = []
@@ -146,9 +171,22 @@ export function planMaestro(input: MaestroInput): AddPlan {
       })
     }
   }
+  // Where Maestro's run dirs go: `<dir>/output` unless maestro.output says otherwise.
+  const under =
+    input.output === undefined ? 'output' : relative(dir, parseDir(input.output, 'maestro.output'))
+  const inside = !under.startsWith('..') && under !== '' && !isAbsolute(under)
+  const outputVars = {
+    outputLine: inside ? `${`${under}/`.padEnd(22)}Maestro's run dirs (ignored by git)\n` : '',
+    outputNote: inside
+      ? ''
+      : `Maestro writes its run dirs to \`${input.output}\`, outside this directory. Make sure that\ndirectory is ignored by git: nothing here does it for you.\n`,
+  }
   const files: [string, string][] = [
-    ...FILES.map((f) => [f, render(input.templates, f, vars)] as [string, string]),
-    ['.gitignore', 'output/\n'],
+    ...FILES.map(
+      (f) =>
+        [f, render(input.templates, f, { ...vars, ...outputVars, version: MAESTRO_PIN })] as [string, string],
+    ),
+    ...(inside ? ([['.gitignore', `${under}/\n`]] as [string, string][]) : []),
   ]
   for (const [rel, content] of files) {
     const path = join(dir, rel)

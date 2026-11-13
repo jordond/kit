@@ -100,6 +100,76 @@ describe('kit add maestro', () => {
     expect(read('kit.config.ts')).toBe(config)
   })
 
+  test('a rerun with every file present says nothing to write, and --json says unchanged', async () => {
+    bare()
+    await f.kit(['add', 'maestro'])
+    const r = await f.kit(['add', 'maestro'])
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('nothing to write')
+    expect(r.stderr).not.toContain('added maestro')
+    const json = await f.kit(['add', 'maestro', '--json'])
+    expect(JSON.parse(json.stdout)).toMatchObject({ ok: true, dryRun: false, unchanged: true })
+  })
+
+  test.each(['.', './', '.github', '.hidden/maestro', 'apps/.hidden'])('--dir %s is refused', async (dir) => {
+    bare()
+    const before = read('kit.config.ts')
+    const r = await f.kit(['add', 'maestro', '--dir', dir, '--force'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('cannot be the repo root or a hidden directory')
+    expect(read('kit.config.ts')).toBe(before)
+    expect(has('README.md')).toBe(false)
+  })
+
+  test('ids and tags that YAML would misread are quoted', async () => {
+    bare()
+    put(
+      'kit.config.ts',
+      "export default { name: 'x', maestro: { dir: 'maestro', suites: { qa: { tags: ['a: b #c', 'yes', \"it's\"] } } } }\n",
+    )
+    const r = await f.kit(['add', 'maestro', '--ios', 'null', '--android', 'app.ok'])
+    expect(r.code).toBe(0)
+    const [header, steps] = Bun.YAML.parse(read('maestro/flows/smoke.yaml')) as [
+      { appId: string; tags: string[] },
+      unknown[],
+    ]
+    expect(header.appId).toBe('null')
+    expect(header.tags).toEqual(['a: b #c', 'yes', "it's"])
+    expect(JSON.stringify(steps)).toContain('"appId":"app.ok"')
+    expect((Bun.YAML.parse(read('maestro/subflows/settle.yaml')) as [{ appId: string }])[0].appId).toBe(
+      'null',
+    )
+  })
+
+  test('maestro.output under the flows dir sets the ignore entry; elsewhere the README says so', async () => {
+    bare()
+    put(
+      'kit.config.ts',
+      "export default { name: 'x', maestro: { dir: 'maestro', output: 'maestro/runs/out' } }\n",
+    )
+    await f.kit(['add', 'maestro', '--ios', 'app.x'])
+    expect(read('maestro/.gitignore')).toBe('runs/out/\n')
+    expect(read('maestro/README.md')).toContain('runs/out/')
+    f.cleanup()
+    bare()
+    put(
+      'kit.config.ts',
+      "export default { name: 'x', maestro: { dir: 'maestro', output: 'build/maestro' } }\n",
+    )
+    await f.kit(['add', 'maestro', '--ios', 'app.x'])
+    expect(has('maestro/.gitignore')).toBe(false)
+    expect(read('maestro/README.md')).toContain('`build/maestro`, outside this directory')
+    expect(read('maestro/README.md')).not.toContain('(ignored by')
+  })
+
+  test('the README says the Maestro version is pinned on purpose', async () => {
+    bare()
+    await f.kit(['add', 'maestro'])
+    expect(read('maestro/README.md')).toContain('is pinned on\npurpose')
+    expect(read('maestro/README.md')).toContain('2.9.0')
+    expect(read('maestro/README.md')).not.toMatch(/\{\{\w+\}\}/)
+  })
+
   test('a deleted file comes back without touching the others', async () => {
     bare()
     await f.kit(['add', 'maestro'])

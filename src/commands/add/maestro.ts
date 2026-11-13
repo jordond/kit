@@ -36,8 +36,8 @@ export default defineCommand({
     const { CONFIG_FILE, configFile } = await import('../../config/load')
     const { ExitCode, KitError } = await import('../../lib/errors')
     const { addTemplates, applyAdd } = await import('../../lib/add/apply')
-    const { DEFAULT_MAESTRO_DIR, planMaestro, validateAppId } = await import('../../lib/add/maestro')
-    const { parseDir } = await import('../../lib/add/plan')
+    const { DEFAULT_MAESTRO_DIR, parseFlowsDir, planMaestro, validateAppId } =
+      await import('../../lib/add/maestro')
     const { resolveSuite } = await import('../../lib/maestro/suites')
     const { text } = await import('../../lib/prompt')
     const { kitPackageRoot } = await import('../init')
@@ -48,8 +48,8 @@ export default defineCommand({
     }
     let dir = config.maestro?.dir
     if (ctx.args.dir !== undefined) {
-      const wanted = parseDir(ctx.args.dir)
-      if (dir !== undefined && parseDir(dir) !== wanted) {
+      const wanted = parseFlowsDir(ctx.args.dir)
+      if (dir !== undefined && parseFlowsDir(dir, 'maestro.dir') !== wanted) {
         throw new KitError(
           `--dir "${wanted}" differs from maestro.dir "${dir}" in the config`,
           'Change maestro.dir in kit.config.ts, or drop --dir',
@@ -58,7 +58,7 @@ export default defineCommand({
       }
       dir = wanted
     }
-    dir = parseDir(dir ?? DEFAULT_MAESTRO_DIR, 'maestro.dir')
+    dir = parseFlowsDir(dir ?? DEFAULT_MAESTRO_DIR, dir === undefined ? '--dir' : 'maestro.dir')
 
     // An explicit flag wins; then the app block, then the release block; then a question.
     let ios = ctx.args.ios ?? config.app?.ios?.bundleId ?? config.release?.ios?.bundleIds[0]
@@ -87,6 +87,7 @@ export default defineCommand({
       ios,
       android,
       tags,
+      output: config.maestro?.output,
       configFile: file,
       hasBlock: config.maestro !== undefined,
       templates: addTemplates(kitPackageRoot()),

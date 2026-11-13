@@ -17,9 +17,9 @@ kit lint maestro          # maestro check-syntax over every flow
 config.yaml           stops `maestro test` from running subflows as flows
 flows/                one file per run, each tagged
 subflows/             reusable pieces; not runnable on their own
-output/               Maestro's run dirs (ignored by git)
-```
+{{outputLine}}```
 
+{{outputNote}}
 A flow is selected by its tags. `kit qa` runs the suite named `qa` in `kit.config.ts`
 (default: tag `smoke`). A flow nobody runs rots quietly, so give every flow a tag that
 some suite runs.
@@ -29,6 +29,13 @@ its own: `stages: [['smoke'], ['onboarding']]`. Do not rely on `executionOrder` 
 `config.yaml`: under `--include-tags` a filtered-out first entry errors and a
 filtered-out middle entry silently drops the ordering. kit runs each stage as its own
 Maestro invocation instead.
+
+## The Maestro version is pinned
+
+`maestro.version` in `kit.config.ts` ({{version}} when this was scaffolded) is pinned on
+purpose. `kit doctor` compares it with the installed CLI and the `mobile-qa` workflow installs
+exactly it, so a flow that passes today passes on CI next month. To move to a newer Maestro,
+change that one line, then run `kit lint maestro` and `kit qa` on both platforms before merging.
 
 ## The settle gate
 
