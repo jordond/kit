@@ -26,28 +26,39 @@ export type * from './types-v2'
 // version 2 (`types-v2.ts`) holds the rules once and `resolveSlides` expands it into version 1 slides.
 // ---------------------------------------------------------------------------------------------
 
-export type FrameType =
-  | 'iphone-pro'
-  | 'ipad-pro'
-  | 'android-pixel'
-  | 'clay-minimal'
-  | 'frameless'
-  | 'glass-card'
+/** The value lists behind the unions below; the editor builds its selects from them. */
+export const FRAME_TYPES = [
+  'iphone-pro',
+  'ipad-pro',
+  'android-pixel',
+  'clay-minimal',
+  'frameless',
+  'glass-card',
+] as const
+export type FrameType = (typeof FRAME_TYPES)[number]
 
-export type FrameColor =
-  | 'titanium-natural'
-  | 'titanium-black'
-  | 'titanium-desert'
-  | 'titanium-silver'
-  | 'espresso'
-  | 'cream'
+export const FRAME_COLORS = [
+  'titanium-natural',
+  'titanium-black',
+  'titanium-desert',
+  'titanium-silver',
+  'espresso',
+  'cream',
+] as const
+export type FrameColor = (typeof FRAME_COLORS)[number]
 
-export type DevicePosition = 'bottom-peek' | 'center-float' | 'top-peek' | 'angled-3d' | 'full-bleed'
-export type ShadowElevation = 'none' | 'subtle' | 'medium' | 'deep' | 'dramatic'
-export type BackgroundType = 'solid' | 'linear-gradient' | 'radial-gradient' | 'mesh-glow' | 'panorama'
-export type BackgroundPattern = 'none' | 'coffee-beans' | 'warm-glow' | 'subtle-grid' | 'rings'
-export type BadgeIcon = 'cup' | 'star' | 'sparkles' | 'map' | 'heart' | 'check' | 'none'
-export type MascotPosition = 'top-center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+export const DEVICE_POSITIONS = ['bottom-peek', 'center-float', 'top-peek', 'angled-3d', 'full-bleed'] as const
+export type DevicePosition = (typeof DEVICE_POSITIONS)[number]
+export const SHADOW_ELEVATIONS = ['none', 'subtle', 'medium', 'deep', 'dramatic'] as const
+export type ShadowElevation = (typeof SHADOW_ELEVATIONS)[number]
+export const BACKGROUND_TYPES = ['solid', 'linear-gradient', 'radial-gradient', 'mesh-glow', 'panorama'] as const
+export type BackgroundType = (typeof BACKGROUND_TYPES)[number]
+export const BACKGROUND_PATTERNS = ['none', 'coffee-beans', 'warm-glow', 'subtle-grid', 'rings'] as const
+export type BackgroundPattern = (typeof BACKGROUND_PATTERNS)[number]
+export const BADGE_ICONS = ['cup', 'star', 'sparkles', 'map', 'heart', 'check', 'none'] as const
+export type BadgeIcon = (typeof BADGE_ICONS)[number]
+export const MASCOT_POSITIONS = ['top-center', 'top-left', 'top-right', 'bottom-left', 'bottom-right'] as const
+export type MascotPosition = (typeof MASCOT_POSITIONS)[number]
 
 export interface SlideBackground {
   type: BackgroundType
