@@ -196,6 +196,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/shots/export'),
   },
   {
+    path: ['shots', 'migrate'],
+    description: 'Rewrite the saved shots project as a version 2 project (rules once, sparse slides)',
+    group: 'Quality',
+    load: () => import('../commands/shots/migrate'),
+  },
+  {
     path: ['maestro'],
     description: 'Run the Maestro CLI (arguments pass through)',
     group: 'Develop',

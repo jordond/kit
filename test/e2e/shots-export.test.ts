@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -77,6 +78,14 @@ function editProject(change: (project: ProjectV1) => void) {
   writeFileSync(file, JSON.stringify(project, null, 2))
 }
 
+/** The project file of the fixture copy replaced by the version 2 copy committed beside it. */
+function useVersion2() {
+  copyFileSync(path('brand/studio.v2.json'), path('brand/studio.json'))
+}
+
+/** Every PNG the export wrote: its path, and its bytes. */
+const written = (): [string, Buffer][] => pngs().map((file) => [file, readFileSync(path(file))])
+
 function editConfig(from: string | RegExp, to: string) {
   const file = path('kit.config.ts')
   const before = readFileSync(file, 'utf8')
@@ -143,6 +152,63 @@ describe('kit shots export', () => {
     expect(r.stderr).toContain('apple en-US: 2 x iphone-6.9 1320x2868, 2 x ipad-13 2064x2752')
     expect(r.stderr).toContain('google fr-FR: 2 x phone 1440x2560')
     expect(r.stderr).toContain('✔ 12 screenshots written')
+  })
+
+  test('a version 2 copy of the project exports the same files, sizes and image sizes', async () => {
+    setup()
+    const v1 = json((await run(['--json'])).stdout)
+    const v1Sizes = pngs().map((file) => [file, readFileSync(path(file)).length])
+    rmSync(path('fastlane/screenshots'), { recursive: true, force: true })
+    rmSync(path(GOOGLE + '/en-US/' + PHONE), { recursive: true, force: true })
+    rmSync(path(GOOGLE + '/fr-FR/' + PHONE), { recursive: true, force: true })
+    rmSync(path(GOOGLE + '/.kit-shots.json'), { force: true })
+
+    useVersion2()
+    const r = await run(['--json'])
+    expect(r.code).toBe(0)
+    const v2 = json(r.stdout)
+    const shape = (doc: ExportResult) => doc.written.map(({ slide: _slide, ...rest }) => rest)
+    expect(shape(v2)).toEqual(shape(v1))
+    expect(pngs().map((file) => [file, readFileSync(path(file)).length])).toEqual(v1Sizes)
+    // The ids are the derived ones.
+    expect(v2.written[0]?.slide).toBe('home')
+  })
+
+  test('kit shots migrate prints the version 2 project, and --write replaces the file', async () => {
+    setup()
+    const before = readFileSync(path('brand/studio.json'), 'utf8')
+    const printed = await f.kit(['shots', 'migrate'])
+    expect(printed.code).toBe(0)
+    expect(JSON.parse(printed.stdout)).toEqual(JSON.parse(readFileSync(path('brand/studio.v2.json'), 'utf8')))
+    expect(readFileSync(path('brand/studio.json'), 'utf8')).toBe(before)
+
+    const dry = await f.kit(['shots', 'migrate', '--write', '--dry-run', '--json'])
+    expect(dry.code).toBe(0)
+    expect(JSON.parse(dry.stdout)).toMatchObject({ dryRun: true, written: false, file: 'brand/studio.json' })
+    expect(readFileSync(path('brand/studio.json'), 'utf8')).toBe(before)
+
+    const write = await f.kit(['shots', 'migrate', '--write'])
+    expect(write.code).toBe(0)
+    expect(write.stderr).toContain('brand/studio.json is now a version 2 project (2 slides)')
+    expect(JSON.parse(readFileSync(path('brand/studio.json'), 'utf8'))).toEqual(
+      JSON.parse(readFileSync(path('brand/studio.v2.json'), 'utf8')),
+    )
+
+    const again = await f.kit(['shots', 'migrate', '--write'])
+    expect(again.code).toBe(4)
+    expect(again.stderr).toContain('already a version 2 project')
+  })
+
+  test('kit shots migrate writes nothing when the round trip fails', async () => {
+    setup()
+    editProject((project) => {
+      project.slides[0]!.device.cornerRadius = 20
+    })
+    const before = readFileSync(path('brand/studio.json'), 'utf8')
+    const r = await f.kit(['shots', 'migrate', '--write'])
+    expect(r.code).toBe(4)
+    expect(r.stderr).toContain('slide slide-1 ipad device.cornerRadius: 24 -> 20')
+    expect(readFileSync(path('brand/studio.json'), 'utf8')).toBe(before)
   })
 
   test('--json prints the one document', async () => {
@@ -665,5 +731,18 @@ describe.skipIf(process.env.KIT_CHROME_TEST !== '1')('kit shots export with a re
     expect(info(`${APPLE}/en-US/01_iphone-6.9_1-home.png`)).toMatchObject({ width: 1320, height: 2868 })
     expect(info(`${APPLE}/en-US/01_ipad-13_1-home.png`)).toMatchObject({ width: 2064, height: 2752 })
     expect(info(`${GOOGLE}/en-US/${PHONE}/01_1-home.png`)).toMatchObject({ width: 1440, height: 2560 })
+  }, 120_000)
+
+  test('the version 2 copy of the project renders the same images, byte for byte', async () => {
+    const kit = real()
+    expect((await kit(['--locale', 'en-US'])).code).toBe(0)
+    const v1 = written()
+    rmSync(path('fastlane'), { recursive: true, force: true })
+    useVersion2()
+    expect((await kit(['--locale', 'en-US'])).code).toBe(0)
+    const v2 = written()
+    expect(v1.length).toBe(6)
+    expect(v2.map(([file]) => file)).toEqual(v1.map(([file]) => file))
+    for (const [i, [file, bytes]] of v1.entries()) expect(v2[i]![1].equals(bytes), file).toBe(true)
   }, 120_000)
 })
