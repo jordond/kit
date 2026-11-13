@@ -19,7 +19,7 @@ export function addTemplates(kitRoot: string): Record<string, string> {
 }
 
 export interface Added {
-  add: 'module' | 'target'
+  add: 'module' | 'target' | 'maestro'
   name: string
   /** Repo-relative directory of the module or target. */
   dir: string
@@ -51,9 +51,11 @@ async function configProblem(root: string, added: Added): Promise<string | undef
 }
 
 /**
- * Show the plan, then write it: the shared second half of `kit add module` and `kit add target`.
- * Existing files are refused (exit 2) before anything is written; `--dry-run` stops after the
- * plan; `--json` puts the plan or the result on stdout as one document.
+ * Show the plan, then write it: the shared second half of `kit add module`, `kit add target` and
+ * `kit add maestro`. A plan's conflicts (existing files module and target will not overwrite) are
+ * refused with exit 2 before anything is written; maestro plans skip existing files instead, and a
+ * plan that is all skips reports `nothing to write` (`--json`: `unchanged: true`). `--dry-run`
+ * stops after the plan; `--json` puts the plan or the result on stdout as one document.
  */
 export async function applyAdd(
   ctx: Pick<KitContext, 'flags' | 'log'>,
@@ -119,7 +121,10 @@ export async function applyAdd(
     if (problem) throw new KitError(`kit.config.ts: ${problem}`, undefined, ExitCode.config)
   }
 
-  if (flags.json) emitJson({ ok: true, dryRun: false, ...summary, files })
+  const unchanged = plan.actions.every((a) => a.kind === 'skip')
+  if (flags.json)
+    emitJson({ ok: true, dryRun: false, ...summary, files, ...(unchanged ? { unchanged } : {}) })
+  else if (unchanged) log.dim(`nothing to write: ${added.name} is already there`)
   else {
     log.success(`added ${added.add} ${added.name}  ${pc.dim(added.dir)}`)
     if (added.next.length) log.dim(`next:\n${added.next.map((n) => `  ${n}`).join('\n')}`)

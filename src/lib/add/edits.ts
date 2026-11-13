@@ -151,7 +151,7 @@ export function matchClose(text: string, open: number): number {
   return -1
 }
 
-interface Property {
+export interface Property {
   name: string
   /** Index of the key's first character. */
   start: number
@@ -160,7 +160,7 @@ interface Property {
   valueEnd: number
 }
 
-interface ObjectShape {
+export interface ObjectShape {
   open: number
   close: number
   properties: Property[]
@@ -244,7 +244,7 @@ const indentOf = (text: string, i: number) => /^[ \t]*/.exec(text.slice(lineStar
  * else inline. `render(indent, unit)` gets the property's indent and one indent step ('' inline).
  * Undefined when a comment sits between the last property and an inline closing brace.
  */
-function appendProperty(
+export function appendProperty(
   text: string,
   shape: ObjectShape,
   render: (indent: string | undefined, unit: string) => string,
@@ -268,7 +268,7 @@ function appendProperty(
 }
 
 /** The object literal `export default` evaluates to: bare, or the argument of `defineConfig(`. */
-function configObject(text: string): ObjectShape | undefined {
+export function configObject(text: string): ObjectShape | undefined {
   for (let i = 0; i < text.length;) {
     const j = skip(text, i)
     if (j < 0) return undefined

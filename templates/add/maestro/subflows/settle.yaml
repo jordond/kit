@@ -1,0 +1,23 @@
+appId: {{appId}}
+---
+# Two waits, and the order is the point. A UI toolkit can publish an element to the
+# accessibility tree before it has painted it, so `assertVisible` alone returns while
+# the screen is still blank; and `waitForAnimationToEnd` cannot lead, because a blank
+# screen is a still one and it returns at once. So: gate on a piece of content, then
+# let the pixels stop moving.
+#
+# The second wait only means something when the app holds still. A looping animation
+# anywhere on screen keeps it from ever settling, and the wait then burns its whole
+# timeout (see README, "Motion").
+#
+# Do not give SETTLED a default in a header `env:` block. A subflow's own `env`
+# overrides what the caller passes rather than defaulting it, so every caller's gate
+# would silently become the default.
+#
+# `visible` is a full-string regex, case-insensitive: use the whole on-screen string,
+# or anchor it ("September.*").
+- extendedWaitUntil:
+    visible: ${SETTLED}
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 8000

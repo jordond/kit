@@ -180,13 +180,18 @@ describe('templates/add', () => {
     expect(files).toEqual([
       'Placeholder.kt',
       'gradle-module/build.gradle.kts',
+      'maestro/README.md',
+      'maestro/config.yaml',
+      'maestro/flows/smoke.yaml',
+      'maestro/subflows/settle.yaml',
       'toolchain-module/module.yaml',
       'worker/package.json',
       'worker/src/index.ts',
       'worker/tsconfig.json',
       'worker/wrangler.jsonc',
     ])
-    for (const file of files) add(file)
+    // The maestro flows are filled by the plan from app ids; their placeholders are checked in test/e2e/add-maestro.test.ts.
+    for (const file of files.filter((f) => !f.startsWith('maestro/'))) add(file)
   })
 
   test('gradle module: only kit plugin ids, and the kit { targets { } } block', () => {

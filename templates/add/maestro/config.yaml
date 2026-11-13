@@ -1,0 +1,4 @@
+# Without this, `maestro test` treats every yaml file under the directory as a flow,
+# subflows included. Only flows/ holds runnable flows.
+flows:
+  - flows/*

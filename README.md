@@ -68,16 +68,17 @@ kit init --template toolchain --dry-run
 - A file that already exists is kept; `.gitignore` and the catalog only gain lines. `renovate.json` is
   skipped when the repo has a Renovate config anywhere (`.github/renovate.json`, `.renovaterc`, …).
 
-## Adding modules and targets
+## Adding modules, targets and Maestro flows
 
-`kit add` scaffolds into a repo that already has kit. Both commands show the plan first, write nothing
-with `--dry-run`, and print the plan or result as one document with `--json`.
+`kit add` scaffolds into a repo that already has kit. Every command shows the plan first, writes nothing
+with `--dry-run`, and prints the plan or result as one document with `--json`.
 
 ```sh
 kit add module core                              # KMP library: android, ios, jvm
 kit add module feature:login --compose           # <gradle root>/feature/login, plus kit.compose
 kit add module data --targets android,jvm --dir libs/data
 kit add target api --kind worker --dir apps/api  # worker | vite | astro | docker | custom
+kit add maestro                                  # starter flows, settle subflow, README with the rules
 ```
 
 | | Gradle (`gradle.root`) | Kotlin toolchain (`toolchain.root`) |
@@ -100,6 +101,34 @@ kit add target api --kind worker --dir apps/api  # worker | vite | astro | docke
 - `--kind worker` with a `--dir` that does not exist yet also writes a minimal worker: `wrangler.jsonc`
   (placeholder name, no account id), `src/index.ts`, `package.json`, `tsconfig.json`. An existing directory
   is only registered; other kinds get an empty directory when it is missing.
+- `kit add maestro [--dir <path>] [--ios <bundle id>] [--android <package>]` writes the starter Maestro
+  flows (see [Maestro: QA and screenshots](#maestro-qa-and-screenshots)); its own rules are below.
+
+### `kit add maestro`
+
+| File (under the flows dir) | Holds |
+| --- | --- |
+| `config.yaml` | `flows: [flows/*]`, so `maestro test` never runs a subflow as a flow |
+| `flows/smoke.yaml` | One example flow: launch with permissions granted, then the settle subflow. Tagged with the first stage of the `qa` suite (`smoke` by default) so `kit qa` runs it |
+| `subflows/settle.yaml` | The settle gate: wait for content (`SETTLED`), then for animation to end |
+| `README.md` | The rules: the settle gate, motion, boolean launch switches, taps that lie, what to gate on, no pixel baselines, device state |
+| `.gitignore` | `output/`, Maestro's run directories |
+
+- The flows dir is `maestro.dir` from the config, else `--dir`, else `maestro`. With no `maestro` block the
+  command adds `maestro: { dir, version }` to `kit.config.ts` by the same text edit `kit add target` uses.
+  A config it cannot edit safely is left alone, nothing is written, the line to paste goes to stdout and the
+  exit code is 1; paste it and run the command again.
+- App ids: `--ios` / `--android`, else `app.*` in the config, else `release.*`. With none and a terminal it
+  asks once and uses the answer for both platforms; without a terminal it exits 2 naming the flags. Two
+  different ids make the smoke flow launch the right one per platform (`when: platform:`).
+- A file that exists is kept, not an error: a second run prints `nothing to write` (`--json`: `unchanged: true`),
+  and a deleted file comes back without touching the others. `--force` overwrites them all. `--dir` cannot be
+  the repo root or a hidden directory (`.`, `.github`): exit 2.
+- The `.gitignore` entry follows `maestro.output` when it sits under the flows dir; otherwise the README says
+  to ignore it. The README also explains that `maestro.version` is pinned on purpose and how to change it.
+- Ids and tags are quoted in the YAML when needed (`null`, `yes`, a `:`).
+- `flows/smoke.yaml` gates on the placeholder `Replace with text from your first screen`, which is not on
+  any screen, so it fails until you pick a string from your fixture. A gate that cannot fail is not a gate.
 
 ## Keeping kit up to date
 
@@ -345,7 +374,48 @@ files back, checkpoints SQLite WALs, and replaces the whole fixture dir only whe
 do not survive a dump.
 
 `kit lint` also runs `maestro check-syntax` over the flows, and `kit doctor` checks the Maestro version
-against `maestro.version` and that Java 17+ is there.
+against `maestro.version` and that Java 17+ is there. `kit add maestro` writes a starter flows directory.
+
+### Maestro in CI
+
+`.github/workflows/mobile-qa.yml` is a reusable workflow that runs `kit qa`: an iOS simulator on a macOS
+runner and an Android emulator on a Linux runner with KVM, one job each (an Android emulator cannot run on
+an arm64 macOS runner). Pin it by SHA like `mobile-distribute.yml`:
+
+```yaml
+on:
+  pull_request:
+jobs:
+  qa:
+    uses: jordond/kit/.github/workflows/mobile-qa.yml@<sha> # vX.Y.Z
+    with:
+      platform: both          # ios | android | both
+      suite: ''               # a maestro.suites entry; empty = qa
+      android-api: '36'
+      # API 37 images need these; same as devices.android.emulatorArgs in kit.config.ts
+      # emulator-args: -feature -HardwareDecoder
+```
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `platform` | `both` | `ios`, `android` or `both` |
+| `suite` | empty | `kit qa --suite`; empty runs the `qa` suite |
+| `android-api` | `36` | API level of the Google Play system image the emulator uses |
+| `ios-device` | empty | Simulator name to boot first. Empty skips the explicit boot, so `kit qa ios` uses `maestro.devices.ios`, else the newest, largest iPhone |
+| `emulator-args` | empty | Extra emulator arguments (`KIT_EMULATOR_ARGS`), after `devices.android.emulatorArgs` |
+| `device-timeout-ms` | `600000` | How long kit waits for a device to boot (`KIT_DEVICE_TIMEOUT_MS`) |
+| `maestro-version` | empty | Empty reads `maestro.version` from the config |
+| `bun-version`, `java-version` | `1.3.14`, `21` | Tool versions; Java serves Gradle and Maestro (17 or newer) |
+| `ios-runner`, `android-runner` | `macos-latest`, `ubuntu-latest` | Runner labels |
+| `artifact-name`, `timeout-minutes` | `qa`, `60` | Artifact prefix, job timeout. Artifacts are `<prefix>-<suite>-<platform>` (`qa-qa-ios`, `qa-nightly-android`), so calls with different suites do not collide |
+
+Each job installs the repo's dependencies and Java and Gradle, installs Maestro at the pinned version, then
+runs `kit qa`, which boots the device when none is running. On Linux the workflow installs only the chosen
+API's Google Play system image and kit creates the AVD on it (fixtures go through `run-as`, never `adb root`);
+`maestro.devices.android` names an AVD instead. Both jobs upload the Maestro run directories (`maestro.output`,
+default `<maestro.dir>/output`) and a JUnit report as an artifact, pass or fail; the Android artifact also holds
+the emulator log, which is what explains a boot that hung. The repo needs a `maestro` block in `kit.config.ts` and an app kit can build; the workflow takes no secrets, so a
+build that needs some is not covered yet. It has not been run on a hosted runner.
 
 ### Store screenshots
 
