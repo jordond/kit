@@ -927,3 +927,20 @@ For targets of kind `worker`. Every command runs wrangler from the target's dire
   `kit db reset --remote` is a usage error.
 - `kit logs` has no `--json` document (exit 2): for JSON lines use `kit logs <target> -- --format json`.
 - `--dry-run` runs nothing in any of them.
+
+## Working on kit
+
+kit runs on Bun and is checked and built with [Vite+](https://viteplus.dev) (`vp`). `vp` is a Node
+program, so a checkout needs Node `^22.18`, `^24.11` or `>=26` next to Bun; a globally installed `vp`
+installs Node itself.
+
+| Command | Does |
+| --- | --- |
+| `bun run check` | Format check, lint and type check in one pass (`vp check`); warnings fail |
+| `bun run format` | Rewrite files with the formatter (`vp fmt`) |
+| `bun run lint` | Lint only (`vp lint`) |
+| `bun test` | Tests. They run on Bun, not on `vp test` |
+| `bun run build` | Bundle `dist/` and its declarations (`vp pack`) |
+| `bun run test:pack` | Install the packed tarball into a temp app and run it |
+
+`KIT_DEV=<checkout>` makes the `kit` launcher run that checkout's sources.
