@@ -47,6 +47,8 @@ function start(editorDir?: string) {
     fonts: [{ family: 'Kit Fixture', url: 'api/asset/0', weight: '400 800' }],
     brand: { mark: 'api/asset/1' },
     builtIn: BUILT_IN_STYLE,
+    presets: {},
+    palette: [],
   }
   server = serveStudio({
     session,

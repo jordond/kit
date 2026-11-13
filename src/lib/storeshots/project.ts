@@ -211,7 +211,8 @@ const brandRules = z
   })
   .partial()
 
-const styleRules = z.strictObject({
+/** A set of style rules, every object strict. The project's `style`, and a preset in `shots.presets`. */
+export const styleRules = z.strictObject({
   headline: textRules.optional(),
   subheadline: textRules.optional(),
   badge: badgeRules.optional(),

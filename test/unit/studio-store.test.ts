@@ -13,6 +13,8 @@ const session: StudioSession = {
   fonts: [],
   brand: null,
   builtIn: BUILT_IN_STYLE,
+  presets: {},
+  palette: [],
 }
 
 const shot = (file: string) => ({ file, path: file, width: 10, height: 20 })
