@@ -1,0 +1,319 @@
+name: mobile-qa
+
+# Reusable workflow: run the repo's Maestro flows with `kit qa` on an iOS simulator (macOS runner)
+# and an Android emulator (Linux runner with KVM). Call it from the app repo, pinned by SHA:
+#
+#   jobs:
+#     qa:
+#       uses: jordond/kit/.github/workflows/mobile-qa.yml@<sha> # vX.Y.Z
+#       with:
+#         platform: both        # ios | android | both
+#         suite: ''             # a maestro.suites entry; empty = qa
+#         android-api: '36'
+#         emulator-args: ''     # API 37: -feature -HardwareDecoder
+#
+# Each platform is its own job (an Android emulator cannot run on an arm64 macOS runner), so a
+# `both` run shows two checks: `qa ios` and `qa android`. Both upload the Maestro run directories and
+# the JUnit report as an artifact whether the flows pass or fail.
+#
+# What the repo provides: a `maestro` block in kit.config.ts with flows (`kit add maestro` writes a
+# starter), an app kit can build (`app` or `release` in the config), and a fixture when the suite
+# loads one. kit does the rest: the device (an AVD kit's own code boots on a Google Play image,
+# so fixtures go through `run-as` and need no `adb root`), the debug build, the install, the flows.
+#
+# The setup is inlined rather than using kit's composite action: a reusable workflow cannot
+# reference its own repo's action at its own SHA.
+#
+# Not run end to end by kit's own CI: the first real run is the first consumer's.
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: ios | android | both
+        required: false
+        type: string
+        default: both
+      suite:
+        description: A maestro.suites entry for `kit qa --suite` (empty = the qa suite)
+        required: false
+        type: string
+        default: ''
+      android-api:
+        description: Android API level of the emulator's Google Play system image
+        required: false
+        type: string
+        default: '36'
+      android-device:
+        description: avdmanager device definition for the AVD this workflow creates and kit boots (maestro.devices.android does not apply)
+        required: false
+        type: string
+        default: pixel_6
+      ios-device:
+        description: Simulator name to boot (empty = kit's newest, largest iPhone)
+        required: false
+        type: string
+        default: ''
+      emulator-args:
+        description: 'Extra emulator arguments, KIT_EMULATOR_ARGS; devices.android.emulatorArgs in kit.config.ts applies first. API 37 images need "-feature -HardwareDecoder"'
+        required: false
+        type: string
+        default: ''
+      maestro-version:
+        description: Maestro CLI version (empty = maestro.version from kit.config.ts, else the installer's latest)
+        required: false
+        type: string
+        default: ''
+      bun-version:
+        required: false
+        type: string
+        default: 1.3.14
+      java-version:
+        description: Java for Gradle and for Maestro (Maestro 2 needs 17 or newer)
+        required: false
+        type: string
+        default: '21'
+      ios-runner:
+        required: false
+        type: string
+        default: macos-latest
+      android-runner:
+        description: A Linux x86_64 runner with KVM; the hosted ubuntu runners have it
+        required: false
+        type: string
+        default: ubuntu-latest
+      artifact-name:
+        description: Artifact name prefix; the platform is appended (qa-ios, qa-android)
+        required: false
+        type: string
+        default: qa
+      timeout-minutes:
+        required: false
+        type: number
+        default: 60
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Validate inputs
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          ANDROID_API: ${{ inputs.android-api }}
+        run: |
+          case "$PLATFORM" in ios|android|both) ;; *) echo "::error::platform must be ios, android or both, got '$PLATFORM'"; exit 2 ;; esac
+          case "$ANDROID_API" in ''|*[!0-9]*) echo "::error::android-api must be a number, got '$ANDROID_API'"; exit 2 ;; esac
+
+  ios:
+    name: qa ios
+    needs: validate
+    if: inputs.platform == 'ios' || inputs.platform == 'both'
+    runs-on: ${{ inputs.ios-runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      CI: 'true'
+      SUITE: ${{ inputs.suite }}
+      IOS_DEVICE: ${{ inputs.ios-device }}
+      MAESTRO_VERSION_INPUT: ${{ inputs.maestro-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
+      # kit lives in the root package.json, or in .kit/ (Kotlin toolchain apps keep the root free
+      # of a package.json). `kit` goes on PATH.
+      - name: Install dependencies
+        run: |
+          if [ -f package.json ]; then bun install --frozen-lockfile; fi
+          if [ -f .kit/package.json ]; then
+            (cd .kit && bun install --frozen-lockfile)
+            echo "$PWD/.kit/node_modules/.bin" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+          fi
+
+      # Gradle builds the app (and the KMP framework for iOS); Maestro 2 needs Java 17+.
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+
+      # Kotlin toolchain apps (a `kotlin` wrapper and project.yaml, no Gradle): only its caches need restoring.
+      - name: Kotlin toolchain cache dirs
+        if: hashFiles('**/project.yaml', '!**/node_modules/**') != ''
+        run: |
+          {
+            echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$RUNNER_TEMP/kotlin-cli"
+            echo "KOTLIN_SHARED_CACHE_DIR=$RUNNER_TEMP/kotlin-shared"
+            echo "KOTLIN_CLI_NO_WELCOME_BANNER=1"
+          } >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        if: hashFiles('**/project.yaml', '!**/node_modules/**') != ''
+        with:
+          path: |
+            ${{ runner.temp }}/kotlin-cli
+            ${{ runner.temp }}/kotlin-shared
+          key: kotlin-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/kotlin', '**/libs.versions.toml', '**/module.yaml', '!**/node_modules/**') }}
+          restore-keys: kotlin-toolchain-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install Maestro
+        run: |
+          version=$MAESTRO_VERSION_INPUT
+          [ -n "$version" ] || version=$(kit config | jq -r '.config.maestro.version // empty')
+          if [ -n "$version" ]; then export MAESTRO_VERSION=$version; fi
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      # Where Maestro writes its run directories: maestro.output, else <maestro.dir>/output.
+      - name: Resolve the Maestro output directory
+        run: |
+          out=$(kit config | jq -r '.config.maestro // empty | (.output // (.dir + "/output"))')
+          [ -n "$out" ] || { echo "::error::kit.config.ts sets no maestro block (kit add maestro writes one)"; exit 1; }
+          echo "MAESTRO_OUTPUT=$out" >> "$GITHUB_ENV"
+
+      # Boot and run in one step: kit boots the simulator (creating one when the runner has none),
+      # `kit qa` builds, installs, loads the fixture and runs the suite on it.
+      - name: kit qa ios
+        run: |
+          mkdir -p qa-report
+          boot=(device boot ios --yes)
+          [ -z "$IOS_DEVICE" ] || boot+=(--device "$IOS_DEVICE")
+          kit "${boot[@]}"
+          qa=(qa ios --junit qa-report/ios.xml)
+          [ -z "$SUITE" ] || qa+=(--suite "$SUITE")
+          kit "${qa[@]}"
+
+      # always(): a failed run is the one whose screenshots and logs are wanted.
+      - name: Upload Maestro output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ inputs.artifact-name }}-ios
+          path: |
+            ${{ env.MAESTRO_OUTPUT }}
+            qa-report
+          if-no-files-found: warn
+          retention-days: 14
+
+  android:
+    name: qa android
+    needs: validate
+    if: inputs.platform == 'android' || inputs.platform == 'both'
+    runs-on: ${{ inputs.android-runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      CI: 'true'
+      SUITE: ${{ inputs.suite }}
+      ANDROID_API: ${{ inputs.android-api }}
+      ANDROID_DEVICE: ${{ inputs.android-device }}
+      KIT_EMULATOR_ARGS: ${{ inputs.emulator-args }}
+      MAESTRO_VERSION_INPUT: ${{ inputs.maestro-version }}
+      AVD_NAME: kit_ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Hosted Linux runners have /dev/kvm; the emulator needs it readable by this user.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ inputs.bun-version }}
+
+      - name: Install dependencies
+        run: |
+          if [ -f package.json ]; then bun install --frozen-lockfile; fi
+          if [ -f .kit/package.json ]; then
+            (cd .kit && bun install --frozen-lockfile)
+            echo "$PWD/.kit/node_modules/.bin" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+          fi
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          java-version: ${{ inputs.java-version }}
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+
+      - name: Kotlin toolchain cache dirs
+        if: hashFiles('**/project.yaml', '!**/node_modules/**') != ''
+        run: |
+          {
+            echo "KOTLIN_CLI_BOOTSTRAP_CACHE_DIR=$RUNNER_TEMP/kotlin-cli"
+            echo "KOTLIN_SHARED_CACHE_DIR=$RUNNER_TEMP/kotlin-shared"
+            echo "KOTLIN_CLI_NO_WELCOME_BANNER=1"
+          } >> "$GITHUB_ENV"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        if: hashFiles('**/project.yaml', '!**/node_modules/**') != ''
+        with:
+          path: |
+            ${{ runner.temp }}/kotlin-cli
+            ${{ runner.temp }}/kotlin-shared
+          key: kotlin-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/kotlin', '**/libs.versions.toml', '**/module.yaml', '!**/node_modules/**') }}
+          restore-keys: kotlin-toolchain-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install Maestro
+        run: |
+          version=$MAESTRO_VERSION_INPUT
+          [ -n "$version" ] || version=$(kit config | jq -r '.config.maestro.version // empty')
+          if [ -n "$version" ]; then export MAESTRO_VERSION=$version; fi
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Resolve the Maestro output directory
+        run: |
+          out=$(kit config | jq -r '.config.maestro // empty | (.output // (.dir + "/output"))')
+          [ -n "$out" ] || { echo "::error::kit.config.ts sets no maestro block (kit add maestro writes one)"; exit 1; }
+          echo "MAESTRO_OUTPUT=$out" >> "$GITHUB_ENV"
+
+      # A Google Play image (kit's rule for every emulator it boots): app data is reached through
+      # `run-as` on the debug build, never `adb root`. The AVD gets the same disk and keyboard
+      # settings kit gives the ones it creates.
+      - name: Create the emulator
+        run: |
+          sdk=${ANDROID_HOME:-$ANDROID_SDK_ROOT}
+          sdkmanager=$sdk/cmdline-tools/latest/bin/sdkmanager
+          avdmanager=$sdk/cmdline-tools/latest/bin/avdmanager
+          image="system-images;android-${ANDROID_API};google_apis_playstore;x86_64"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install platform-tools emulator "$image"
+          echo no | "$avdmanager" create avd --force -n "$AVD_NAME" -k "$image" -d "$ANDROID_DEVICE"
+          ini="$HOME/.android/avd/$AVD_NAME.avd/config.ini"
+          printf 'disk.dataPartition.size=8G\nhw.keyboard=yes\n' >> "$ini"
+
+      # Boot and run in one step so the emulator outlives nothing it should not. kit adds
+      # -no-window -no-audio -no-boot-anim on CI, then devices.android.emulatorArgs, then
+      # KIT_EMULATOR_ARGS, and waits for sys.boot_completed.
+      - name: kit qa android
+        run: |
+          mkdir -p qa-report
+          kit device boot android --device "$AVD_NAME" --yes
+          qa=(qa android --junit qa-report/android.xml)
+          [ -z "$SUITE" ] || qa+=(--suite "$SUITE")
+          kit "${qa[@]}"
+
+      # The emulator log is what explains a boot that hung (a stale netsimd, a flag the image needs).
+      - name: Upload Maestro output
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ inputs.artifact-name }}-android
+          path: |
+            ${{ env.MAESTRO_OUTPUT }}
+            qa-report
+            /tmp/kit-emulator-*.log
+          if-no-files-found: warn
+          retention-days: 14
