@@ -73,7 +73,7 @@ jobs:
         run: |
           # npm <12 prints an array, npm 12 an object keyed by package name.
           npm pack --dry-run --json | jq '[if type == "array" then .[0] else .[] end | .files[].path]' > pack.json
-          for f in bin/kit dist/cli.js dist/index.js dist/index.d.ts fastlane/Fastfile fastlane/Gemfile.lock; do
+          for f in bin/kit dist/cli.js dist/index.js dist/index.d.ts dist/shots-editor/index.html fastlane/Fastfile fastlane/Gemfile.lock; do
             jq -e --arg f "$f" 'index($f)' pack.json > /dev/null \
               || { echo "::error::$f is missing from the tarball"; exit 1; }
           done
