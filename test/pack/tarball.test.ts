@@ -105,6 +105,8 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(readdirSync(join(installed, 'dist'))).toContain('cli.js')
     // The page headless Chrome runs for `kit shots export`, built for the browser.
     expect(readdirSync(join(installed, 'dist'))).toContain('shots-page.js')
+    // The built editor of `kit shots studio`, served as static files.
+    expect(readdirSync(join(installed, 'dist/shots-editor'))).toContain('index.html')
     // zod is a peer: kit's bundle must use the app's copy, never a nested one.
     expect(readdirSync(installed)).not.toContain('node_modules')
   })
@@ -171,6 +173,39 @@ describe.skipIf(!enabled)('packed tarball', () => {
     expect(dist.filter((f) => f.includes('spike'))).toEqual([])
     // One build has one cli entry chunk set; earlier builds left several main-*.js chunks behind.
     expect(dist.filter((f) => /^main-.*\.js$/.test(f)).length).toBeLessThanOrEqual(1)
+  })
+
+  test('kit shots studio --no-open in the installed copy serves the built editor', async () => {
+    const repo = join(tmp, 'shots-app')
+    cpSync(join(KIT, 'test/fixtures/shots-app'), repo, { recursive: true })
+    const proc = Bun.spawn([join(app, 'node_modules/.bin/kit'), 'shots', 'studio', '--no-open'], {
+      cwd: repo,
+      env: { ...process.env, CI: 'true', NO_COLOR: '1', KIT_ROOT: '', KIT_DEV: '' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    try {
+      // The URL is printed on stderr, with the random path token.
+      const reader = proc.stderr.getReader()
+      const decoder = new TextDecoder()
+      let seen = ''
+      let url: string | undefined
+      while (!url) {
+        const { done, value } = await reader.read()
+        if (done) throw new Error(`kit exited before it printed a URL:\n${seen}`)
+        seen += decoder.decode(value)
+        url = /http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]+\//.exec(seen)?.[0]
+      }
+      const page = await (await fetch(url)).text()
+      expect(page).toContain('<div id="root">')
+      const script = /src="\.\/(assets\/[^"]+\.js)"/.exec(page)?.[1]
+      expect(script).toBeDefined()
+      expect((await fetch(`${url}${script}`)).status).toBe(200)
+    } finally {
+      proc.kill('SIGINT')
+      await proc.exited
+    }
   })
 
   test('kit --help', async () => {

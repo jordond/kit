@@ -7,8 +7,11 @@ import { drawDeviceFrame, roundedRectPath } from './device-frames'
 
 /** What a slide is drawn from besides its own settings. */
 export interface SlideSources {
-  /** URL of the job's raw shot (`shot/<jobId>`). */
-  shot: string
+  /**
+   * URL of the job's raw shot (`shot/<jobId>`), or the shot already loaded: the editor redraws one
+   * shot many times and keeps the decoded image instead of fetching it on every draw.
+   */
+  shot: string | HTMLImageElement
   /** The brand lockup of the plan; `null` draws nothing for `showMascot`. */
   brand: PageBrand | null
   /** The loaded brand mark; set when `brand` is. */
@@ -305,7 +308,7 @@ export async function renderSlideToCanvas(
 ): Promise<void> {
   const { brand, mark } = sources
   // A slide is never drawn without its shot. The render host adds which file the job's shot is.
-  const img = await loadImage(sources.shot, 'The raw shot')
+  const img = typeof sources.shot === 'string' ? await loadImage(sources.shot, 'The raw shot') : sources.shot
   if (!img.naturalWidth || !img.naturalHeight) throw new Error('The raw shot has no size')
 
   canvas.width = targetWidth

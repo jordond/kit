@@ -11,5 +11,5 @@
     "verbatimModuleSyntax": true,
     "paths": { "@jordond/kit": ["./src/index.ts"] }
   },
-  "include": ["src", "test"]
+  "include": ["src", "test", "scripts"]
 }
