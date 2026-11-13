@@ -330,7 +330,7 @@ kit maestro studio              # the Maestro CLI itself
 ```ts
 maestro: {
   dir: 'apps/client/maestro',            // config.yaml and the flows
-  version: '2.9.0',                      // kit doctor compares it; CI installs it
+  version: '2.12.1',                      // kit doctor compares it; CI installs it
   devices: { ios: 'iPhone 17 Pro Max' }, // optional: what to boot when nothing is running
   suites: {
     qa: { tags: ['smoke'], fixture: 'portland' },

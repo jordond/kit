@@ -36,7 +36,7 @@ describe('kit add maestro', () => {
     expect(read('kit.config.ts')).toBe(
       before.replace(
         "  release: { android: { packageName: 'app.setup', module: ':android' } },\n",
-        "  release: { android: { packageName: 'app.setup', module: ':android' } },\n  maestro: {\n    dir: 'maestro',\n    version: '2.9.0',\n  },\n",
+        "  release: { android: { packageName: 'app.setup', module: ':android' } },\n  maestro: {\n    dir: 'maestro',\n    version: '2.12.1',\n  },\n",
       ),
     )
     // The Android id comes from release.android; there is no iOS id, so every flow uses it.
@@ -61,7 +61,7 @@ describe('kit add maestro', () => {
     expect(r.stderr).toContain('kit qa android')
     // The config loads and carries the block.
     const cfg = JSON.parse((await f.kit(['config'])).stdout).config
-    expect(cfg.maestro).toEqual({ dir: 'maestro', version: '2.9.0' })
+    expect(cfg.maestro).toEqual({ dir: 'maestro', version: '2.12.1' })
     expect(f.calls()).toEqual([])
   })
 
@@ -78,7 +78,7 @@ describe('kit add maestro', () => {
       'app.setup',
     ])
     expect(r.code).toBe(0)
-    expect(read('kit.config.ts')).toContain("    dir: 'apps/client/maestro',\n    version: '2.9.0',")
+    expect(read('kit.config.ts')).toContain("    dir: 'apps/client/maestro',\n    version: '2.12.1',")
     const smoke = read('apps/client/maestro/flows/smoke.yaml')
     expect(smoke).toStartWith('appId: app.setup.ios\n')
     expect(smoke).toContain('platform: iOS')
@@ -166,7 +166,7 @@ describe('kit add maestro', () => {
     bare()
     await f.kit(['add', 'maestro'])
     expect(read('maestro/README.md')).toContain('is pinned on\npurpose')
-    expect(read('maestro/README.md')).toContain('2.9.0')
+    expect(read('maestro/README.md')).toContain('2.12.1')
     expect(read('maestro/README.md')).not.toMatch(/\{\{\w+\}\}/)
   })
 
@@ -237,14 +237,14 @@ describe('kit add maestro', () => {
     const before = read('kit.config.ts')
     const r = await f.kit(['add', 'maestro'])
     expect(r.code).toBe(1)
-    expect(r.stdout).toBe("maestro: { dir: 'maestro', version: '2.9.0' },\n")
+    expect(r.stdout).toBe("maestro: { dir: 'maestro', version: '2.12.1' },\n")
     expect(has('maestro')).toBe(false)
     expect(read('kit.config.ts')).toBe(before)
     const json = await f.kit(['add', 'maestro', '--json'])
     expect(json.code).toBe(1)
     expect(JSON.parse(json.stdout)).toMatchObject({
       ok: false,
-      snippet: "maestro: { dir: 'maestro', version: '2.9.0' },",
+      snippet: "maestro: { dir: 'maestro', version: '2.12.1' },",
     })
   })
 

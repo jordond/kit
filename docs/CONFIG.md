@@ -314,7 +314,7 @@ the AVD, so `-avd` and `@name` are refused.
 ```ts
 maestro: {
   dir: 'apps/client/maestro',
-  version: '2.9.0',
+  version: '2.12.1',
   output: 'build/maestro',
   devices: { ios: 'iPhone 17 Pro Max', ipad: 'iPad Pro 13-inch (M4)', android: 'Pixel_9_Pro' },
   suites: {
@@ -832,7 +832,7 @@ export default defineConfig({
   devices: { android: { emulatorArgs: ['-feature', '-HardwareDecoder'] } },
   maestro: {
     dir: 'apps/client/maestro',
-    version: '2.9.0',
+    version: '2.12.1',
     devices: { ios: 'iPhone 17 Pro Max' },
     suites: {
       qa: { fixture: 'portland' },

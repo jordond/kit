@@ -11,7 +11,7 @@ import { type AddPlan, parseDir } from './plan'
  */
 
 /** The Maestro version a new `maestro` block pins; `kit doctor` compares it and CI installs it. */
-export const MAESTRO_PIN = '2.9.0'
+export const MAESTRO_PIN = '2.12.1'
 
 /** The flows directory a config with no `maestro` block gets. */
 export const DEFAULT_MAESTRO_DIR = 'maestro'
@@ -71,7 +71,7 @@ const q = (s: string, like: string) =>
     ? JSON.stringify(s)
     : `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 
-/** `maestro: { dir: 'maestro', version: '2.9.0' }`, quoted the way `like` quotes its strings. */
+/** `maestro: { dir: 'maestro', version: '2.12.1' }`, quoted the way `like` quotes its strings. */
 export function maestroSnippet(dir: string, like = ''): string {
   return `maestro: { dir: ${q(dir, like)}, version: ${q(MAESTRO_PIN, like)} }`
 }
