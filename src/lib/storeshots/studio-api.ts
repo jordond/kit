@@ -1,6 +1,6 @@
 import type { DeviceTarget } from '../devices'
 import type { SetId, Size, Store } from './sizes'
-import type { ExportResult, FullStyle, PageBrand, PageFont, Project } from './types'
+import type { ExportResult, FullStyle, PageBrand, PageFont, Project, StyleRules } from './types'
 
 /**
  * The contract between `kit shots studio`'s server (`studio-server.ts`) and the editor (`editor/`).
@@ -23,6 +23,14 @@ import type { ExportResult, FullStyle, PageBrand, PageFont, Project } from './ty
  * | `POST api/export` | `StudioExportRequest` | `ExportResult`; 422 with the KitError message when export fails |
  */
 
+/** One swatch of `shots.palette`. */
+export interface PaletteColor {
+  /** The key of a named palette; absent for a plain list. */
+  name?: string
+  /** A hex colour. */
+  color: string
+}
+
 /** What the editor needs to know about the repo, read once at start. */
 export interface StudioSession {
   /** The project file (`shots.project`), relative to the repo root. */
@@ -40,6 +48,10 @@ export interface StudioSession {
   brand: PageBrand | null
   /** kit's built-in style: the bottom layer of the merge. */
   builtIn: FullStyle
+  /** `shots.presets`: the repo's own presets, name to rules; the editor lists them after its built-in ones. */
+  presets: Record<string, StyleRules>
+  /** `shots.palette`: the swatches shown beside every colour control; empty when the config sets none. */
+  palette: PaletteColor[]
 }
 
 /** The project file as it is on disk. */

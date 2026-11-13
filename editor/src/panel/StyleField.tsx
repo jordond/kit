@@ -3,6 +3,7 @@ import { useId, useState } from 'react'
 import { hasOverride, readField, type Source, type StyleValue } from '../scope'
 import { useEditor } from '../store'
 import { type FieldSpec, GENERIC_FONTS, type Option } from './fields'
+import { Swatches } from './Swatches'
 
 const INPUT =
   'rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-zinc-100 outline-none focus-visible:ring-2 focus-visible:ring-sky-500'
@@ -87,27 +88,31 @@ function Control({ id, label, spec, value, onChange, fonts }: ControlProps) {
       const text = typeof value === 'string' ? value : ''
       const hex = toHex(text)
       return (
-        <div className="flex items-center gap-2">
-          <input
-            type="color"
-            aria-label={`${label} picker`}
-            value={hex ?? '#000000'}
-            onChange={(e) => onChange(e.target.value)}
-            className={`h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0.5 ${hex ? '' : 'opacity-50'}`}
-          />
-          <input
-            id={id}
-            type="text"
-            spellCheck={false}
-            value={draft ?? text}
-            aria-invalid={draft !== null && !validColour(draft)}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              if (e.target.value.trim() !== '' && validColour(e.target.value)) onChange(e.target.value.trim())
-            }}
-            onBlur={() => setDraft(null)}
-            className={`${INPUT} min-w-0 flex-1 font-mono text-[11px]`}
-          />
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              aria-label={`${label} picker`}
+              value={hex ?? '#000000'}
+              onChange={(e) => onChange(e.target.value)}
+              className={`h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-zinc-800 p-0.5 ${hex ? '' : 'opacity-50'}`}
+            />
+            <input
+              id={id}
+              type="text"
+              spellCheck={false}
+              value={draft ?? text}
+              aria-invalid={draft !== null && !validColour(draft)}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                if (e.target.value.trim() !== '' && validColour(e.target.value))
+                  onChange(e.target.value.trim())
+              }}
+              onBlur={() => setDraft(null)}
+              className={`${INPUT} min-w-0 flex-1 font-mono text-[11px]`}
+            />
+          </div>
+          <Swatches label={label} current={text} onPick={(color) => onChange(color)} />
         </div>
       )
     }

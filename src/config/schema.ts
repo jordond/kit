@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { styleRules } from '../lib/storeshots/project'
 
 export const verbs = ['lint', 'format', 'typecheck', 'test', 'build', 'dev', 'deploy'] as const
 export type Verb = (typeof verbs)[number]
@@ -20,6 +21,11 @@ export const DEFAULT_SUITES: Record<string, { tags: string[]; statusBar?: boolea
   qa: { tags: ['smoke'] },
   shots: { tags: ['screenshots'], statusBar: true },
 }
+
+/** `#rgb`, `#rrggbb` or `#rrggbbaa`. */
+const hexColor = z
+  .string()
+  .regex(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i, 'Expected a hex colour like #1a2b3c')
 
 export const kinds = ['gradle', 'kotlin', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
@@ -260,6 +266,13 @@ export const configSchema = z
           })
           .strict()
           .optional(),
+        /**
+         * Style presets the editor offers beside its built-in ones: name, then the rules, the same
+         * strict shape as the project's `style`. A preset named like a built-in one replaces it.
+         */
+        presets: z.record(z.string().min(1), styleRules).optional(),
+        /** Colours the editor shows as swatches beside every colour control: hex colours, or name to colour. */
+        palette: z.union([z.array(hexColor), z.record(z.string().min(1), hexColor)]).optional(),
         /** The size each target is exported at; default iphone-6.9, ipad-13, phone. */
         sets: z
           .object({

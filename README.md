@@ -368,6 +368,8 @@ shots: {
   fonts: [{ family: 'Nunito', file: 'brand/fonts/nunito.woff2', weight: '400 800' }],
   brand: { mark: 'brand/logo.svg', wordmark: 'brewd', color: '#2c1e14', font: 'Nunito' },
   sets: { ios: 'iphone-6.9' },           // optional: iphone-6.9 | iphone-6.5 | iphone-6.3
+  presets: { sand: { background: { primaryColor: '#f4ecd8' } } },   // optional: style presets for the studio
+  palette: ['#2c1e14', '#f4ecd8'],       // optional: swatches beside the studio's colour controls
 },
 ```
 
@@ -398,7 +400,15 @@ each control shows where its value comes from and can reset it, and a value equa
 give removes the override, so the file stays small. Changes autosave (Cmd/Ctrl+S saves now, Cmd/Ctrl+Z
 undoes); if the file changed on disk the editor asks whether to reload or overwrite. Slides are added from
 the raw shots (a PNG can be uploaded into the raw dir), reordered by dragging and deleted, undoably. With
-no project file it offers one slide per raw shot and writes nothing until you confirm. See
+no project file it offers one slide per raw shot and writes nothing until you confirm.
+
+In the studio, a slide whose text overflows (a headline past 3 lines, text off the canvas, or text that
+pushes the device far down) gets a warning on the filmstrip and its target column, for any locale. Drag the
+device on a canvas to place it, scroll or pinch over it to scale it, or nudge it with the arrow keys; the
+expand button on a column shows that target at export size. The header's Export button runs `kit shots
+export` for the stores and locale you pick (saving first) and shows what was written. The Presets group
+applies a built-in look (`light`, `dark`, `bold-colour`) or one from `shots.presets` in one undoable edit,
+and `shots.palette` puts your brand colours beside every colour control. See
 [docs/CONFIG.md](docs/CONFIG.md#shots).
 
 **Fonts and brand.** Every font family a slide names has to be in `shots.fonts` (the CSS generics

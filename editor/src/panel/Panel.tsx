@@ -4,6 +4,7 @@ import type { DeviceTarget } from '../../../src/lib/devices'
 import { SCOPES, type Scope } from '../scope'
 import { useEditor } from '../store'
 import { STYLE_GROUPS } from './fields'
+import { Presets } from './Presets'
 import { SlideGroup } from './SlideGroup'
 import { StyleField } from './StyleField'
 
@@ -80,6 +81,9 @@ export function Panel() {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section title="Slide" open>
           <SlideGroup />
+        </Section>
+        <Section title="Presets" open={false}>
+          <Presets />
         </Section>
         {STYLE_GROUPS.map((group) => (
           <Section key={group.id} title={group.title} open={group.open}>

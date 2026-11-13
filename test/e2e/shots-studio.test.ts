@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { imageInfo } from '../../src/lib/image/png'
 import type {
@@ -33,8 +33,9 @@ afterEach(async () => {
 })
 
 /** Start the command and wait for the URL it prints. `fixture.spawn` inherits this process's env. */
-async function start(args: string[] = []): Promise<string> {
+async function start(args: string[] = [], edit?: (dir: string) => void): Promise<string> {
   f = fixture('shots-app', [])
+  edit?.(f.dir)
   chrome = fakeChrome(f.dir)
   process.env.KIT_CHROME = chrome.bin
   process.env.CHROME_PATH = ''
@@ -55,6 +56,33 @@ async function start(args: string[] = []): Promise<string> {
 }
 
 describe('kit shots studio', () => {
+  test('the session carries the repo presets and the palette, as a list or with names', async () => {
+    const withShots = (extra: string) => (dir: string) => {
+      const file = join(dir, 'kit.config.ts')
+      const text = readFileSync(file, 'utf8')
+      writeFileSync(
+        file,
+        text.replace("project: 'brand/studio.json',", `project: 'brand/studio.json', ${extra}`),
+      )
+    }
+    let url = await start(
+      [],
+      withShots(
+        "presets: { sand: { background: { primaryColor: '#f4ecd8' } } }, palette: ['#2c1e14', '#f4ecd8'],",
+      ),
+    )
+    let session = (await (await fetch(`${url}api/session`)).json()) as StudioSession
+    expect(session.presets).toEqual({ sand: { background: { primaryColor: '#f4ecd8' } } })
+    expect(session.palette).toEqual([{ color: '#2c1e14' }, { color: '#f4ecd8' }])
+    proc?.kill('SIGINT')
+    await proc?.exited
+    f?.cleanup()
+    url = await start([], withShots("palette: { ink: '#2c1e14' },"))
+    session = (await (await fetch(`${url}api/session`)).json()) as StudioSession
+    expect(session.presets).toEqual({})
+    expect(session.palette).toEqual([{ name: 'ink', color: '#2c1e14' }])
+  }, 30_000)
+
   test('serves the session, the project and a raw shot', async () => {
     const url = await start()
     const session = (await (await fetch(`${url}api/session`)).json()) as StudioSession

@@ -1,5 +1,6 @@
 import { Languages, Redo2, Save, Undo2 } from 'lucide-react'
 import { localesOf, useEditor } from '../store'
+import { ExportMenu } from './ExportMenu'
 
 const BUTTON =
   'flex items-center gap-1 rounded px-1.5 py-1 text-zinc-300 outline-none enabled:hover:bg-zinc-800 enabled:hover:text-zinc-100 focus-visible:ring-2 focus-visible:ring-sky-500 disabled:opacity-30'
@@ -64,6 +65,7 @@ export function Header() {
           >
             <Save size={14} aria-hidden /> Save
           </button>
+          <ExportMenu />
         </>
       )}
       <label className="flex items-center gap-1.5 text-zinc-400">

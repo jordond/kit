@@ -33,6 +33,27 @@ describe('shots config', () => {
     expect(resolveSets(config)).toEqual({ ios: 'iphone-6.5', ipad: 'ipad-13', android: 'phone' })
   })
 
+  test('presets are style rules under the strict schema, palette hex colours as a list or a map', () => {
+    const parse = (shots: object) =>
+      configSchema.safeParse({ name: 'app', maestro, shots: { project: 'p', ...shots } })
+    const ok = parse({
+      presets: {
+        sand: { background: { primaryColor: '#f4ecd8' }, headline: { color: '#2c1e14', fontWeight: 700 } },
+      },
+      palette: ['#fff', '#2c1e14', '#11223344'],
+    })
+    expect(ok.success).toBe(true)
+    expect(parse({ palette: { ink: '#2c1e14', paper: '#f4ecd8' } }).success).toBe(true)
+    // A key the project's style does not have is refused in a preset too, with its path.
+    const unknown = parse({ presets: { sand: { background: { primaryColour: '#fff' } } } })
+    expect(unknown.success).toBe(false)
+    expect(unknown.error?.issues[0]?.path.slice(0, 4)).toEqual(['shots', 'presets', 'sand', 'background'])
+    expect(parse({ presets: { sand: { headline: { fontSize: 'big' } } } }).success).toBe(false)
+    expect(parse({ presets: { '': {} } }).success).toBe(false)
+    expect(parse({ palette: ['red'] }).success).toBe(false)
+    expect(parse({ palette: { ink: 'not-a-colour' } }).success).toBe(false)
+  })
+
   test('without a maestro block, shots needs raw', () => {
     const r = configSchema.safeParse({ name: 'app', shots: { project: 'studio.json' } })
     expect(r.success).toBe(false)

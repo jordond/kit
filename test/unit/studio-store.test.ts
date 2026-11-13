@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { createEditorStore, type EditorApi, type EditorState } from '../../editor/src/store-core'
 import { BUILT_IN_STYLE } from '../../src/lib/storeshots/resolve'
-import type { StudioSave, StudioSession, StudioShots } from '../../src/lib/storeshots/studio-api'
+import type {
+  StudioExportRequest,
+  StudioSave,
+  StudioSession,
+  StudioShots,
+} from '../../src/lib/storeshots/studio-api'
 import type { Project, ProjectV2 } from '../../src/lib/storeshots/types'
 
 const session: StudioSession = {
@@ -13,6 +18,8 @@ const session: StudioSession = {
   fonts: [],
   brand: null,
   builtIn: BUILT_IN_STYLE,
+  presets: {},
+  palette: [],
 }
 
 const shot = (file: string) => ({ file, path: file, width: 10, height: 20 })
@@ -47,7 +54,12 @@ function setup(file: Project | null = project()) {
   let version = 1
   const puts: StudioSave[] = []
   const gates: (() => void)[] = []
-  const fail: { next: Error | null; hold: boolean } = { next: null, hold: false }
+  const fail: { next: Error | null; hold: boolean; exportNext: Error | null } = {
+    next: null,
+    hold: false,
+    exportNext: null,
+  }
+  const exports: { request: StudioExportRequest; hash: string | null; disk: Project | null }[] = []
   const api: EditorApi = {
     getSession: async () => session,
     getProject: async () => (disk && hash ? { project: disk, hash } : null),
@@ -66,6 +78,15 @@ function setup(file: Project | null = project()) {
       return { hash }
     },
     uploadShot: async (_t, name) => shot(name),
+    exportShots: async (request) => {
+      exports.push({ request, hash, disk })
+      if (fail.exportNext) {
+        const err = fail.exportNext
+        fail.exportNext = null
+        throw err
+      }
+      return { dryRun: false, stores: request.stores, written: [], removed: [], skipped: [] }
+    },
   }
   const clock = { t: 0, timers: new Map<number, () => void>(), n: 0 }
   const store = createEditorStore({
@@ -87,6 +108,7 @@ function setup(file: Project | null = project()) {
   return {
     store,
     puts,
+    exports,
     clock,
     fail,
     gates,
@@ -200,6 +222,137 @@ describe('undo and redo', () => {
     old.s().addSlideFromShot('x.png')
     expect(old.s().project).toBe(v1)
     expect(old.s().dirty).toBe(false)
+  })
+})
+
+describe('presets', () => {
+  test('a preset merges into the project style in one undoable edit', async () => {
+    const t = setup({
+      ...project(),
+      style: { headline: { fontFamily: 'Serif', color: '#000000' }, device: { scale: 0.9 } },
+    })
+    await t.s().loadAll()
+    t.s().applyPresetRules({ headline: { color: '#ffffff' }, background: { primaryColor: '#111111' } })
+    expect((t.s().project as ProjectV2).style).toEqual({
+      headline: { fontFamily: 'Serif', color: '#ffffff' },
+      device: { scale: 0.9 },
+      background: { primaryColor: '#111111' },
+    })
+    expect(t.s().past).toHaveLength(1)
+    t.s().undo()
+    expect((t.s().project as ProjectV2).style).toEqual({
+      headline: { fontFamily: 'Serif', color: '#000000' },
+      device: { scale: 0.9 },
+    })
+  })
+
+  test('applying a preset the style already has changes nothing and adds no undo step', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    t.s().applyPresetRules({ headline: { color: '#ffffff' } })
+    t.s().applyPresetRules({ headline: { color: '#ffffff' } })
+    expect(t.s().past).toHaveLength(1)
+  })
+})
+
+describe('writing several fields as one gesture', () => {
+  const x = { section: 'device', key: 'xOffset' } as const
+  const y = { section: 'device', key: 'yOffset' } as const
+
+  test('x and y written together, over time, are one undo step', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    for (const [vx, vy] of [
+      [1, 4],
+      [2, 6],
+      [3, 8],
+    ] as const) {
+      t.clock.t += 5000
+      t.s().writeStyles(
+        'all',
+        [
+          { field: x, value: vx },
+          { field: y, value: vy },
+        ],
+        'drag-1',
+      )
+    }
+    expect((t.s().project as ProjectV2).style).toEqual({ device: { xOffset: 3, yOffset: 8 } })
+    expect(t.s().past).toHaveLength(1)
+    // The next gesture is its own step.
+    t.s().writeStyles('all', [{ field: x, value: 9 }], 'drag-2')
+    expect(t.s().past).toHaveLength(2)
+    t.s().undo()
+    expect((t.s().project as ProjectV2).style).toEqual({ device: { xOffset: 3, yOffset: 8 } })
+    t.s().undo()
+    expect((t.s().project as ProjectV2).style).toBeUndefined()
+  })
+
+  test('the focused target and scope decide where it is written', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    t.s().setTarget('ipad')
+    t.s().writeStyles('slide-target', [{ field: x, value: 5 }], 'g')
+    expect((t.s().project as ProjectV2).slides[0]!.targets).toEqual({ ipad: { device: { xOffset: 5 } } })
+  })
+})
+
+describe('export', () => {
+  test('a dirty project is saved first, then exported, and the result is kept', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    t.s().writeStyle(place, 'all', 0.5)
+    expect(t.s().dirty).toBe(true)
+    await t.s().runExport({ stores: ['apple'], locales: ['en-US'] })
+    expect(t.puts).toHaveLength(1)
+    // The server saw the saved file, not the old one.
+    expect(t.exports).toHaveLength(1)
+    expect((t.exports[0]!.disk as ProjectV2).style).toEqual({ device: { scale: 0.5 } })
+    expect(t.exports[0]!.request).toEqual({ stores: ['apple'], locales: ['en-US'] })
+    expect(t.s().exporting).toEqual({
+      status: 'done',
+      result: { dryRun: false, stores: ['apple'], written: [], removed: [], skipped: [] },
+    })
+    t.s().dismissExport()
+    expect(t.s().exporting).toEqual({ status: 'idle' })
+  })
+
+  test('a save that fails stops the export', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    t.s().writeStyle(place, 'all', 0.5)
+    t.fail.next = new StatusError('invalid', 422, ['slides.0: bad'])
+    await t.s().runExport({ stores: ['apple'] })
+    expect(t.exports).toHaveLength(0)
+    expect(t.s().exporting).toMatchObject({ status: 'error' })
+    expect((t.s().exporting as { message: string }).message).toContain('nothing was exported')
+  })
+
+  test('a change on disk stops the export and says so', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    t.setDisk(project(), 'other')
+    t.s().writeStyle(place, 'all', 0.5)
+    await t.s().runExport({ stores: ['apple'] })
+    expect(t.exports).toHaveLength(0)
+    expect((t.s().exporting as { message: string }).message).toContain('changed on disk')
+  })
+
+  test('an export that fails keeps the server message', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    t.fail.exportNext = new Error('Chrome not found')
+    await t.s().runExport({ stores: ['google'] })
+    expect(t.s().exporting).toEqual({ status: 'error', message: 'Chrome not found' })
+  })
+
+  test('an export already running is not started twice', async () => {
+    const t = setup()
+    await t.s().loadAll()
+    const first = t.s().runExport({ stores: ['apple'] })
+    const second = t.s().runExport({ stores: ['apple'] })
+    await Promise.all([first, second])
+    expect(t.exports).toHaveLength(1)
   })
 })
 

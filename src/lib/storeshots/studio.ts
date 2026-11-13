@@ -9,7 +9,7 @@ import { requireShots, resolveRawDir, runExport, storeLocales } from './command'
 import { pageAssets, repoPath } from './plan'
 import { BUILT_IN_STYLE } from './resolve'
 import { resolveSets, SET_SIZES, STORE_TARGETS, storeOf } from './sizes'
-import type { StudioSession } from './studio-api'
+import type { PaletteColor, StudioSession } from './studio-api'
 import { serveStudio } from './studio-server'
 
 /** Where the built editor is: `dist/shots-editor`, next to the CLI chunks; in a source checkout, `<repo>/dist/shots-editor`. */
@@ -19,6 +19,13 @@ export function editorDir(): string | undefined {
     join(import.meta.dir, '..', '..', '..', 'dist', 'shots-editor'),
   ]
   return candidates.find((dir) => existsSync(join(dir, 'index.html')))
+}
+
+/** `shots.palette` as swatches: a list keeps its order, a map keeps its names. */
+export function paletteOf(palette: string[] | Record<string, string> | undefined): PaletteColor[] {
+  if (!palette) return []
+  if (Array.isArray(palette)) return palette.map((color) => ({ color }))
+  return Object.entries(palette).map(([name, color]) => ({ name, color }))
 }
 
 /** The browser opener of this platform. A failure is not an error: the URL is printed. */
@@ -56,6 +63,8 @@ export async function studioShots(ctx: KitContext, opts: { port?: number; open: 
     fonts: fonts.map((font) => ({ ...font, url: `api/${font.url}` })),
     brand: brand ? { ...brand, mark: `api/${brand.mark}` } : null,
     builtIn: BUILT_IN_STYLE,
+    presets: shots.presets ?? {},
+    palette: paletteOf(shots.palette),
   }
 
   let server: ReturnType<typeof serveStudio>

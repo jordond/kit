@@ -1,4 +1,4 @@
-import { renderSlideToCanvas } from '../../../src/lib/storeshots/page/renderer'
+import { renderSlideToCanvas, type SlideLayout } from '../../../src/lib/storeshots/page/renderer'
 import type { PageBrand, Slide } from '../../../src/lib/storeshots/types'
 import { assetUrl } from '../api'
 import { cachedImage } from './assets'
@@ -34,8 +34,8 @@ export interface CanvasRenderer {
 export function createCanvasRenderer(
   canvas: HTMLCanvasElement,
   onError: (error: Error | null) => void,
-  /** Called once a draw reached the canvas. */
-  onDrawn?: () => void,
+  /** Called once a draw reached the canvas, with where it put the text and the device. */
+  onDrawn?: (layout: SlideLayout) => void,
 ): CanvasRenderer {
   const offscreen = document.createElement('canvas')
   let latest: DrawRequest | undefined
@@ -53,7 +53,7 @@ export function createCanvasRenderer(
           : Promise.resolve(null),
       ])
       if (mine !== generation || disposed) return
-      await renderSlideToCanvas(req.slide, offscreen, req.width, req.height, {
+      const layout = await renderSlideToCanvas(req.slide, offscreen, req.width, req.height, {
         shot,
         brand: req.brand,
         mark,
@@ -65,7 +65,7 @@ export function createCanvasRenderer(
       if (!ctx) throw new Error('Could not get 2D canvas rendering context')
       ctx.drawImage(offscreen, 0, 0)
       onError(null)
-      onDrawn?.()
+      onDrawn?.(layout)
     } catch (err) {
       if (mine === generation && !disposed) onError(err instanceof Error ? err : new Error(String(err)))
     }

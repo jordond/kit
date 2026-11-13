@@ -4,7 +4,9 @@ import type { StudioSession, StudioShots } from '../../../src/lib/storeshots/stu
 import type { Project } from '../../../src/lib/storeshots/types'
 import { shotUrl } from '../api'
 import { findShot, slidesFor } from '../slides'
-import { useEditor } from '../store'
+import { useEditor, useOverflow } from '../store'
+import { overflowsOf } from '../overflow-monitor'
+import { OverflowMarker } from './OverflowMarker'
 import { ShotPicker } from './ShotPicker'
 import { SlideCanvas, type SlideDraw } from './SlideCanvas'
 
@@ -51,6 +53,7 @@ export function Filmstrip() {
   const { project, session, shots, shotsRev, locale, activeSlide } = useEditor()
   const { setActiveSlide, deleteSlide, moveSlideTo, addSlideFromShot } = useEditor.getState()
   const editable = project?.version === 2
+  const overflow = useOverflow().items
   const [adding, setAdding] = useState(false)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
@@ -119,6 +122,11 @@ export function Filmstrip() {
             />
             <span className="w-full truncate text-center text-[10px] text-zinc-400">{item.name}</span>
           </button>
+          {overflowsOf(overflow, item.id).length > 0 && (
+            <span className="absolute top-1.5 left-1.5 rounded bg-zinc-950/80 p-0.5">
+              <OverflowMarker items={overflowsOf(overflow, item.id)} />
+            </span>
+          )}
           {editable && (
             <button
               type="button"

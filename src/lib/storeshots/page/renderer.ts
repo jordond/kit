@@ -18,6 +18,25 @@ export interface SlideSources {
   mark: HTMLImageElement | null
 }
 
+/**
+ * Where a draw put things, in pixels of the canvas it drew on. The editor measures text overflow
+ * from it and hit-tests the device with it; the export page ignores it.
+ */
+export interface SlideLayout {
+  /** The canvas size the draw used. */
+  width: number
+  height: number
+  /** Lines the headline wrapped into; 0 when there is none. */
+  headlineLines: number
+  subheadlineLines: number
+  /** Where the header (brand lockup, badge, headline, subheadline) ends. */
+  textBottom: number
+  /** The device's rect before rotation and tilt, as drawn (`yOffset` and `xOffset` included). */
+  device: { x: number; y: number; width: number; height: number }
+  /** True when the position puts the device under the text (so more text pushes it down). */
+  textPushesDevice: boolean
+}
+
 /** Loads an image, or throws naming `what` it is: the URL means nothing to whoever reads the error. */
 export async function loadImage(src: string, what: string): Promise<HTMLImageElement> {
   const img = new Image()
@@ -172,8 +191,10 @@ function drawTypography(
   width: number,
   startY: number,
   scaleFactor: number,
-): number {
+): { bottom: number; headlineLines: number; subheadlineLines: number } {
   let currentY = startY
+  let headlineLines = 0
+  let subheadlineLines = 0
 
   // 1. Headline
   if (slide.headline.text.trim()) {
@@ -192,6 +213,7 @@ function drawTypography(
     ctx.fillStyle = slide.headline.color
     const maxWidth = width * 0.84
     const lines = wrapText(ctx, slide.headline.text, maxWidth)
+    headlineLines = lines.length
     const lineHeight = headlineFontSize * slide.headline.lineHeight
 
     const x =
@@ -226,6 +248,7 @@ function drawTypography(
     ctx.fillStyle = slide.subheadline.color
     const maxWidth = width * 0.8
     const lines = wrapText(ctx, slide.subheadline.text, maxWidth)
+    subheadlineLines = lines.length
     const lineHeight = subFontSize * slide.subheadline.lineHeight
 
     const x =
@@ -242,7 +265,7 @@ function drawTypography(
     ctx.restore()
   }
 
-  return currentY
+  return { bottom: currentY, headlineLines, subheadlineLines }
 }
 
 /**
@@ -297,7 +320,8 @@ function drawDeviceShadow(
 
 /**
  * Renders one slide onto `canvas` at exactly `targetWidth` x `targetHeight`. The caller loads the
- * fonts before the first draw. Throws when the shot does not load.
+ * fonts before the first draw. Throws when the shot does not load. Returns where the draw put the
+ * text and the device.
  */
 export async function renderSlideToCanvas(
   slide: Slide,
@@ -305,7 +329,7 @@ export async function renderSlideToCanvas(
   targetWidth: number,
   targetHeight: number,
   sources: SlideSources,
-): Promise<void> {
+): Promise<SlideLayout> {
   const { brand, mark } = sources
   // A slide is never drawn without its shot. The render host adds which file the job's shot is.
   const img = typeof sources.shot === 'string' ? await loadImage(sources.shot, 'The raw shot') : sources.shot
@@ -329,7 +353,8 @@ export async function renderSlideToCanvas(
   // The badge has no font of its own in the config: the brand font, else the headline family.
   const badgeFont = brand?.font || slide.headline.fontFamily
   currentY = drawBadge(ctx, slide, badgeFont, targetWidth, currentY, scaleFactor)
-  currentY = drawTypography(ctx, slide, targetWidth, currentY, scaleFactor)
+  const text = drawTypography(ctx, slide, targetWidth, currentY, scaleFactor)
+  currentY = text.bottom
 
   // Shot and device frame
   const imgAspect = img.naturalWidth / img.naturalHeight
@@ -356,6 +381,7 @@ export async function renderSlideToCanvas(
     devY = currentY + 16 * scaleFactor + (slide.device.yOffset / 100) * targetHeight
   }
 
+  const textPushesDevice = slide.device.position === 'bottom-peek' || slide.device.position === 'full-bleed'
   const radius = Math.round(slide.device.cornerRadius * scaleFactor)
 
   ctx.save()
@@ -423,5 +449,15 @@ export async function renderSlideToCanvas(
     ctx.shadowOffsetY = 10 * scaleFactor
     ctx.drawImage(mark, mx, my, mascotSize, mascotSize)
     ctx.restore()
+  }
+
+  return {
+    width: targetWidth,
+    height: targetHeight,
+    headlineLines: text.headlineLines,
+    subheadlineLines: text.subheadlineLines,
+    textBottom: text.bottom,
+    device: { x: devX, y: devY, width: devW, height: devH },
+    textPushesDevice,
   }
 }

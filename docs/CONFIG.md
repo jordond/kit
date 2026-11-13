@@ -398,6 +398,8 @@ shots: {
   fonts: [{ family: 'Nunito', file: 'brand/fonts/nunito.woff2', weight: '400 800' }],
   brand: { mark: 'brand/logo.svg', wordmark: 'brewd', color: '#2c1e14', font: 'Nunito' },
   sets: { ios: 'iphone-6.9', ipad: 'ipad-13', android: 'phone' },
+  presets: { sand: { background: { primaryColor: '#f4ecd8' }, headline: { color: '#2c1e14' } } },
+  palette: { ink: '#2c1e14', sand: '#f4ecd8' },
 },
 ```
 
@@ -415,6 +417,8 @@ shots: {
 | `sets.ios` | `'iphone-6.9' \| 'iphone-6.5' \| 'iphone-6.3'` | `iphone-6.9` | Export size for iPhone |
 | `sets.ipad` | `'ipad-13'` | `ipad-13` | Export size for iPad |
 | `sets.android` | `'phone'` | `phone` | Export size for Android |
+| `presets` | `Record<string, StyleRules>` | none | Style presets the editor offers after its own. The rules are checked with the same strict schema as the project's `style`, so a misspelt key is an error with its path |
+| `palette` | `string[] \| Record<string, string>` | none | Hex colours (`#rgb`, `#rrggbb`, `#rrggbbaa`) shown as swatches beside every colour control in the editor; a map gives each swatch a name |
 
 Every font family a slide names must be in `fonts` (CSS generics aside), or export stops with exit 3.
 Output goes to `release.ios.metadata/../screenshots` and `release.android.metadata`.
@@ -501,6 +505,41 @@ The page warns before it is closed with unsaved changes. A new slide is picked f
 (never copied from another slide), and a PNG can be uploaded into the raw dir of the target in focus;
 replacing an existing file asks first. With no project file the editor offers one slide per raw shot and
 writes the file only when you confirm.
+
+**Presets and palette.** The Presets group of the panel lists kit's three built-in presets (`light`,
+`dark`, `bold-colour`) and then those of `shots.presets`; a preset named like a built-in one replaces it.
+Applying one is a single undoable edit that **merges** into the project's `style` (the All slides layer):
+the fields the preset names replace the same fields there and the rest stay, so a colour preset keeps your
+fonts. It never touches `targets` or a slide's own overrides, which still win over it. A preset is a set of
+style rules, the same shape as `style`:
+
+```ts
+presets: { sand: { background: { primaryColor: '#f4ecd8' }, headline: { color: '#2c1e14' } } },
+palette: ['#2c1e14', '#f4ecd8', '#c97b31'],   // or { ink: '#2c1e14', sand: '#f4ecd8' } for named swatches
+```
+
+The palette is shown as swatches under every colour control; a click writes that colour at the current
+scope.
+
+**Export from the editor.** The Export button in the header picks the stores and a locale (or all of
+them), saves any unsaved changes first, then runs the same code as `kit shots export` on the server. It
+shows the progress, then how many files were written, removed or skipped, or the error `kit shots export`
+would have printed. It does not pass `--allow-missing` or `--force`: a slide with no raw shot stops the
+export, as on the command line.
+
+**Overflow warnings.** After each edit the editor checks every slide for every locale and target, on a
+small offscreen canvas while the browser is idle, and puts a warning on the filmstrip slide and on the
+target column. Its tooltip names the locale, the target and the reason. Text overflows when the headline
+wraps to more than 3 lines, when the text ends below the bottom of the canvas, or when the text pushes the
+device down so that its top is past 55% of the canvas height (a device that sits low because of its
+position or offsets is not flagged). The limits are in `editor/src/overflow.ts`.
+
+**Actual size and drag to place.** The expand button on a target column draws that target at its export
+resolution, one canvas pixel per screen pixel, in a scrollable view; the other columns keep fitting their
+space. On a canvas, drag the device to set `device.xOffset` and `yOffset` (percent of the canvas, as in
+the panel fields), scroll over it, or pinch, to set `device.scale`, and use the arrow keys on a focused
+canvas to nudge by 0.5% (2% with Shift). The write goes to the current scope for the target you touched,
+and a drag, or a burst of scrolling or key presses, is one undo step. The panel sliders follow along.
 
 ## `release`
 
