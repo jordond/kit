@@ -71,11 +71,36 @@ describe('shots config', () => {
     expect(configSchema.safeParse({ ...base, shots: { project: 'p', logo: 'x' } }).success).toBe(false)
   })
 
-  test('rejects shots.pages: artwork pages are not built, so the key is unknown, not ignored', () => {
-    const pages = [{ file: 'brand/feature.html', out: 'meta/featureGraphic.png', width: 1024, height: 500 }]
-    const r = configSchema.safeParse({ name: 'app', maestro, shots: { project: 'p', pages } })
-    expect(r.success).toBe(false)
-    expect(r.error?.issues[0]).toMatchObject({ code: 'unrecognized_keys', path: ['shots'], keys: ['pages'] })
+  test('shots.pages is HTML artwork pages: a project is optional, the rest is checked', () => {
+    const page = { name: 'header', file: 'art/header.html', width: 3840, height: 1646 }
+    const parse = (shots: object) => configSchema.safeParse({ name: 'app', maestro, shots })
+    expect(parse({ pages: [page] }).success).toBe(true)
+    expect(
+      parse({ project: 'p', pages: [{ ...page, scale: 1, background: '#fff', out: 'build/h.png' }] }).success,
+    ).toBe(true)
+    // Neither a project nor pages.
+    expect(parse({}).success).toBe(false)
+    // The old store-listing shape (no name) and unknown keys.
+    expect(parse({ pages: [{ file: 'a.html', out: 'm.png', width: 1024, height: 500 }] }).success).toBe(false)
+    expect(parse({ pages: [{ ...page, extra: 1 }] }).success).toBe(false)
+    // Duplicate names, a size that is not a multiple of the scale, an alpha or bad background.
+    expect(parse({ pages: [page, page] }).error?.issues[0]).toMatchObject({
+      path: ['shots', 'pages', 1, 'name'],
+    })
+    expect(parse({ pages: [{ ...page, width: 3841 }] }).error?.issues[0]).toMatchObject({
+      path: ['shots', 'pages', 0, 'width'],
+    })
+    expect(parse({ pages: [{ ...page, background: '#11223344' }] }).success).toBe(false)
+    expect(parse({ pages: [{ ...page, background: 'red' }] }).success).toBe(false)
+    expect(parse({ pages: [{ ...page, name: '../x' }] }).success).toBe(false)
+  })
+
+  test('font weights go into CSS, so only words and numbers pass', () => {
+    const fonts = (weight: string) => ({ project: 'p', fonts: [{ family: 'F', file: 'f.ttf', weight }] })
+    expect(configSchema.safeParse({ name: 'app', maestro, shots: fonts('400 800') }).success).toBe(true)
+    expect(configSchema.safeParse({ name: 'app', maestro, shots: fonts('400; } body { x') }).success).toBe(
+      false,
+    )
   })
 })
 

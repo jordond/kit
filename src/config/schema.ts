@@ -235,8 +235,8 @@ export const configSchema = z
     /** Store screenshots: `kit shots export` renders the raw shots into the store listing dirs. */
     shots: z
       .object({
-        /** The saved project JSON (slides, text, frames), relative to the repo root. */
-        project: z.string(),
+        /** The saved project JSON (slides, text, frames), relative to the repo root. Optional with `pages`. */
+        project: z.string().optional(),
         /** Dir holding the raw shots, `<raw>/<target>/…`; default the `shots` suite's screenshots dir. */
         raw: z.string().optional(),
         /** Font files the slides name, loaded before the first draw. */
@@ -248,7 +248,10 @@ export const configSchema = z
                 /** woff2 or ttf, relative to the repo root. */
                 file: z.string(),
                 /** A CSS weight or range (`'400 800'`). */
-                weight: z.string().optional(),
+                weight: z
+                  .string()
+                  .regex(/^[\w .%-]+$/, 'Expected a CSS weight like 400 or "400 800"')
+                  .optional(),
               })
               .strict(),
           )
@@ -273,6 +276,40 @@ export const configSchema = z
         presets: z.record(z.string().min(1), styleRules).optional(),
         /** Colours the editor shows as swatches beside every colour control: hex colours, or name to colour. */
         palette: z.union([z.array(hexColor), z.record(z.string().min(1), hexColor)]).optional(),
+        /**
+         * HTML artwork pages (the App Store product page header, search results artwork): `kit shots
+         * pages` renders each to a PNG with headless Chrome, flattened to no alpha.
+         */
+        pages: z
+          .array(
+            z
+              .object({
+                /** Names the page on the command line and in the default file name. */
+                name: z
+                  .string()
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use letters, digits, ".", "_" and "-"'),
+                /**
+                 * The HTML file, relative to the repo root, not under a dot dir. The repo root is served to
+                 * Chrome while it renders, so relative assets (`../brand/logo.svg`) load, and the page can
+                 * read any non-dot file under the repo.
+                 */
+                file: z.string().min(1),
+                /** The PNG's size in pixels; the page is laid out at width/scale by height/scale. */
+                width: z.number().int().positive(),
+                height: z.number().int().positive(),
+                /** Device scale factor; default 2. Width and height must be multiples of it. */
+                scale: z.number().int().min(1).max(4).optional(),
+                /** Colour the PNG is flattened onto where the page is transparent; default `#ffffff`. */
+                background: z
+                  .string()
+                  .regex(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i, 'Expected #rgb or #rrggbb')
+                  .optional(),
+                /** The PNG, relative to the repo root; default `build/shots-pages/<name>-<w>x<h>.png`. */
+                out: z.string().min(1).optional(),
+              })
+              .strict(),
+          )
+          .optional(),
         /** The size each target is exported at; default iphone-6.9, ipad-13, phone. */
         sets: z
           .object({
@@ -410,7 +447,35 @@ export const configSchema = z
         })
       }
     }
-    if (c.shots && c.shots.raw === undefined && !c.maestro) {
+    if (c.shots && c.shots.project === undefined && !c.shots.pages?.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['shots'],
+        message: 'Set shots.project (for export and studio) or shots.pages (for kit shots pages)',
+      })
+    }
+    const seen = new Set<string>()
+    for (const [i, page] of (c.shots?.pages ?? []).entries()) {
+      if (seen.has(page.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'pages', i, 'name'],
+          message: `Duplicate page "${page.name}"`,
+        })
+      }
+      seen.add(page.name)
+      const scale = page.scale ?? 2
+      for (const key of ['width', 'height'] as const) {
+        if (page[key] % scale !== 0) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['shots', 'pages', i, key],
+            message: `${key} ${page[key]} is not a multiple of the scale ${scale}`,
+          })
+        }
+      }
+    }
+    if (c.shots?.project !== undefined && c.shots.raw === undefined && !c.maestro) {
       ctx.addIssue({
         code: 'custom',
         path: ['shots', 'raw'],

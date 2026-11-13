@@ -373,6 +373,26 @@ shots: {
 },
 ```
 
+**Artwork pages.** `kit shots pages [name...]` renders the HTML pages in `shots.pages` (the App Store
+product page header and search results artwork, for example) with the same headless Chrome, at the pixel
+size you declare and with the alpha channel flattened, which App Store Connect requires. It writes
+`build/shots-pages/<name>-<width>x<height>.png` unless a page sets `out` or you pass `--out <dir>`. `--dry-run`
+lists the files without starting Chrome; `--json` prints them on stdout. A page sets `scale` (default 2, so
+a 3840x1646 page is laid out at 1920x823), and `background` for the colour under transparent areas. The repo
+root is served locally (the page can read any non-dot file under it), so a page's relative assets load, and `shots.fonts` is available to every page. With
+only `pages` set, `shots.project` may be left out. See [docs/CONFIG.md](docs/CONFIG.md#artwork-pages).
+
+```sh
+kit shots pages                      # every page
+kit shots pages header --out build/artwork
+```
+
+```ts
+shots: {
+  pages: [{ name: 'header', file: 'brand/creative/header.html', width: 3840, height: 1646 }],
+},
+```
+
 **The project file.** A version 1 project as the screenshot editor saves it: `slides[]`, each with a
 `name`, an `order`, the `sourceFile` of its raw shot (`home.png`), its text, device and background. kit
 ignores the editor's `imageSrc` and `dimensionId`. Every slide is exported for every target: the raw shot
@@ -506,7 +526,7 @@ export default defineCommand({
 a repo with `mise.toml` warns when mise isn't installed or a pinned version differs, and a repo with
 `lefthook.yml` warns when lefthook isn't installed or `lefthook install` hasn't been run in the clone.
 
-When the config has a `shots` block, `kit doctor` also checks for Chrome, which `kit shots export` uses to render store screenshots. It warns if Chrome or Chromium is missing or older than 112; install Google Chrome or set `KIT_CHROME` to a Chrome or Chromium binary.
+When the config has a `shots` block, `kit doctor` also checks for Chrome, which `kit shots export` and `kit shots pages` use to render store artwork. It warns if Chrome or Chromium is missing or older than 112; install Google Chrome or set `KIT_CHROME` to a Chrome or Chromium binary.
 
 ```sh
 kit doctor --fix             # list the fixes, confirm once, apply, check again

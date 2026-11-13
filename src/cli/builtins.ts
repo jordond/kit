@@ -196,6 +196,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/shots/export'),
   },
   {
+    path: ['shots', 'pages'],
+    description: 'Render the HTML artwork pages in shots.pages to PNGs, without alpha',
+    group: 'Quality',
+    load: () => import('../commands/shots/pages'),
+  },
+  {
     path: ['shots', 'migrate'],
     description: 'Rewrite the saved shots project as a version 2 project (rules once, sparse slides)',
     group: 'Quality',

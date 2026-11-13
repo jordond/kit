@@ -5,7 +5,7 @@ import { ExitCode, KitError } from '../errors'
 import { emitJson } from '../log'
 import { migrateChecked } from './migrate'
 import { repoPath } from './plan'
-import { loadProject } from './project'
+import { loadProject, requireProjectPath } from './project'
 import type { ProjectV2 } from './types'
 
 /** The `--json` document of `kit shots migrate`. */
@@ -33,7 +33,7 @@ export async function migrateShots(ctx: KitContext, opts: { write: boolean }): P
       ExitCode.config,
     )
   }
-  const file = resolve(root, config.shots.project)
+  const file = resolve(root, requireProjectPath(config.shots))
   const name = repoPath(root, file)
   const project = await loadProject(file)
   if (project.version === 2) {
