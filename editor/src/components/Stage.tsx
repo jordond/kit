@@ -2,7 +2,9 @@ import { useMemo } from 'react'
 import type { DeviceTarget } from '../../../src/lib/devices'
 import { shotUrl } from '../api'
 import { expectedShot, findShot, slidesFor } from '../slides'
-import { useEditor } from '../store'
+import { overflowsOf } from '../overflow-monitor'
+import { useEditor, useOverflow } from '../store'
+import { OverflowMarker } from './OverflowMarker'
 import { SlideCanvas } from './SlideCanvas'
 
 const LABEL: Record<DeviceTarget, string> = { ios: 'iPhone', ipad: 'iPad', android: 'Android' }
@@ -10,6 +12,7 @@ const LABEL: Record<DeviceTarget, string> = { ios: 'iPhone', ipad: 'iPad', andro
 /** One target's column: the active slide drawn for it, or what is missing to draw it. */
 function TargetPreview({ target }: { target: DeviceTarget }) {
   const { project, session, shots, shotsRev, locale, activeSlide, target: focus, setTarget } = useEditor()
+  const overflow = useOverflow().items
   const slides = useMemo(() => (project ? slidesFor(project, target, locale) : []), [project, target, locale])
   if (!session || !shots) return null
 
@@ -31,6 +34,7 @@ function TargetPreview({ target }: { target: DeviceTarget }) {
         >
           {LABEL[target]}
         </button>
+        <OverflowMarker items={slide ? overflowsOf(overflow, slide.id).filter((o) => o.target === target) : []} />
         <span className="tabular-nums">
           {set.id} · {set.width}×{set.height}
         </span>

@@ -6,7 +6,7 @@ import { Stage } from './components/Stage'
 import { Loading, LoadError, MigrateNotice, NoProject } from './components/States'
 import { Panel } from './panel/Panel'
 import { useShortcuts } from './shortcuts'
-import { useEditor } from './store'
+import { startMonitor, useEditor } from './store'
 
 export function App() {
   const load = useEditor((s) => s.load)
@@ -18,6 +18,7 @@ export function App() {
   useEffect(() => {
     void loadAll()
   }, [loadAll])
+  useEffect(() => startMonitor(), [])
 
   return (
     <div className="flex h-full flex-col">
