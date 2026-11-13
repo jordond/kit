@@ -1,0 +1,20 @@
+appId: {{appId}}
+name: smoke
+tags:
+{{tags}}
+---
+# `kit qa` runs this flow. It launches the app and gates on its first screen.
+#
+# Before the first run, replace SETTLED with text that only appears once the first
+# screen has real content on it (not a title or a tab label: those paint first). The
+# placeholder is deliberately a string that is not on screen, so this flow fails until
+# you do: a gate that cannot fail is not a gate.
+#
+# Launch switches go under `arguments:` on launchApp. Write booleans as booleans
+# (`IS_AUTOMATION: true`, not "true"): iOS only reads a boolean as a bare process
+# argument. See README, "Launch switches".
+{{launch}}
+- runFlow:
+    file: ../subflows/settle.yaml
+    env:
+      SETTLED: Replace with text from your first screen

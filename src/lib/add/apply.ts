@@ -19,7 +19,7 @@ export function addTemplates(kitRoot: string): Record<string, string> {
 }
 
 export interface Added {
-  add: 'module' | 'target'
+  add: 'module' | 'target' | 'maestro'
   name: string
   /** Repo-relative directory of the module or target. */
   dir: string

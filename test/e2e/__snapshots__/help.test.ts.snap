@@ -44,7 +44,7 @@ Infra
 Setup
   doctor      Check tools, versions and .env
   init        Set up a fresh clone, or add kit to a new repo
-  add         Scaffold a module or a target into this repo …
+  add         Scaffold a module, a target or the Maestro flows into this repo …
   deps        List or update npm dependencies (catalog-aware)
   upgrade     Move the @jordond/kit pin and the workflow SHAs to a kit release
   config      Print the resolved kit.config.ts
@@ -54,14 +54,15 @@ Setup
 `;
 
 exports[`help kit add --help 1`] = `
-"Scaffold a module or a target into this repo
+"Scaffold a module, a target or the Maestro flows into this repo
 
 Usage
   kit add <command> [options]
 
 Commands
-  module  Add a KMP library module (Gradle or Kotlin toolchain)
-  target  Add a target to kit.config.ts
+  module   Add a KMP library module (Gradle or Kotlin toolchain)
+  target   Add a target to kit.config.ts
+  maestro  Scaffold the Maestro flows directory
 
 Options
   -h, --help     Show help
@@ -241,6 +242,34 @@ Commands
 Options
   -h, --help     Show help
   -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit add maestro --help 1`] = `
+"Scaffold the Maestro flows directory: smoke flow, settle subflow, README with the rules
+
+Usage
+  kit add maestro [options]
+
+Examples
+  kit add maestro
+  kit add maestro --dir apps/client/maestro --ios app.example --android app.example
+  kit add maestro --dry-run --json
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+      --dir <string>      Flows directory, relative to the repo root (default: maestro.dir, else maestro)
+      --ios <string>      iOS bundle id (default: app.ios.bundleId or release.ios.bundleIds)
+      --android <string>  Android package name (default: app.android.packageName or release.android.packageName)
+      --force             Overwrite files that already exist
 
 "
 `;

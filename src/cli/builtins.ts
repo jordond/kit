@@ -375,6 +375,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/add/target'),
   },
   {
+    path: ['add', 'maestro'],
+    description: 'Scaffold the Maestro flows directory',
+    group: 'Setup',
+    load: () => import('../commands/add/maestro'),
+  },
+  {
     path: ['deps'],
     description: 'List or update npm dependencies (catalog-aware)',
     group: 'Setup',
@@ -414,7 +420,7 @@ export const groupDescriptions: Record<string, string> = {
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
-  add: 'Scaffold a module or a target into this repo',
+  add: 'Scaffold a module, a target or the Maestro flows into this repo',
   app: 'Build, install and launch the debug app on a device',
   device: 'Simulators, emulators and connected devices',
   fixture: 'Replay or capture app state on a device',
