@@ -60,11 +60,16 @@ describe('kit shots studio', () => {
     const withShots = (extra: string) => (dir: string) => {
       const file = join(dir, 'kit.config.ts')
       const text = readFileSync(file, 'utf8')
-      writeFileSync(file, text.replace("project: 'brand/studio.json',", `project: 'brand/studio.json', ${extra}`))
+      writeFileSync(
+        file,
+        text.replace("project: 'brand/studio.json',", `project: 'brand/studio.json', ${extra}`),
+      )
     }
     let url = await start(
       [],
-      withShots("presets: { sand: { background: { primaryColor: '#f4ecd8' } } }, palette: ['#2c1e14', '#f4ecd8'],"),
+      withShots(
+        "presets: { sand: { background: { primaryColor: '#f4ecd8' } } }, palette: ['#2c1e14', '#f4ecd8'],",
+      ),
     )
     let session = (await (await fetch(`${url}api/session`)).json()) as StudioSession
     expect(session.presets).toEqual({ sand: { background: { primaryColor: '#f4ecd8' } } })

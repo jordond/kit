@@ -23,7 +23,9 @@ export const DEFAULT_SUITES: Record<string, { tags: string[]; statusBar?: boolea
 }
 
 /** `#rgb`, `#rrggbb` or `#rrggbbaa`. */
-const hexColor = z.string().regex(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i, 'Expected a hex colour like #1a2b3c')
+const hexColor = z
+  .string()
+  .regex(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i, 'Expected a hex colour like #1a2b3c')
 
 export const kinds = ['gradle', 'kotlin', 'worker', 'vite', 'astro', 'docker', 'custom'] as const
 export type Kind = (typeof kinds)[number]
@@ -270,9 +272,7 @@ export const configSchema = z
          */
         presets: z.record(z.string().min(1), styleRules).optional(),
         /** Colours the editor shows as swatches beside every colour control: hex colours, or name to colour. */
-        palette: z
-          .union([z.array(hexColor), z.record(z.string().min(1), hexColor)])
-          .optional(),
+        palette: z.union([z.array(hexColor), z.record(z.string().min(1), hexColor)]).optional(),
         /** The size each target is exported at; default iphone-6.9, ipad-13, phone. */
         sets: z
           .object({

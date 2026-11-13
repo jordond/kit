@@ -2,6 +2,8 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { DeviceTarget } from '../../src/lib/devices'
 import { slideId } from '../../src/lib/storeshots/resolve'
 import type {
+  StudioExportRequest,
+  StudioExportResult,
   StudioProjectFile,
   StudioSave,
   StudioSaved,
@@ -9,7 +11,8 @@ import type {
   StudioShot,
   StudioShots,
 } from '../../src/lib/storeshots/studio-api'
-import type { PageFont, Project, ProjectV2 } from '../../src/lib/storeshots/types'
+import type { PageFont, Project, ProjectV2, StyleRules } from '../../src/lib/storeshots/types'
+import { applyPreset } from './presets'
 import {
   addSlide,
   type ContentField,
@@ -64,6 +67,7 @@ export interface EditorApi {
   getProject: () => Promise<StudioProjectFile | null>
   getShots: () => Promise<StudioShots>
   putProject: (save: StudioSave) => Promise<StudioSaved>
+  exportShots: (request: StudioExportRequest) => Promise<StudioExportResult>
   uploadShot: (
     target: DeviceTarget,
     name: string,
@@ -80,16 +84,26 @@ export interface EditorDeps {
   clearTimer: (handle: unknown) => void
   /** Quiet time after an edit before it is saved. */
   autosaveMs?: number
-  /** Edits with the same `coalesce` key closer together than this are one undo step. */
+  /** Edits with the same `coalesce` key closer together than this are one undo step (not a `gesture`). */
   coalesceMs?: number
 }
 
 export interface EditOptions {
   /** Edits with the same key in quick succession join one undo entry (a slider drag, typing). */
   coalesce?: string
+  /** With `coalesce`: join the previous entry whatever the time between them. */
+  untimed?: boolean
   /** The slide to select afterwards; default: the selected one, followed by id. */
   select?: string | null
 }
+
+/** The export the header started: saving the project first, running, then what came back. */
+export type ExportState =
+  | { status: 'idle' }
+  | { status: 'saving' }
+  | { status: 'running' }
+  | { status: 'done'; result: StudioExportResult }
+  | { status: 'error'; message: string }
 
 export interface EditorState {
   load: LoadState
@@ -118,6 +132,7 @@ export interface EditorState {
   /** The file changed on disk since it was loaded: saving stops until Reload or Overwrite. */
   conflict: boolean
   saveError: SaveError | null
+  exporting: ExportState
 
   loadAll: () => Promise<void>
   setActiveSlide: (index: number) => void
@@ -126,6 +141,17 @@ export interface EditorState {
   setLocale: (locale: string) => void
   setScope: (scope: Scope) => void
 
+  /** Applies a preset's rules to the project's `style` in one undoable edit; see `applyPreset`. */
+  applyPresetRules: (rules: StyleRules) => void
+  /**
+   * Writes several fields of one section at a scope as one edit. A `gesture` id joins every call
+   * with the same id into one undo entry, however long the pause between them: a drag is one step.
+   */
+  writeStyles: (
+    scope: Scope,
+    writes: readonly { field: FieldRef; value: StyleValue }[],
+    gesture?: string,
+  ) => void
   /** Applies a change to the version 2 project. A version 1 project is never changed. */
   edit: (change: (project: ProjectV2) => ProjectV2, options?: EditOptions) => void
   writeStyle: (field: FieldRef, scope: Scope, value: StyleValue) => void
@@ -140,6 +166,12 @@ export interface EditorState {
   undo: () => void
   redo: () => void
 
+  /**
+   * Saves what is unsaved, then runs the export on the server. Stops with an error when the save
+   * does not go through, so an export never runs on a project older than the one on screen.
+   */
+  runExport: (request: StudioExportRequest) => Promise<void>
+  dismissExport: () => void
   /** Saves now (cancelling a pending autosave); resolves when nothing is left to save or it failed. */
   save: () => Promise<void>
   /** After a 409: throw away the edits and load the file as it is on disk. */
@@ -295,6 +327,7 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
       saving: false,
       conflict: false,
       saveError: null,
+      exporting: { status: 'idle' },
 
       async loadAll() {
         const mine = ++loadToken
@@ -348,7 +381,9 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         if (next === project) return
         const now = deps.now()
         const joins =
-          options.coalesce !== undefined && options.coalesce === lastKey && now - lastAt < coalesceMs
+          options.coalesce !== undefined &&
+          options.coalesce === lastKey &&
+          (options.untimed === true || now - lastAt < coalesceMs)
         lastKey = options.coalesce ?? null
         lastAt = now
         const past =
@@ -359,6 +394,16 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         scheduleSave()
       },
 
+      applyPresetRules(rules) {
+        get().edit((p) => applyPreset(p, rules))
+      },
+      writeStyles(scope, writes, gesture) {
+        const key = `gesture:${gesture}:${scope}:${get().activeId}:${get().target}`
+        get().edit(
+          (p) => writes.reduce((acc, w) => writeField(acc, scope, placeOf(get()), w.field, w.value), p),
+          gesture === undefined ? undefined : { coalesce: key, untimed: true },
+        )
+      },
       writeStyle(field, scope, value) {
         const key = `style:${scope}:${get().activeId}:${get().target}:${field.section}.${field.key}`
         get().edit((p) => writeField(p, scope, placeOf(get()), field, value), { coalesce: key })
@@ -426,6 +471,35 @@ export function createEditorStore(deps: EditorDeps): StoreApi<EditorState> {
         await get().save()
       },
       dismissSaveError: () => set({ saveError: null }),
+
+      async runExport(request) {
+        if (get().exporting.status === 'saving' || get().exporting.status === 'running') return
+        set({ exporting: { status: 'saving' } })
+        try {
+          await get().save()
+          const s = get()
+          if (s.conflict || s.saveError || (s.project && s.project.version === 2 && s.dirty)) {
+            set({
+              exporting: {
+                status: 'error',
+                message: s.conflict
+                  ? 'The project changed on disk: reload or overwrite, then export'
+                  : `The project did not save${s.saveError ? ` (${s.saveError.message})` : ''}, so nothing was exported`,
+              },
+            })
+            return
+          }
+          set({ exporting: { status: 'running' } })
+          const result = await api.exportShots(request)
+          set({ exporting: { status: 'done', result } })
+        } catch (err) {
+          set({ exporting: { status: 'error', message: err instanceof Error ? err.message : String(err) } })
+        }
+      },
+      dismissExport: () => {
+        const status = get().exporting.status
+        if (status !== 'saving' && status !== 'running') set({ exporting: { status: 'idle' } })
+      },
 
       async createProject() {
         const s = get()

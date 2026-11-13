@@ -5,7 +5,7 @@ import { loadFonts } from './render/assets'
 import { idle, measureLayout } from './render/measure'
 import { createEditorStore, type EditorState } from './store-core'
 
-export { baseShotFiles, localesOf, placeOf, type EditorState } from './store-core'
+export { baseShotFiles, type EditorState, localesOf, placeOf } from './store-core'
 
 /** The editor's one store, wired to the real server, fonts and clock. */
 export const editorStore = createEditorStore({
