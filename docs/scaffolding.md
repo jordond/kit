@@ -24,6 +24,8 @@ kit init --template toolchain --dry-run
   (`mobile/android`, `mobile/*`): the config gets the module's path, and commands get the toolchain's name
   for it. An id it cannot find is `com.example.<name>`: replace it before a release.
   CI tests the non-Apple platforms the modules declare (`--platform jvm --platform android …`).
+- `kit init --agents`, with or without a template, also writes the guide for coding agents into `AGENTS.md`
+  and an `@AGENTS.md` import into `CLAUDE.md`; `--hooks` adds the Claude Code hook as well. See [Coding agents](agents.md).
 - Workflows pin kit by the commit of the running version's tag (`@<sha> # vX.Y.Z`).
 - A file that already exists is kept; `.gitignore` and the catalog only gain lines. `renovate.json` is
   skipped when the repo has a Renovate config anywhere (`.github/renovate.json`, `.renovaterc`, …).

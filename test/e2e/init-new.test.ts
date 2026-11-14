@@ -113,6 +113,7 @@ describe('kit init in a Kotlin toolchain project', () => {
       'scaffold lefthook.yml',
       'cmd kotlin --version',
       'cmd bundle install (kit fastlane)',
+      'skip AGENTS.md',
     ])
     expect(doc.plan[1]).toMatchObject({ cmd: ['bun', 'install'], cwd: '.kit' })
     expect(has('.kit')).toBe(false)
@@ -187,7 +188,12 @@ describe('kit init in a Kotlin toolchain project', () => {
     const again = await run(['init', '--json'])
     expect(again.code).toBe(0)
     const steps = JSON.parse(again.stdout).steps as { title: string; skipped?: string }[]
-    expect(steps.filter((s) => s.skipped).map((s) => s.title)).toEqual(['.env', 'mise.toml', 'lefthook.yml'])
+    expect(steps.filter((s) => s.skipped).map((s) => s.title)).toEqual([
+      '.env',
+      'mise.toml',
+      'lefthook.yml',
+      'AGENTS.md',
+    ])
     expect((await run(['init', '--template', 'toolchain'])).code).toBe(2)
   }, 30_000)
 

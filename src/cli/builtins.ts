@@ -387,6 +387,24 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/add/maestro'),
   },
   {
+    path: ['agents', 'guide'],
+    description: 'Print the guide that tells coding agents how to drive this repo with kit',
+    group: 'Setup',
+    load: () => import('../commands/agents/guide'),
+  },
+  {
+    path: ['agents', 'sync'],
+    description: 'Write the guide into AGENTS.md; --hooks adds the Claude Code hook',
+    group: 'Setup',
+    load: () => import('../commands/agents/sync'),
+  },
+  {
+    path: ['agents', 'hook'],
+    description: 'The Claude Code PreToolUse hook: refuse a direct ./kotlin or ./gradlew build or test',
+    group: 'Setup',
+    load: () => import('../commands/agents/hook'),
+  },
+  {
     path: ['deps'],
     description: 'List or update npm dependencies (catalog-aware)',
     group: 'Setup',
@@ -427,6 +445,7 @@ export const groupDescriptions: Record<string, string> = {
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
   add: 'Scaffold a module, a target or the Maestro flows into this repo',
+  agents: 'Point coding agents at kit: the AGENTS.md guide and the Claude Code hook',
   app: 'Build, install and launch the debug app on a device',
   device: 'Simulators, emulators and connected devices',
   fixture: 'Replay or capture app state on a device',

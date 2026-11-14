@@ -76,6 +76,7 @@ Then:
 kit doctor                  # are the tools this config needs installed?
 kit check                   # lint and typecheck every target
 kit test api -- --watch     # arguments after -- go to the tool
+kit test -m core -p jvm     # one module and platform, Gradle or Kotlin toolchain
 kit dev site
 kit deploy api --preview
 ```
@@ -112,6 +113,7 @@ A repo adds its own commands, or wraps a built-in, with a file in `.kit/commands
 | [Env](docs/env.md)                                   | The `.env` schema, `kit env push` and `kit env rotate`                                                  |
 | [Cloudflare Workers](docs/cloudflare.md)             | Preview deploys, rollback, logs, D1                                                                     |
 | [Kotlin toolchain](docs/kotlin-toolchain.md)         | Apps built with the JetBrains Kotlin Toolchain instead of Gradle                                        |
+| [Coding agents](docs/agents.md)                      | The `AGENTS.md` guide, `kit agents sync`, the Claude Code hook                                          |
 | [Repo commands](docs/commands.md)                    | Adding commands and wrapping built-ins                                                                  |
 | [Doctor](docs/doctor.md)                             | What `kit doctor` checks and what `--fix` repairs                                                       |
 | [Changelog](docs/changelog.md)                       | `kit changelog` from Conventional Commits                                                               |

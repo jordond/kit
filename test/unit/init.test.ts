@@ -70,6 +70,16 @@ describe('planInit', () => {
     expect(plan).toContain('skip mise.toml')
   })
 
+  test('the agent guide is its own step: written, written with the hook, or skipped with the reason', () => {
+    expect(titles(state([], { agents: { hooks: false } }))).toContain('agents AGENTS.md')
+    expect(titles(state([], { agents: { hooks: true } }))).toContain(
+      'agents AGENTS.md and the Claude Code hook',
+    )
+    const skipped = planInit(state([], { agents: { hooks: false, skip: 'up to date' } }))
+    expect(skipped).toContainEqual({ kind: 'skip', title: 'AGENTS.md', reason: 'up to date' })
+    expect(titles(state([])).some((t) => t.includes('AGENTS.md'))).toBe(false)
+  })
+
   test('outside a project: no env sync, no wrangler types', () => {
     expect(titles(state(['package.json'], { config: undefined }))).toEqual([
       'skip .env',

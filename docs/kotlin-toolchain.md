@@ -30,10 +30,15 @@ export default defineConfig({
 | ------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
 | `kit test` / `kit build`  | `./gradlew test` / `build`        | `./kotlin test` / `build`                                                          |
 | `kit lint` / `kit format` | `spotlessCheck` / `spotlessApply` | `ktlint` / `ktlint -F` over `**/*.kt` and `**/*.kts`, skipping `build/`            |
+| `kit test -m core -p jvm` | `:core:jvmTest`                   | `./kotlin test -m core -p jvm`                                                     |
 | `kit build <t> --release` | `<project path>:bundleRelease`    | `./kotlin package -m <module name>` (AAB only)                                     |
 | passthrough               | `kit gradle …`                    | `kit kotlin …`                                                                     |
 | `kit init`                | `gradle.init` tasks               | `toolchain.init` (default `./kotlin --version`, which downloads the toolchain)     |
 | `kit doctor`              | java, Android SDK, catalog keys   | the wrapper and its pinned `kotlin_cli_version`, and ktlint; no java or SDK needed |
+
+`kit build` and `kit test` take the toolchain's own `-m, --module` and `-p, --platform`, both repeatable, so
+there is no reason to call the wrapper directly: see [Modules and platforms](CONFIG.md#modules-and-platforms).
+[Coding agents](agents.md) covers telling an agent so.
 
 The toolchain has no linter, so `kotlin` targets use the standalone `ktlint` binary: pin it in `mise.toml`
 (`ktlint = "1.8.0"`) and style it with `.editorconfig`. `kit lint --staged --fix` passes only the staged

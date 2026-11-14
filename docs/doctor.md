@@ -19,6 +19,7 @@ reported as applied, with the next step.
 
 | Check                                   | Fix                                                                                                                           |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `AGENTS.md` kit block out of date       | `kit agents sync`; a repo without the block is not checked (see [Coding agents](agents.md))                                   |
 | lefthook hook not installed             | `lefthook install`                                                                                                            |
 | mise tool missing or drifted            | `mise install`                                                                                                                |
 | wrangler not installed                  | the worker's install: the package manager of the nearest lockfile above the worker dir, run where that lockfile is            |

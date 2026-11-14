@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readdirSync, readFileSync, realpathS
 import { dirname, join, relative, resolve } from 'node:path'
 import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
+import { AGENTS_FILE, agentGuide, agentPlan, applyAgents, currentBlock, guideFacts } from '../agents'
 import { findChrome } from '../chrome'
 import { compareVersions, kitCopyAt, pathKit } from '../kit-copy'
 import { latestVersion } from '../kitref'
@@ -29,6 +30,7 @@ import {
   checkIosVersion,
   checkJava,
   checkKtlint,
+  checkAgentGuide,
   checkLefthook,
   checkMaestro,
   checkMaestroJava,
@@ -321,6 +323,21 @@ export function doctorEntries(
     { id: 'mise', run: mise },
     { id: 'lefthook', run: lefthook },
     { id: 'env', run: () => checkEnvFile(read('.env.example'), read('.env')) },
+    {
+      id: 'agents',
+      run: () =>
+        config
+          ? checkAgentGuide(currentBlock(read(AGENTS_FILE)), agentGuide(config, guideFacts(root, config)), {
+              description: 'kit agents sync',
+              action: {
+                edit: () => {
+                  applyAgents(root, agentPlan(root, config))
+                  return undefined
+                },
+              },
+            })
+          : undefined,
+    },
     {
       id: 'ios-version',
       run: () =>

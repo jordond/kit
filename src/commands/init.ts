@@ -12,7 +12,8 @@ import type { PackageManager } from '../lib/pm'
  * `.env.example`, install, optional mise/lefthook scaffolds, `kit env sync`, `wrangler types`, then
  * the native side: `gradle.init` tasks (needs java, and an Android SDK when release.android is set)
  * or the Kotlin toolchain's `toolchain.init` (default: `./kotlin --version`, which downloads it),
- * and `bundle install` where a Gemfile is (the Gradle root, else the repo root). A missing tool
+ * and `bundle install` where a Gemfile is (the Gradle root, else the repo root), and with `--agents`
+ * the guide for coding agents in AGENTS.md (src/lib/agents.ts; `--hooks` adds the Claude Code hook). A missing tool
  * skips its step with a hint instead of failing, so a JS-only machine still ends up set up.
  * Idempotent: whatever is already there is skipped. Every step runs even after a failure, so one
  * pass surfaces every problem; the exit code is 1 if any failed.
@@ -67,6 +68,8 @@ export interface InitState {
   jsOnly?: boolean
   /** Shell completion for the user's shell; undefined (CI, unknown shell) plans nothing. */
   completion?: CompletionState
+  /** The agent guide (AGENTS.md); undefined (no config yet) plans nothing. `skip` is why it is not written. */
+  agents?: { hooks: boolean; skip?: string }
 }
 
 export type InitAction =
@@ -74,6 +77,7 @@ export type InitAction =
   | { kind: 'scaffold'; title: string; scaffold: Scaffold }
   | { kind: 'cmd'; title: string; cmd: string[]; cwd: string; env?: Record<string, string> }
   | { kind: 'completion'; title: string; shell: Shell; file: string; rc?: string }
+  | { kind: 'agents'; title: string; hooks: boolean }
   | { kind: 'skip'; title: string; reason: string }
 
 const WRANGLER_CONFIGS = ['wrangler.jsonc', 'wrangler.json', 'wrangler.toml']
@@ -126,6 +130,14 @@ export function planInit(s: InitState): InitAction[] {
     plan.push({ kind: 'cmd', title: `wrangler types (${name})`, cmd: s.exec(cwd, 'wrangler', 'types'), cwd })
   }
   plan.push(...planNative(s))
+  if (s.agents) {
+    const title = s.agents.hooks ? 'AGENTS.md and the Claude Code hook' : 'AGENTS.md'
+    plan.push(
+      s.agents.skip
+        ? { kind: 'skip', title, reason: s.agents.skip }
+        : { kind: 'agents', title, hooks: s.agents.hooks },
+    )
+  }
   if (s.completion) {
     const { shell, file, rc, skip } = s.completion
     const title = `${shell} completion`
@@ -238,6 +250,11 @@ export default defineCommand({
         'New repo: write the kit files first (toolchain: an existing Kotlin toolchain project; gradle)',
     },
     name: { type: 'string', description: 'App name for --template (default: the directory name)' },
+    agents: { type: 'boolean', description: 'Write the kit guide for coding agents into AGENTS.md' },
+    hooks: {
+      type: 'boolean',
+      description: '--agents, plus the Claude Code hook that sends ./kotlin and ./gradlew builds through kit',
+    },
   },
   examples: [
     'kit init',
@@ -429,6 +446,26 @@ export default defineCommand({
       completion = { shell, file: targets.script, rc: targets.rc, skip }
     }
 
+    // The agent guide is opt-in: --agents or --hooks, a yes to the question, or a repo that has it already.
+    const { AGENTS_FILE, agentPlan, applyAgents, currentBlock } = await import('../lib/agents')
+    const hooks = ctx.args.hooks === true
+    let agents: InitState['agents']
+    if (config) {
+      const has =
+        onDisk(AGENTS_FILE) && currentBlock(readFileSync(join(root, AGENTS_FILE), 'utf8')) !== undefined
+      let skip: string | undefined
+      if (agentPlan(root, config, hooks || 'keep').every((a) => a.kind === 'skip')) skip = 'up to date'
+      else if (ctx.args.agents === true || hooks || has) skip = undefined
+      else if (ctx.flags.yes || !ctx.flags.interactive)
+        skip = 'opt-in; pass --agents, or run `kit agents sync`'
+      else if (ctx.flags.dryRun) skip = 'would ask'
+      else if (
+        !(await confirm(ctx.flags, 'Add the kit guide for coding agents to AGENTS.md?', { initial: false }))
+      )
+        skip = 'declined'
+      agents = { hooks, skip }
+    }
+
     const { bundleEnv } = await import('../lib/fastlane')
     const self = [process.execPath, '--no-env-file', process.argv[1]!]
     const plan = planInit({
@@ -446,6 +483,7 @@ export default defineCommand({
       bundleEnv,
       jsOnly: ctx.args['js-only'] === true,
       completion,
+      agents,
     })
 
     const where = (cwd: string) => relative(root, cwd) || '.'
@@ -477,6 +515,7 @@ export default defineCommand({
         else if (a.kind === 'cmd')
           ctx.log.step(`${a.title}  ${pc.dim(`${where(a.cwd)} $ ${a.cmd.join(' ')}`)}`)
         else if (a.kind === 'completion') ctx.log.step(`${a.title}  ${pc.dim(a.rc ?? a.file)}`)
+        else if (a.kind === 'agents') ctx.log.step(`write ${a.title}`)
         else ctx.log.step(a.kind === 'scaffold' ? `write ${a.title}` : `create ${a.title}`)
       }
       return
@@ -505,6 +544,9 @@ export default defineCommand({
           join(root, SCAFFOLDS[a.scaffold].file),
           renderTemplate(readFileSync(file, 'utf8'), vars),
         )
+      } else if (a.kind === 'agents') {
+        if (config) applyAgents(root, agentPlan(root, config, a.hooks || 'keep'))
+        else ok = false
       } else if (a.kind === 'completion') {
         // A static script: no kit process (and no repo config) runs when a shell starts.
         const script = await runCapture([...self, 'completion', a.shell], { cwd: homedir() })

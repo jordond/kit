@@ -45,6 +45,7 @@ Setup
   doctor      Check tools, versions and .env
   init        Set up a fresh clone, or add kit to a new repo
   add         Scaffold a module, a target or the Maestro flows into this repo …
+  agents      Point coding agents at kit: the AGENTS.md guide and the Claude Code hook …
   deps        List or update npm dependencies (catalog-aware)
   upgrade     Move the repo to a kit release (npm pin, workflow SHAs); --global updates the kit on PATH
   config      Print the resolved kit.config.ts
@@ -63,6 +64,24 @@ Commands
   module   Add a KMP library module (Gradle or Kotlin toolchain)
   target   Add a target to kit.config.ts
   maestro  Scaffold the Maestro flows directory
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit agents --help 1`] = `
+"Point coding agents at kit: the AGENTS.md guide and the Claude Code hook
+
+Usage
+  kit agents <command> [options]
+
+Commands
+  guide  Print the guide that tells coding agents how to drive this repo with kit
+  sync   Write the guide into AGENTS.md; --hooks adds the Claude Code hook
+  hook   The Claude Code PreToolUse hook: refuse a direct ./kotlin or ./gradlew build or test
 
 Options
   -h, --help     Show help
@@ -330,6 +349,76 @@ Options
 "
 `;
 
+exports[`help kit agents guide --help 1`] = `
+"Print the guide that tells coding agents how to drive this repo with kit
+
+Usage
+  kit agents guide [options]
+
+Examples
+  kit agents guide
+  kit agents guide --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit agents hook --help 1`] = `
+"The Claude Code PreToolUse hook: refuse a direct ./kotlin or ./gradlew build or test
+
+Usage
+  kit agents hook [options]
+
+Examples
+  echo '{"tool_name":"Bash","tool_input":{"command":"./kotlin build -m core"}}' | kit agents hook
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit agents sync --help 1`] = `
+"Write the guide into AGENTS.md; --hooks adds the Claude Code hook
+
+Usage
+  kit agents sync [options]
+
+Examples
+  kit agents sync
+  kit agents sync --hooks
+  kit agents sync --dry-run
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --hooks    Also add the Claude Code PreToolUse hook to .claude/settings.json
+
+"
+`;
+
 exports[`help kit app build --help 1`] = `
 "Build the debug app for a platform and print the artifact path
 
@@ -473,21 +562,24 @@ Usage
 Examples
   kit build
   kit build api admin
+  kit build -m core -p jvm
   kit build client --release
 
 Options
-  -h, --help           Show help
-  -V, --version        Show kit version
-      --json           Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run        Plan and run read-only steps; skip mutations
-  -y, --yes            Accept confirmations (never skips prod)
-  -v, --verbose        Stream all child output
-  -q, --quiet          Errors and summary only
-      --bail           Stop at the first failure
-      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
-      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
-      --release        Gradle or Kotlin toolchain: the signed release bundle (AAB)
-      --apk            Gradle: the signed release APK
+  -h, --help               Show help
+  -V, --version            Show kit version
+      --json               Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run            Plan and run read-only steps; skip mutations
+  -y, --yes                Accept confirmations (never skips prod)
+  -v, --verbose            Stream all child output
+  -q, --quiet              Errors and summary only
+      --bail               Stop at the first failure
+      --affected           Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>      Ref --affected compares against (default: origin/<default branch>, then main)
+  -m, --module <string>    Gradle or Kotlin toolchain: only this module (its name, directory or Gradle path); repeatable
+  -p, --platform <string>  Gradle or Kotlin toolchain: only this platform (jvm, android, iosSimulatorArm64); repeatable
+      --release            Gradle or Kotlin toolchain: the signed release bundle (AAB)
+      --apk                Gradle: the signed release APK
 
 "
 `;
@@ -1284,6 +1376,8 @@ Options
       --js-only            Skip the Gradle, Kotlin toolchain and bundler steps
       --template <string>  New repo: write the kit files first (toolchain: an existing Kotlin toolchain project; gradle)
       --name <string>      App name for --template (default: the directory name)
+      --agents             Write the kit guide for coding agents into AGENTS.md
+      --hooks              --agents, plus the Claude Code hook that sends ./kotlin and ./gradlew builds through kit
 
 "
 `;
@@ -1837,19 +1931,22 @@ Examples
   kit test
   kit test api
   kit test client -- --rerun
+  kit test -m core -p jvm
   kit test --affected --base origin/develop
 
 Options
-  -h, --help           Show help
-  -V, --version        Show kit version
-      --json           Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run        Plan and run read-only steps; skip mutations
-  -y, --yes            Accept confirmations (never skips prod)
-  -v, --verbose        Stream all child output
-  -q, --quiet          Errors and summary only
-      --bail           Stop at the first failure
-      --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
-      --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
+  -h, --help               Show help
+  -V, --version            Show kit version
+      --json               Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run            Plan and run read-only steps; skip mutations
+  -y, --yes                Accept confirmations (never skips prod)
+  -v, --verbose            Stream all child output
+  -q, --quiet              Errors and summary only
+      --bail               Stop at the first failure
+      --affected           Only targets changed since the base (commits, staged, unstaged and untracked files)
+      --base <string>      Ref --affected compares against (default: origin/<default branch>, then main)
+  -m, --module <string>    Gradle or Kotlin toolchain: only this module (its name, directory or Gradle path); repeatable
+  -p, --platform <string>  Gradle or Kotlin toolchain: only this platform (jvm, android, iosSimulatorArm64); repeatable
 
 "
 `;

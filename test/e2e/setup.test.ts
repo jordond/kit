@@ -190,6 +190,7 @@ describe('init', () => {
       'skip lefthook.yml',
       'cmd wrangler types (api)',
       'cmd bundle install (kit fastlane)',
+      'skip AGENTS.md',
     ])
     expect(plan[5]).toMatchObject({ cmd: ['bundle', 'install'], cwd: '.' })
     expect(plan[4]).toMatchObject({ cmd: ['pnpm', 'exec', 'wrangler', 'types'], cwd: 'apps/api' })
@@ -245,9 +246,10 @@ describe('init', () => {
     ])
     const js = await fx.kit(['init', '--js-only', '--dry-run', '--json'], { env: { ANDROID_HOME: '/sdk' } })
     const plan = JSON.parse(js.stdout).plan as { kind: string; title: string; reason?: string }[]
-    expect(plan.slice(-2)).toEqual([
+    expect(plan.slice(-3)).toEqual([
       { kind: 'skip', title: 'gradle :shared:dependencies', reason: '--js-only' },
       { kind: 'skip', title: 'bundle install (kit fastlane)', reason: '--js-only' },
+      { kind: 'skip', title: 'AGENTS.md', reason: 'opt-in; pass --agents, or run `kit agents sync`' },
     ])
   })
 

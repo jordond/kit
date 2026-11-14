@@ -185,6 +185,36 @@ command and sets `KIT_ENV` for every command of that target. An unknown env is a
 - `kotlin` lint covers `**/*.kt` and `**/*.kts` outside `build/` and `node_modules/`; with `--staged`,
   only the staged Kotlin files.
 
+### Modules and platforms
+
+`kit build` and `kit test` take `-m, --module` and `-p, --platform` (both repeatable) and turn them into
+whatever the project's build tool wants, so the same command works in a Gradle and a Kotlin toolchain repo:
+
+```sh
+kit build -m core -p jvm
+kit test -m core -m data -p jvm -p iosSimulatorArm64
+kit test client -p jvm -- --rerun
+```
+
+|                            | Kotlin toolchain                | Gradle                                                     |
+| -------------------------- | ------------------------------- | ---------------------------------------------------------- |
+| `kit build -m core`        | `./kotlin build -m core`        | `./gradlew :core:build`                                    |
+| `kit test -m core`         | `./kotlin test -m core`         | `./gradlew :core:test`                                     |
+| `kit build -m core -p jvm` | `./kotlin build -m core -p jvm` | `./gradlew :core:compileKotlinJvm`                         |
+| `kit test -m core -p jvm`  | `./kotlin test -m core -p jvm`  | `./gradlew :core:jvmTest`                                  |
+| `-p android`               | `-p android`                    | `compileAndroidMain` (build), `testAndroidHostTest` (test) |
+
+- A module is its name, its directory (`libs/data`) or a Gradle project path (`:libs:data`); the name the
+  build tool gets follows the [Modules](#modules) rule.
+- Only `gradle` and `kotlin` targets run, and the workspace does not. Naming a target of another kind with
+  either flag is a usage error.
+- The kind's command runs even when the target overrides `build` or `test`: an override is a shell command
+  kit cannot add a module to.
+- On Gradle, a platform is a Kotlin Multiplatform target name: `<platform>Test` and
+  `compileKotlin<Platform>`. `android` is the `com.android.kotlin.multiplatform.library` target. For
+  anything else (an Android application's `testDebugUnitTest`), pass the task: `kit gradle :app:testDebugUnitTest`.
+- Neither flag combines with `--release` or `--apk`.
+
 ## `workspace`
 
 Repo-wide commands, run from the repo root. Use it for tools that cover the whole tree (Biome, `tsc -b`).

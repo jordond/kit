@@ -5,6 +5,7 @@ import { configSchema, RESERVED_SERVICE_NAMES } from '../../src/config/schema'
 import {
   affectedTargets,
   isGradleTask,
+  nativeTargets,
   planVerbs,
   selectTargets,
   targetCommands,
@@ -267,5 +268,84 @@ describe('config', () => {
     const names = new Set(builtins.filter((b) => b.path[0] === 'release').map((b) => b.path[1]))
     // oxlint-disable-next-line typescript/require-array-sort-compare -- plain strings, default order on both sides
     expect([...names].sort()).toEqual([...RESERVED_SERVICE_NAMES].sort())
+  })
+})
+
+describe('--module and --platform', () => {
+  const toolchain = configSchema.parse({
+    name: 'x',
+    toolchain: { root: '.' },
+    workspace: { prepare: 'bun run codegen' },
+    targets: {
+      app: { kind: 'kotlin', dir: '.', test: './kotlin test --exclude-module web' },
+      api: { kind: 'worker', dir: 'apps/api' },
+    },
+  })
+  const gradle = configSchema.parse({
+    name: 'x',
+    gradle: { root: 'apps/client' },
+    targets: {
+      client: { kind: 'gradle', dir: 'apps/client', build: 'assembleDebug' },
+      api: { kind: 'worker', dir: 'apps/api' },
+    },
+  })
+  const cmd = (c: typeof toolchain, target: string, verb: 'build' | 'test', opts: object) =>
+    targetCommands(root, c, target, verb, opts)![0]!.cmd.slice(1)
+
+  test('toolchain: passed to ./kotlin, a directory named by its basename, the override skipped', () => {
+    expect(cmd(toolchain, 'app', 'build', { modules: ['core'], platforms: ['jvm'] })).toEqual([
+      'build',
+      '-m',
+      'core',
+      '-p',
+      'jvm',
+    ])
+    expect(cmd(toolchain, 'app', 'test', { modules: ['mobile/android', 'core'] })).toEqual([
+      'test',
+      '-m',
+      'android',
+      '-m',
+      'core',
+    ])
+    expect(cmd(toolchain, 'app', 'test', { platforms: ['jvm'], extra: ['--include-classes', 'A*'] })).toEqual(
+      ['test', '-p', 'jvm', '--include-classes', 'A*'],
+    )
+  })
+
+  test('gradle: project-path tasks, one per module and platform', () => {
+    expect(cmd(gradle, 'client', 'build', { modules: ['core'] })).toEqual([':core:build'])
+    expect(cmd(gradle, 'client', 'test', { modules: ['core', ':libs:data'], platforms: ['jvm'] })).toEqual([
+      ':core:jvmTest',
+      ':libs:data:jvmTest',
+    ])
+    expect(
+      cmd(gradle, 'client', 'build', { modules: ['libs/data'], platforms: ['jvm', 'iosArm64'] }),
+    ).toEqual([':libs:data:compileKotlinJvm', ':libs:data:compileKotlinIosArm64'])
+    expect(cmd(gradle, 'client', 'test', { platforms: ['android'] })).toEqual(['testAndroidHostTest'])
+    expect(cmd(gradle, 'client', 'build', { platforms: ['android'] })).toEqual(['compileAndroidMain'])
+  })
+
+  test('without either flag the override still wins', () => {
+    expect(cmd(gradle, 'client', 'build', {})).toEqual(['assembleDebug'])
+    expect(cmd(gradle, 'client', 'build', { modules: [], platforms: [] })).toEqual(['assembleDebug'])
+  })
+
+  test('nativeTargets: every gradle or kotlin target, or the named ones', () => {
+    expect(nativeTargets(toolchain)).toEqual(['app'])
+    expect(nativeTargets(gradle, ['client'])).toEqual(['client'])
+    expect(() => nativeTargets(gradle, ['api'])).toThrow(/not api/)
+    expect(() => nativeTargets(gradle, ['workspace'])).toThrow(/not workspace/)
+    const js = configSchema.parse({ name: 'x', targets: { api: { kind: 'worker', dir: 'apps/api' } } })
+    expect(() => nativeTargets(js)).toThrow(/need a gradle or kotlin/)
+    // Unknown names are selectTargets' error.
+    expect(nativeTargets(gradle, ['nope'])).toEqual(['nope'])
+  })
+
+  test('a scoped plan runs only the native targets, without the workspace', () => {
+    const groups = planVerbs(root, toolchain, ['test'], {
+      targets: nativeTargets(toolchain),
+      modules: ['core'],
+    })
+    expect(groups.map((g) => g.title)).toEqual(['app'])
   })
 })

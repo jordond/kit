@@ -13,10 +13,15 @@ import {
   selectTargets,
 } from '../lib/targets'
 
+/** A command's context whatever its flags: a repeatable flag's values are not `KitContext<Args>`. */
+export type VerbContext = Omit<KitContext, 'args'> & { args: object }
+
 export interface VerbRun {
   /** Name shown in the summary (`check`, `lint --fix`). */
   name: string
   verbs: Verb[]
+  /** Target names to run instead of the positionals (`--module` narrows to the native targets). */
+  targets?: string[]
   plan?: Omit<PlanOptions, 'targets' | 'extra' | 'affected'>
   /** Shown under a failure. */
   hint?: string
@@ -36,10 +41,11 @@ interface Affected {
 
 /** `--affected [--base <ref>]`: the changed files and the targets they select. Undefined without the flag. */
 async function resolveAffected(
-  ctx: KitContext,
+  ctx: VerbContext,
   root: string,
   config: KitConfig,
   verbs: Verb[],
+  names: string[],
 ): Promise<Affected | undefined> {
   const args = ctx.args as { affected?: boolean; base?: string; staged?: boolean }
   if (!args.affected) {
@@ -53,7 +59,7 @@ async function resolveAffected(
       ExitCode.usage,
     )
   }
-  const selected = selectTargets(config, ctx.positionals, verbs.includes('lint')).targets.map(([n]) => n)
+  const selected = selectTargets(config, names, verbs.includes('lint')).targets.map(([n]) => n)
   const { changedFiles } = await import('../lib/git')
   const changed = await changedFiles(root, args.base).catch(() => undefined)
   if (!changed) {
@@ -76,7 +82,7 @@ async function resolveAffected(
 }
 
 /** Shared body of lint/format/typecheck/check/test/build: plan, run as a tree, summarize, exit code. */
-export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
+export async function runVerb(ctx: VerbContext, v: VerbRun): Promise<void> {
   const { root, config } = requireProject(ctx)
   if (config.cloudflare?.accountId) {
     // Verbs mostly don't touch wrangler: a missing account id is a warning here, fatal in deploy.
@@ -88,7 +94,8 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
     }
   }
   const started = performance.now()
-  const affected = await resolveAffected(ctx, root, config, v.verbs)
+  const names = v.targets ?? ctx.positionals
+  const affected = await resolveAffected(ctx, root, config, v.verbs, names)
   /** `affected` and `base` in every `--json` document of an `--affected` run. */
   const selection = affected
     ? {
@@ -99,7 +106,7 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
     : {}
   const groups = planVerbs(root, config, v.verbs, {
     ...v.plan,
-    targets: ctx.positionals,
+    targets: names,
     extra: ctx.rest,
     affected: affected?.files,
   })
@@ -118,7 +125,7 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
   if (!groups.length) {
     if (ctx.flags.json) emitJson({ verb: v.name, ok: true, steps: [], ...selection })
     else if (unchanged) log.info(`${v.name}: nothing affected since ${affected?.base}`)
-    else log.warn(`Nothing to ${v.name}${ctx.positionals.length ? ` for ${ctx.positionals.join(', ')}` : ''}`)
+    else log.warn(`Nothing to ${v.name}${names.length ? ` for ${names.join(', ')}` : ''}`)
     return
   }
 
@@ -153,7 +160,7 @@ export async function runVerb(ctx: KitContext, v: VerbRun): Promise<void> {
 
 const tail = (s: string | undefined, n = 50) => s?.split('\n').slice(-n).join('\n')
 
-function printPlan(root: string, groups: PlannedGroup[], ctx: KitContext, selection: object): void {
+function printPlan(root: string, groups: PlannedGroup[], ctx: VerbContext, selection: object): void {
   if (ctx.flags.json) {
     emitJson({
       ...selection,

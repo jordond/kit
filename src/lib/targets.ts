@@ -5,7 +5,7 @@ import { ExitCode, KitError } from './errors'
 import { MAESTRO_GROUP, maestroLintGroup } from './maestro/lint'
 import { detectPackageManager, type PackageManager, packageScripts, pmExec, runScript } from './pm'
 import { shell } from './proc'
-import { releaseAndroidModule } from './module'
+import { releaseAndroidModule, resolveModule } from './module'
 
 /**
  * Targets and kinds (PLAN §6.4). A kind maps verbs to default commands; any verb on any target can
@@ -47,6 +47,71 @@ export interface PlanOptions {
   affected?: string[]
   /** Gradle and kotlin targets build the release artifact instead. */
   release?: 'aab' | 'apk'
+  /**
+   * `--module`: modules of the native build, for `build` and `test` on gradle and kotlin targets.
+   * With this or `platforms` set, those targets run the kind's command and skip a config override.
+   */
+  modules?: string[]
+  /** `--platform`: platforms of the native build (`jvm`, `android`, `iosSimulatorArm64`). */
+  platforms?: string[]
+}
+
+/** Kinds that take `--module` and `--platform`. */
+const NATIVE_KINDS: readonly Kind[] = ['gradle', 'kotlin']
+
+const isScoped = (opts: PlanOptions): boolean => !!(opts.modules?.length || opts.platforms?.length)
+
+/**
+ * Targets a `--module` or `--platform` run covers: the named ones, which must be gradle or kotlin,
+ * or every gradle and kotlin target when none is named. Unknown names are left to `selectTargets`.
+ */
+export function nativeTargets(config: KitConfig, names: string[] = []): string[] {
+  const native = Object.entries(config.targets)
+    .filter(([, t]) => NATIVE_KINDS.includes(t.kind))
+    .map(([n]) => n)
+  if (!names.length) {
+    if (native.length) return native
+    throw new KitError(
+      '--module and --platform need a gradle or kotlin target',
+      'kit.config.ts has none; other kinds have no modules or platforms',
+      ExitCode.usage,
+    )
+  }
+  const wrong = names.filter((n) => n === WORKSPACE || (config.targets[n] && !native.includes(n)))
+  if (wrong.length) {
+    throw new KitError(
+      `--module and --platform are for gradle and kotlin targets, not ${wrong.join(', ')}`,
+      native.length ? `Targets that take them: ${native.join(', ')}` : undefined,
+      ExitCode.usage,
+    )
+  }
+  return names
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
+
+/**
+ * The Gradle task that builds or tests one Kotlin Multiplatform platform. Android is the AGP
+ * `com.android.kotlin.multiplatform.library` target, which names its tasks differently.
+ */
+function gradlePlatformTask(verb: 'build' | 'test', platform: string): string {
+  if (platform === 'android') return verb === 'test' ? 'testAndroidHostTest' : 'compileAndroidMain'
+  return verb === 'test' ? `${platform}Test` : `compileKotlin${capitalize(platform)}`
+}
+
+/** Gradle tasks of a `--module` / `--platform` run: each task, under each module's project path. */
+function gradleScopedTasks(c: Ctx, verb: 'build' | 'test'): string[] {
+  const names = c.opts.platforms?.length ? c.opts.platforms.map((p) => gradlePlatformTask(verb, p)) : [verb]
+  const projects = (c.opts.modules ?? []).map((m) => resolveModule(c.root, c.config, m, '--module', 'gradle'))
+  return projects.length ? projects.flatMap((m) => names.map((n) => `${m.name}:${n}`)) : names
+}
+
+/** `-m <name>` and `-p <platform>` arguments of a `--module` / `--platform` run, for `./kotlin`. */
+function kotlinScopedArgs(c: Ctx): string[] {
+  const modules = (c.opts.modules ?? []).map((m) =>
+    resolveModule(c.root, c.config, m, '--module', 'toolchain'),
+  )
+  return [...modules.flatMap((m) => ['-m', m.name]), ...(c.opts.platforms ?? []).flatMap((p) => ['-p', p])]
 }
 
 /** Verbs that run the workspace `prepare` commands first. */
@@ -182,6 +247,9 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
           ]),
         ]
       }
+      if ((verb === 'build' || verb === 'test') && isScoped(c.opts)) {
+        return [gradleCommand(c, t, gradleScopedTasks(c, verb))]
+      }
       const task = { lint: 'spotlessCheck', format: 'spotlessApply', test: 'test', build: 'build' }[
         verb as string
       ]
@@ -208,7 +276,7 @@ function kindDefault(c: Ctx, name: string, t: TargetConfig, verb: Verb): Planned
       }
       if (verb === 'lint' || verb === 'format') return ktlintCommand(c, t, verb === 'format')
       const args = { test: ['test'], build: ['build'] }[verb as string]
-      return args ? [kotlinCommand(c, t, args)] : undefined
+      return args ? [kotlinCommand(c, t, [...args, ...kotlinScopedArgs(c)])] : undefined
     }
     case 'worker':
       if (verb === 'test') return script(c, dir, pm, 'test')
@@ -256,7 +324,9 @@ export function targetCommands(
   const t = config.targets[name]
   if (!t) throw new KitError(`Unknown target "${name}"`, undefined, ExitCode.usage)
   const c: Ctx = { root, config, opts }
-  const value = targetValue(t, verb)
+  // A module or platform is a question for the build tool: an override command can't take it.
+  const scoped = isScoped(opts) && NATIVE_KINDS.includes(t.kind) && (verb === 'build' || verb === 'test')
+  const value = scoped ? undefined : targetValue(t, verb)
   if (value === false) return undefined
   const cmds =
     value !== undefined ? fromValue(c, value, resolve(root, t.dir), t) : kindDefault(c, name, t, verb)

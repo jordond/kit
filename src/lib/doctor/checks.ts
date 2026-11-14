@@ -382,6 +382,30 @@ export const LEFTHOOK_FILES = ['lefthook.yml', 'lefthook.yaml', '.lefthook.yml',
  * `hook` is the text of git's pre-commit hook (undefined: none). Warnings only; skipped in CI,
  * where nothing commits.
  */
+/**
+ * The kit block of AGENTS.md against the one the config generates now. `current` is the block in
+ * the file, undefined when the file or the block is missing. The guide is opt-in: a repo without
+ * the block is only told how to get it, and one that has it is warned when it has gone stale.
+ */
+export function checkAgentGuide(current: string | undefined, wanted: string, fix: Fix): Check {
+  const base = { id: 'agents', label: 'agent guide' }
+  if (current === undefined) {
+    return {
+      ...base,
+      status: 'skip',
+      detail: 'not set up; `kit agents sync` adds it to AGENTS.md (optional)',
+    }
+  }
+  if (current === wanted) return { ...base, status: 'ok', detail: 'AGENTS.md' }
+  return {
+    ...base,
+    status: 'warn',
+    detail: 'the kit block in AGENTS.md is out of date',
+    hint: 'Run `kit agents sync`',
+    fix,
+  }
+}
+
 export function checkLefthook(
   file: string | undefined,
   installed: boolean,
