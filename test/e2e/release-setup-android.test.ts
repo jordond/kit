@@ -18,11 +18,11 @@ f="${fx.dir}/.fakebin/gh.fail"
 if [ -f "$f" ]; then cat "$f.out" 2>/dev/null; exit "$(cat "$f")"; fi`
 }
 
-describe.skipIf(!hasKeytool)('release keystore (gradle, keytool)', () => {
+describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
   test('creates the keystore, writes .env, prints the password once', async () => {
     fx = fixture('release', ['gh'])
     writeFileSync(join(fx.dir, '.env'), '# app\nOTHER=1\n')
-    const r = await fx.kit(['release', 'keystore', '--out', 'keys/upload.jks'])
+    const r = await fx.kit(['release', 'setup', 'android', '--out', 'keys/upload.jks'])
     expect(r.code).toBe(0)
     expect(r.stdout).toBe('')
 
@@ -56,7 +56,7 @@ describe.skipIf(!hasKeytool)('release keystore (gradle, keytool)', () => {
   test('defaults to ~/.keystores/<name>.keystore; --alias and --github set the secrets on stdin', async () => {
     fx = fixture('release', ['gh'])
     fx.script('gh', recordingGh())
-    const r = await fx.kit(['release', 'keystore', '--alias', 'upload', '--github'], {
+    const r = await fx.kit(['release', 'setup', 'android', '--alias', 'upload', '--github'], {
       env: { HOME: fx.dir },
     })
     expect(r.code).toBe(0)
@@ -75,7 +75,7 @@ describe.skipIf(!hasKeytool)('release keystore (gradle, keytool)', () => {
   test('a gh failure keeps the keystore and .env, and exits non-zero', async () => {
     fx = fixture('release', ['gh'])
     fx.fail('gh', 1, 'HTTP 403: Resource not accessible')
-    const r = await fx.kit(['release', 'keystore', '--out', 'k.jks', '--github'])
+    const r = await fx.kit(['release', 'setup', 'android', '--out', 'k.jks', '--github'])
     expect(r.code).not.toBe(0)
     expect(existsSync(join(fx.dir, 'k.jks'))).toBe(true)
     expect(envValue('ANDROID_KEYSTORE_PASSWORD')).not.toBe('')
@@ -83,27 +83,54 @@ describe.skipIf(!hasKeytool)('release keystore (gradle, keytool)', () => {
     expect(r.stderr).toContain(envValue('ANDROID_KEYSTORE_PASSWORD')) // still shown once
   })
 
-  test('--json carries the password; a second run refuses, --force replaces', async () => {
+  test('--json carries the password; a second run keeps the key, --force replaces it', async () => {
     fx = fixture('release', ['gh'])
-    const first = await fx.kit(['release', 'keystore', '--out', 'a.jks', '--json'])
+    const first = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks', '--json'])
     expect(first.code).toBe(0)
     const doc = JSON.parse(first.stdout)
     expect(doc).toMatchObject({ alias: 'key0', generator: 'keytool', github: false, pushed: [], ok: true })
     expect(doc.password).toBe(envValue('ANDROID_KEYSTORE_PASSWORD'))
     expect(first.stderr).not.toContain(doc.password)
 
-    const again = await fx.kit(['release', 'keystore', '--out', 'b.jks'])
-    expect(again.code).toBe(2)
-    expect(again.stderr).toContain('.env already holds ANDROID_KEYSTORE_BASE64')
+    const again = await fx.kit(['release', 'setup', 'android', '--out', 'b.jks'])
+    expect(again.code).toBe(0)
+    expect(again.stderr).toContain('upload key already in .env; kept')
     expect(existsSync(join(fx.dir, 'b.jks'))).toBe(false)
+    expect(envValue('ANDROID_KEYSTORE_PASSWORD')).toBe(doc.password)
 
-    const same = await fx.kit(['release', 'keystore', '--out', 'a.jks', '--force'])
+    const same = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks', '--force'])
     expect(same.code).toBe(2)
     expect(same.stderr).toContain('already exists')
 
-    const forced = await fx.kit(['release', 'keystore', '--out', 'b.jks', '--force'])
+    const forced = await fx.kit(['release', 'setup', 'android', '--out', 'b.jks', '--force'])
     expect(forced.code).toBe(0)
     expect(envValue('ANDROID_KEYSTORE_PASSWORD')).not.toBe(doc.password)
+  })
+
+  test('--play-json stores the service account; --github pushes every Android secret .env holds', async () => {
+    fx = fixture('release', ['gh'])
+    expect((await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])).code).toBe(0)
+    const password = envValue('ANDROID_KEYSTORE_PASSWORD')
+    const json = '{ "type": "service_account", "client_email": "x@y.iam" }'
+    writeFileSync(join(fx.dir, 'play.json'), json)
+
+    const r = await fx.kit(['release', 'setup', 'android', '--play-json', 'play.json', '--github'])
+    expect(r.code).toBe(0)
+    expect(envValue('PLAY_SERVICE_ACCOUNT_BASE64')).toBe(Buffer.from(json).toString('base64'))
+    expect(envValue('ANDROID_KEYSTORE_PASSWORD')).toBe(password)
+    expect(r.stderr).not.toContain(password)
+    expect(r.stderr).toContain('wrote PLAY_SERVICE_ACCOUNT_BASE64 to .env')
+    expect(fx.calls().map((c) => c.argv.join(' '))).toEqual([
+      'secret set ANDROID_KEYSTORE_BASE64',
+      'secret set ANDROID_KEYSTORE_ALIAS',
+      'secret set ANDROID_KEYSTORE_PASSWORD',
+      'secret set PLAY_SERVICE_ACCOUNT_BASE64',
+    ])
+
+    writeFileSync(join(fx.dir, 'bad.json'), '{ "type": "authorized_user" }')
+    const bad = await fx.kit(['release', 'setup', 'android', '--play-json', 'bad.json'])
+    expect(bad.code).toBe(2)
+    expect(bad.stderr).toContain('is not a Google service-account JSON')
   })
 
   test('no note when the app module applies the kit release plugin', async () => {
@@ -113,7 +140,7 @@ describe.skipIf(!hasKeytool)('release keystore (gradle, keytool)', () => {
       join(fx.dir, 'client/android/build.gradle.kts'),
       'plugins {\n  alias(libs.plugins.kit.release)\n}\n',
     )
-    const r = await fx.kit(['release', 'keystore', '--out', 'a.jks'])
+    const r = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])
     expect(r.code).toBe(0)
     expect(r.stderr).not.toContain('build.gradle')
 
@@ -121,15 +148,24 @@ describe.skipIf(!hasKeytool)('release keystore (gradle, keytool)', () => {
       join(fx.dir, 'client/android/build.gradle.kts'),
       'plugins {\n  id("com.android.application")\n}\n',
     )
-    const warned = await fx.kit(['release', 'keystore', '--out', 'b.jks', '--force'])
+    const warned = await fx.kit(['release', 'setup', 'android', '--out', 'b.jks', '--force'])
     expect(warned.stderr).toContain('client/android/build.gradle.kts does not apply the kit release plugin')
   })
 })
 
-describe('release keystore', () => {
+describe('release setup android', () => {
   test('--dry-run plans and writes nothing', async () => {
     fx = fixture('release', ['gh'])
-    const r = await fx.kit(['release', 'keystore', '--out', 'a.jks', '--github', '--dry-run', '--json'])
+    const r = await fx.kit([
+      'release',
+      'setup',
+      'android',
+      '--out',
+      'a.jks',
+      '--github',
+      '--dry-run',
+      '--json',
+    ])
     expect(r.code).toBe(0)
     const doc = JSON.parse(r.stdout)
     expect(doc.keystore).toEndWith('/a.jks')
@@ -158,7 +194,7 @@ fs.writeFileSync("kotlin.log", JSON.stringify({ argv, props, mode }))' -- "$@"
 `,
     )
     chmodSync(join(fx.dir, 'kotlin'), 0o755)
-    const r = await fx.kit(['release', 'keystore'], { env: { HOME: fx.dir } })
+    const r = await fx.kit(['release', 'setup', 'android'], { env: { HOME: fx.dir } })
     expect(r.code).toBe(0)
     const file = join(fx.dir, '.keystores/app.keystore')
     const password = envValue('ANDROID_KEYSTORE_PASSWORD')
@@ -175,9 +211,18 @@ fs.writeFileSync("kotlin.log", JSON.stringify({ argv, props, mode }))' -- "$@"
     expect(r.stderr).not.toContain('build.gradle')
   })
 
+  test('a half-filled upload key in .env is an error, not a new key', async () => {
+    fx = fixture('release', ['gh'])
+    writeFileSync(join(fx.dir, '.env'), 'ANDROID_KEYSTORE_ALIAS=upload\n')
+    const r = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])
+    expect(r.code).toBe(2)
+    expect(r.stderr).toContain('.env holds ANDROID_KEYSTORE_ALIAS but not ANDROID_KEYSTORE_BASE64')
+    expect(existsSync(join(fx.dir, 'a.jks'))).toBe(false)
+  })
+
   test('needs release.android', async () => {
     fx = fixture('infra', [])
-    const r = await fx.kit(['release', 'keystore'])
+    const r = await fx.kit(['release', 'setup', 'android'])
     expect(r.code).toBe(3)
     expect(r.stderr).toContain('No release.android in kit.config.ts')
   })

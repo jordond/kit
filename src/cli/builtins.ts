@@ -72,10 +72,16 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/release/certs'),
   },
   {
-    path: ['release', 'keystore'],
-    description: 'Create the Android upload keystore and store it in .env and GitHub Actions secrets',
+    path: ['release', 'setup', 'android'],
+    description: 'Set up Android release secrets: create the upload keystore, store it and the Play key',
     group: 'Release',
-    load: () => import('../commands/release/keystore'),
+    load: () => import('../commands/release/setup/android'),
+  },
+  {
+    path: ['release', 'setup', 'ios'],
+    description: 'Set up iOS release secrets: the App Store Connect API key and match access',
+    group: 'Release',
+    load: () => import('../commands/release/setup/ios'),
   },
   {
     path: ['release', 'status'],
@@ -447,6 +453,7 @@ export const builtins: BuiltinEntry[] = [
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
   metadata: 'Sync the store listing (text, screenshots)',
+  setup: 'Create and store the release secrets (.env, GitHub Actions)',
   version: 'Version names in the catalog TOML',
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',

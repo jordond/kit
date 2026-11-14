@@ -3,16 +3,15 @@ import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { KitConfig } from '../../config/schema'
-import { setKey } from '../env/init'
-import { parseDotenv, writeAtomic } from '../env/render'
 import { ExitCode, KitError } from '../errors'
 import { type ModuleKind, releaseAndroidModule } from '../module'
 import { runPiped } from '../proc'
 import { redact, registerSecret, secretFile } from '../secrets'
+import { dotenvValues } from './setup'
 import { keystoreProperties, requireWrapper, WRAPPER } from '../toolchain'
 
 /**
- * `kit release keystore`: create the Android upload keystore and store it under the canonical
+ * `kit release setup android`: create the Android upload keystore and store it under the canonical
  * secret names (PLAN §9.5). One password for store and key, as `kit.release` and the toolchain
  * release build expect. The password reaches the generator through a 0600 properties file
  * (toolchain) or the child's env (keytool), never argv.
@@ -115,16 +114,10 @@ export async function generateKeystore(root: string, config: KitConfig, o: Gener
   chmodSync(o.file, 0o600)
 }
 
-/** `.env` text, or '' when there is none. */
-export function readDotenv(root: string): string {
-  const file = join(root, '.env')
-  return existsSync(file) ? readFileSync(file, 'utf8') : ''
-}
-
 /** Which of the keystore secrets `.env` already holds a value for. */
 export function existingKeystoreSecrets(root: string): string[] {
-  const parsed = parseDotenv(readDotenv(root), 'env')
-  return KEYSTORE_SECRETS.filter((k) => (parsed[k] ?? '').trim() !== '')
+  const values = dotenvValues(root)
+  return KEYSTORE_SECRETS.filter((k) => k in values)
 }
 
 export function keystoreSecretValues(file: string, alias: string, password: string): Record<string, string> {
@@ -133,14 +126,6 @@ export function keystoreSecretValues(file: string, alias: string, password: stri
     ANDROID_KEYSTORE_ALIAS: alias,
     ANDROID_KEYSTORE_PASSWORD: password,
   }
-}
-
-/** Write the three secrets into `.env` (0600), keeping every other line. */
-export function writeKeystoreSecrets(root: string, values: Record<string, string>): void {
-  let text = readDotenv(root)
-  for (const [k, v] of Object.entries(values)) text = setKey(text, k, v)
-  if (!text.endsWith('\n')) text += '\n'
-  writeAtomic(join(root, '.env'), text)
 }
 
 const RELEASE_PLUGIN = /kit[.-]release|io\.github\.jordond\.kit\.release/

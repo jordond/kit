@@ -198,7 +198,7 @@ Commands
   ios       Build and upload iOS to a track
   android   Build and upload Android to a track
   certs     Install App Store signing with match; --add creates what is missing
-  keystore  Create the Android upload keystore and store it in .env and GitHub Actions secrets
+  setup     Create and store the release secrets (.env, GitHub Actions) …
   status    Show the version and the latest build on each store track
   promote   Promote a build the store already has to a later track (no rebuild)
   rollout   Change the production rollout: Play staged rollout, App Store phased release
@@ -1613,36 +1613,6 @@ Options
 "
 `;
 
-exports[`help kit release keystore --help 1`] = `
-"Create the Android upload keystore and store it in .env and GitHub Actions secrets
-
-Usage
-  kit release keystore [options]
-
-Examples
-  kit release keystore
-  kit release keystore --alias upload --github
-  kit release keystore --out keys/upload.jks --no-github
-  kit release keystore --dry-run
-
-Options
-  -h, --help            Show help
-  -V, --version         Show kit version
-      --json            Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run         Plan and run read-only steps; skip mutations
-  -y, --yes             Accept confirmations (never skips prod)
-  -v, --verbose         Stream all child output
-  -q, --quiet           Errors and summary only
-      --bail            Stop at the first failure
-      --alias <string>  Key alias (default key0)
-      --out <string>    Keystore file to create (default ~/.keystores/<name>.keystore)
-      --dn <string>     Certificate subject (default CN=<name>)
-      --github          Set the GitHub Actions secrets with gh (asked when omitted)
-      --force           Replace ANDROID_KEYSTORE_* values already in .env
-
-"
-`;
-
 exports[`help kit release metadata pull --help 1`] = `
 "Download the store listing text into release.<platform>.metadata; --screenshots adds images
 
@@ -1782,6 +1752,69 @@ Options
       --resume            Resume a halted rollout or a paused phased release; prod confirmation
       --complete          Release to everyone now; prod confirmation
       --build <number>    Android: version code of the release to change (when the track holds more than one)
+
+"
+`;
+
+exports[`help kit release setup android --help 1`] = `
+"Set up Android release secrets: create the upload keystore, store it and the Play key
+
+Usage
+  kit release setup android [options]
+
+Examples
+  kit release setup android
+  kit release setup android --play-json ~/Downloads/play-key.json --github
+  kit release setup android --alias upload --out keys/upload.jks --no-github
+  kit release setup android --dry-run
+
+Options
+  -h, --help                Show help
+  -V, --version             Show kit version
+      --json                Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run             Plan and run read-only steps; skip mutations
+  -y, --yes                 Accept confirmations (never skips prod)
+  -v, --verbose             Stream all child output
+  -q, --quiet               Errors and summary only
+      --bail                Stop at the first failure
+      --alias <string>      Key alias (default key0)
+      --out <string>        Keystore file to create (default ~/.keystores/<name>.keystore)
+      --dn <string>         Certificate subject (default CN=<name>)
+      --play-json <string>  Play service-account JSON key to store as base64
+      --github              Set the GitHub Actions secrets with gh (asked when omitted)
+      --force               Create a new upload key although .env already holds one
+
+"
+`;
+
+exports[`help kit release setup ios --help 1`] = `
+"Set up iOS release secrets: the App Store Connect API key and match access
+
+Usage
+  kit release setup ios [options]
+
+Examples
+  kit release setup ios
+  kit release setup ios --p8 ~/Downloads/AuthKey_ABC123DEFG.p8 --issuer-id <uuid> --match-url git@github.com:me/certs.git
+  kit release setup ios --github          # also: push what .env already holds
+  kit release setup ios --dry-run
+
+Options
+  -h, --help                Show help
+  -V, --version             Show kit version
+      --json                Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run             Plan and run read-only steps; skip mutations
+  -y, --yes                 Accept confirmations (never skips prod)
+  -v, --verbose             Stream all child output
+  -q, --quiet               Errors and summary only
+      --bail                Stop at the first failure
+      --p8 <string>         App Store Connect API key file (AuthKey_<id>.p8)
+      --key-id <string>     API key id (default: from the .p8 file name)
+      --issuer-id <string>  App Store Connect issuer id
+      --match-url <string>  Git URL of the match repo
+      --github              Set the GitHub Actions secrets with gh (asked when omitted)
+      --verify              Check the key with App Store Connect and the match repo with git (default on)
+      --force               Ask again for values .env already holds
 
 "
 `;
