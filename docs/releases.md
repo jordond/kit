@@ -11,18 +11,19 @@ import(ENV.fetch("KIT_FASTFILE") { UI.user_error!("Run fastlane via `kit fastlan
 No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT_*` env vars, and
 `kit init` installs kit's bundle (frozen, in `~/.cache/kit/bundle`).
 
-| Command                                                                              | Does                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kit version show`                                                                   | Version names from `versions.file` and the last release tags                                                                                                                                             |
-| `kit version bump <patch\|minor\|major> [--platform ios\|android\|all\|<service>]`   | Edit the TOML value, commit `chore(release): …`, push (`--no-push`, `--pr`)                                                                                                                              |
-| `kit release ios\|android --track internal\|alpha\|beta\|prod`                       | Preflight → next build number from the store → confirm → build → upload → tag `<platform>/v<version>+<build>`                                                                                            |
-| `kit release <service>`                                                              | `release.services.<name>`: build, deploy, tag `<name>/v<version>`. A service cannot be named after a release command (`ios`, `android`, `certs`, `status`, `promote`, `rollout`, `metadata`, `rollback`) |
-| `kit release rollback <service> [--to <version-id>]`                                 | Worker services only: `wrangler rollback`; tags stay put (see [Cloudflare workers](cloudflare.md))                                                                                                       |
-| `kit release certs [--add]`                                                          | match `appstore`, readonly; `--add` creates only what this app is missing (never nuke)                                                                                                                   |
-| `kit fastlane …`                                                                     | fastlane with kit's env and the ASC/Play key files                                                                                                                                                       |
-| `kit release status [ios\|android]`                                                  | The TOML version and the latest build per store track (`--json`)                                                                                                                                         |
-| `kit release promote <ios\|android> --from alpha\|beta --to beta\|prod`              | Move a build the store already has to a later track: no rebuild, no upload                                                                                                                               |
-| `kit release rollout <ios\|android> --percent <1-100>\|--halt\|--resume\|--complete` | Change the production rollout of the released build                                                                                                                                                      |
+| Command                                                                              | Does                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kit version show`                                                                   | Version names from `versions.file` and the last release tags                                                                                                                                                         |
+| `kit version bump <patch\|minor\|major> [--platform ios\|android\|all\|<service>]`   | Edit the TOML value, commit `chore(release): …`, push (`--no-push`, `--pr`)                                                                                                                                          |
+| `kit release ios\|android --track internal\|alpha\|beta\|prod`                       | Preflight → next build number from the store → confirm → build → upload → tag `<platform>/v<version>+<build>`                                                                                                        |
+| `kit release <service>`                                                              | `release.services.<name>`: build, deploy, tag `<name>/v<version>`. A service cannot be named after a release command (`ios`, `android`, `certs`, `keystore`, `status`, `promote`, `rollout`, `metadata`, `rollback`) |
+| `kit release rollback <service> [--to <version-id>]`                                 | Worker services only: `wrangler rollback`; tags stay put (see [Cloudflare workers](cloudflare.md))                                                                                                                   |
+| `kit release certs [--add]`                                                          | match `appstore`, readonly; `--add` creates only what this app is missing (never nuke)                                                                                                                               |
+| `kit release keystore [--alias key0] [--github]`                                     | Create the Android upload keystore, write `ANDROID_KEYSTORE_*` to `.env` and GitHub Actions secrets (see [Android upload key](#android-upload-key))                                                                  |
+| `kit fastlane …`                                                                     | fastlane with kit's env and the ASC/Play key files                                                                                                                                                                   |
+| `kit release status [ios\|android]`                                                  | The TOML version and the latest build per store track (`--json`)                                                                                                                                                     |
+| `kit release promote <ios\|android> --from alpha\|beta --to beta\|prod`              | Move a build the store already has to a later track: no rebuild, no upload                                                                                                                                           |
+| `kit release rollout <ios\|android> --percent <1-100>\|--halt\|--resume\|--complete` | Change the production rollout of the released build                                                                                                                                                                  |
 
 - `kit release status`: Android lists every Play track (version codes and release names); iOS lists
   `testflight` (one build list for every group) and `prod` (the live App Store build and its phased
@@ -83,6 +84,29 @@ Secrets (canonical names, from `.env` or the CI job): `ASC_KEY_ID`, `ASC_ISSUER_
 `MATCH_PASSWORD`, `MATCH_GIT_URL`, `MATCH_GIT_BASIC_AUTHORIZATION` (CI), `ANDROID_KEYSTORE_BASE64`,
 `ANDROID_KEYSTORE_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, `PLAY_SERVICE_ACCOUNT_BASE64`, `SENTRY_AUTH_TOKEN`.
 Files are decoded into a 0600 temp dir removed on exit; values are redacted from output.
+
+## Android upload key
+
+`kit release keystore` sets up Android signing for an app that has no upload key yet:
+
+1. Creates a keystore with one key (alias `key0`, `--alias` to change) and a generated password, used
+   for both store and key. A Kotlin toolchain repo runs `./kotlin tool generate-keystore`; a Gradle
+   repo runs `keytool` (PKCS12, RSA 2048). The file goes to `~/.keystores/<name>.keystore`, outside the
+   repo (`--out` to change).
+2. Writes `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_ALIAS` and `ANDROID_KEYSTORE_PASSWORD` to `.env`.
+3. Sets the same three as GitHub Actions secrets with `gh`: `--github` does it, `--no-github` skips it,
+   and without either kit asks in a terminal (`--yes` answers yes) and skips elsewhere.
+4. Prints the keystore path, alias and password. `.env` then holds the whole key (the keystore as
+   base64, the alias and the password), so the keystore can be rebuilt from it; GitHub secrets cannot be
+   read back. Keep a copy off the machine: losing both `.env` and the keystore file needs an upload-key
+   reset in Play Console.
+
+It never overwrites a keystore file, and refuses when `.env` already holds `ANDROID_KEYSTORE_*` values
+unless `--force`. `--dry-run` shows the plan; `--json` includes the password in the document.
+
+Nothing else is needed for a Kotlin toolchain app: `kit release android` writes
+`settings.android.signing` into `module.yaml` for the build. A Gradle app module must apply
+`io.github.jordond.kit.release`, which reads these variables; the command warns when it does not.
 
 ## Preflight checks
 

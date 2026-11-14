@@ -9,6 +9,7 @@ export const RESERVED_SERVICE_NAMES = [
   'ios',
   'android',
   'certs',
+  'keystore',
   'status',
   'promote',
   'rollout',

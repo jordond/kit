@@ -72,6 +72,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/release/certs'),
   },
   {
+    path: ['release', 'keystore'],
+    description: 'Create the Android upload keystore and store it in .env and GitHub Actions secrets',
+    group: 'Release',
+    load: () => import('../commands/release/keystore'),
+  },
+  {
     path: ['release', 'status'],
     description: 'Show the version and the latest build on each store track',
     group: 'Release',

@@ -198,6 +198,7 @@ Commands
   ios       Build and upload iOS to a track
   android   Build and upload Android to a track
   certs     Install App Store signing with match; --add creates what is missing
+  keystore  Create the Android upload keystore and store it in .env and GitHub Actions secrets
   status    Show the version and the latest build on each store track
   promote   Promote a build the store already has to a later track (no rebuild)
   rollout   Change the production rollout: Play staged rollout, App Store phased release
@@ -1608,6 +1609,36 @@ Options
       --build <number>  Build number (default: max in App Store Connect + 1)
       --notes <string>  Release notes (default: commits since the last ios/v* tag); prod: What's New, required
       --skip <string>   Skip release.preflight checks by skipFlag (comma-separated)
+
+"
+`;
+
+exports[`help kit release keystore --help 1`] = `
+"Create the Android upload keystore and store it in .env and GitHub Actions secrets
+
+Usage
+  kit release keystore [options]
+
+Examples
+  kit release keystore
+  kit release keystore --alias upload --github
+  kit release keystore --out keys/upload.jks --no-github
+  kit release keystore --dry-run
+
+Options
+  -h, --help            Show help
+  -V, --version         Show kit version
+      --json            Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run         Plan and run read-only steps; skip mutations
+  -y, --yes             Accept confirmations (never skips prod)
+  -v, --verbose         Stream all child output
+  -q, --quiet           Errors and summary only
+      --bail            Stop at the first failure
+      --alias <string>  Key alias (default key0)
+      --out <string>    Keystore file to create (default ~/.keystores/<name>.keystore)
+      --dn <string>     Certificate subject (default CN=<name>)
+      --github          Set the GitHub Actions secrets with gh (asked when omitted)
+      --force           Replace ANDROID_KEYSTORE_* values already in .env
 
 "
 `;
