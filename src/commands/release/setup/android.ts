@@ -1,7 +1,8 @@
 import { defineCommand } from '../../../cli/command'
 
 export default defineCommand({
-  description: 'Set up Android release secrets: create the upload keystore, store it and the Play key',
+  description:
+    'Set up Android release secrets: create the upload keystore, store it and the Play key, apply the release plugin',
   group: 'Release',
   args: {
     alias: { type: 'string', description: 'Key alias (default key0)' },
@@ -22,7 +23,7 @@ export default defineCommand({
     'kit release setup android --dry-run',
   ].join('\n'),
   async run(ctx) {
-    const { existsSync } = await import('node:fs')
+    const { existsSync, writeFileSync } = await import('node:fs')
     const { resolve } = await import('node:path')
     const { requireProject } = await import('../../../cli/command')
     const { ExitCode, KitError } = await import('../../../lib/errors')
@@ -61,7 +62,7 @@ export default defineCommand({
     }
     const play = ctx.args['play-json'] ? setup.playServiceAccount(resolve(ctx.args['play-json'])) : undefined
 
-    const notes = ks.buildConfigNotes(root, config, kind)
+    const { notes, apply } = ks.buildConfigPlan(root, config, kind)
     const github = await setup.decideGithub(ctx.flags, ctx.args.github, 'the Android release secrets')
 
     const write = [...(create ? ks.KEYSTORE_SECRETS : []), ...(play ? ['PLAY_SERVICE_ACCOUNT_BASE64'] : [])]
@@ -70,6 +71,7 @@ export default defineCommand({
       alias: create ? alias : null,
       generator: create ? generator : null,
       env: write,
+      plugin: apply?.rel ?? null,
       github: github ?? null,
     }
     if (ctx.flags.dryRun) {
@@ -78,6 +80,7 @@ export default defineCommand({
         if (create) ctx.log.step(`create ${file} (alias ${alias}) with ${generator}`)
         else ctx.log.step('keep the upload key .env already holds')
         if (write.length) ctx.log.step(`write ${write.join(', ')} to .env`)
+        if (apply) ctx.log.step(`apply the kit release plugin in ${apply.rel}`)
         if (github) ctx.log.step('set the Android release secrets as GitHub Actions secrets')
         for (const n of notes) ctx.log.warn(n)
       }
@@ -93,6 +96,7 @@ export default defineCommand({
     }
     if (play) values.PLAY_SERVICE_ACCOUNT_BASE64 = play
     setup.writeEnvSecrets(root, values)
+    if (apply) writeFileSync(apply.file, apply.content)
 
     // GitHub gets every Android release secret .env now holds, not only what this run wrote.
     const stored = setup.dotenvValues(root)
@@ -108,6 +112,7 @@ export default defineCommand({
       if (create) ctx.log.success(`created ${file}`)
       else ctx.log.info('upload key already in .env; kept (--force creates a new one)')
       if (write.length) ctx.log.success(`wrote ${write.join(', ')} to .env`)
+      if (apply) ctx.log.success(`applied the kit release plugin in ${apply.rel}`)
       if (push.pushed.length) ctx.log.success(`set GitHub Actions secrets: ${push.pushed.join(', ')}`)
       if (password) {
         // The one time the password is printed. Written raw: nothing here redacts it.

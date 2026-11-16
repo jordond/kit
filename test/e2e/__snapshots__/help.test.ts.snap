@@ -1757,7 +1757,7 @@ Options
 `;
 
 exports[`help kit release setup android --help 1`] = `
-"Set up Android release secrets: create the upload keystore, store it and the Play key
+"Set up Android release secrets: create the upload keystore, store it and the Play key, apply the release plugin
 
 Usage
   kit release setup android [options]

@@ -128,25 +128,82 @@ export function keystoreSecretValues(file: string, alias: string, password: stri
   }
 }
 
+const RELEASE_PLUGIN_ID = 'io.github.jordond.kit.release'
 const RELEASE_PLUGIN = /kit[.-]release|io\.github\.jordond\.kit\.release/
 
 /**
- * What the build still needs before a release signs with this keystore; empty when nothing.
+ * `source` with the kit release plugin as the last entry of its top-level `plugins { }` block, or
+ * undefined when there is no multi-line block to add a line to.
+ */
+export function applyReleasePlugin(source: string, kts: boolean): string | undefined {
+  const open = /^plugins\s*\{/m.exec(source)
+  if (!open) return undefined
+  let depth = 0
+  let close = -1
+  for (let i = open.index + open[0].length - 1; i < source.length; i++) {
+    if (source[i] === '{') depth++
+    else if (source[i] === '}' && --depth === 0) {
+      close = i
+      break
+    }
+  }
+  if (close < 0) return undefined
+  const lineStart = source.lastIndexOf('\n', close) + 1
+  // The closing brace must sit on its own line, below the opening one.
+  if (lineStart <= open.index || source.slice(lineStart, close).trim() !== '') return undefined
+  const entries = source.slice(open.index + open[0].length, lineStart).split('\n')
+  const last = entries.findLast((l) => l.trim() !== '')
+  const indent = last ? /^\s*/.exec(last)![0] : '    '
+  const line = kts ? `id("${RELEASE_PLUGIN_ID}")` : `id '${RELEASE_PLUGIN_ID}'`
+  return `${source.slice(0, lineStart)}${indent}${line}\n${source.slice(lineStart)}`
+}
+
+export interface BuildConfigPlan {
+  /** What is left for the user to do; empty when nothing. */
+  notes: string[]
+  /** The build file edit that applies the kit release plugin. */
+  apply?: { file: string; rel: string; content: string }
+}
+
+/**
+ * What the build still needs before a release signs with this keystore.
  * - Gradle: the app module must apply `io.github.jordond.kit.release`, which reads ANDROID_KEYSTORE_*.
+ *   kit adds it to the module's `plugins { }` block; the settings file pins its version.
  * - Kotlin toolchain: nothing. kit writes `settings.android.signing` into module.yaml for the build.
  */
-export function buildConfigNotes(root: string, config: KitConfig, kind: ModuleKind | undefined): string[] {
-  if (kind !== 'gradle') return []
+export function buildConfigPlan(
+  root: string,
+  config: KitConfig,
+  kind: ModuleKind | undefined,
+): BuildConfigPlan {
+  if (kind !== 'gradle') return { notes: [] }
   const module = releaseAndroidModule(root, config, kind)
-  if (!module) return ['Set release.android.module in kit.config.ts to the Android app module']
-  const build = ['build.gradle.kts', 'build.gradle']
+  if (!module) return { notes: ['Set release.android.module in kit.config.ts to the Android app module'] }
+  const file = ['build.gradle.kts', 'build.gradle']
     .map((f) => join(root, module.dir, f))
     .find((f) => existsSync(f))
-  if (!build) return [`No build.gradle(.kts) in ${module.dir}; check release.android.module`]
-  if (RELEASE_PLUGIN.test(readFileSync(build, 'utf8'))) return []
-  return [
-    `${relative(root, build)} does not apply the kit release plugin; add id("io.github.jordond.kit.release") to its plugins block so release builds sign from ANDROID_KEYSTORE_*`,
-  ]
+  if (!file) return { notes: [`No build.gradle(.kts) in ${module.dir}; check release.android.module`] }
+  const source = readFileSync(file, 'utf8')
+  if (RELEASE_PLUGIN.test(source)) return { notes: [] }
+  const rel = relative(root, file)
+  const content = applyReleasePlugin(source, file.endsWith('.kts'))
+  if (!content) {
+    return {
+      notes: [
+        `${rel} does not apply the kit release plugin and has no plugins block kit can add it to; add id("${RELEASE_PLUGIN_ID}") so release builds sign from ANDROID_KEYSTORE_*`,
+      ],
+    }
+  }
+  const notes: string[] = []
+  const settings = ['settings.gradle.kts', 'settings.gradle']
+    .map((f) => join(root, config.gradle?.root ?? '.', f))
+    .find((f) => existsSync(f))
+  if (!settings || !readFileSync(settings, 'utf8').includes('io.github.jordond.kit')) {
+    notes.push(
+      `${settings ? relative(root, settings) : 'settings.gradle(.kts)'} does not resolve io.github.jordond.kit plugins; add kit's pluginManagement block (see gradle/README.md in kit) or the build cannot find ${RELEASE_PLUGIN_ID}`,
+    )
+  }
+  return { notes, apply: { file, rel, content } }
 }
 
 /** `--out` resolved against the repo root. */

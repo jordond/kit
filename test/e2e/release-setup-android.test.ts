@@ -133,23 +133,54 @@ describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
     expect(bad.stderr).toContain('is not a Google service-account JSON')
   })
 
-  test('no note when the app module applies the kit release plugin', async () => {
+  test('applies the kit release plugin to the app module build file, once', async () => {
     fx = fixture('release', ['gh'])
+    const build = 'client/android/build.gradle.kts'
     mkdirSync(join(fx.dir, 'client/android'), { recursive: true })
     writeFileSync(
-      join(fx.dir, 'client/android/build.gradle.kts'),
-      'plugins {\n  alias(libs.plugins.kit.release)\n}\n',
+      join(fx.dir, 'client/settings.gradle.kts'),
+      'plugins { id("io.github.jordond.kit.settings") }\n',
     )
+    writeFileSync(join(fx.dir, build), 'plugins {\n  alias(libs.plugins.kit.release)\n}\n')
     const r = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])
     expect(r.code).toBe(0)
     expect(r.stderr).not.toContain('build.gradle')
 
-    writeFileSync(
-      join(fx.dir, 'client/android/build.gradle.kts'),
-      'plugins {\n  id("com.android.application")\n}\n',
+    const source =
+      'plugins {\n  id("com.android.application")\n}\n\nandroid {\n  namespace = "app.example"\n}\n'
+    writeFileSync(join(fx.dir, build), source)
+    const dry = await fx.kit(['release', 'setup', 'android', '--dry-run', '--json'])
+    expect(JSON.parse(dry.stdout).plugin).toBe(build)
+    expect(read(build)).toBe(source)
+
+    const applied = await fx.kit(['release', 'setup', 'android'])
+    expect(applied.code).toBe(0)
+    expect(applied.stderr).toContain(`applied the kit release plugin in ${build}`)
+    expect(applied.stderr).not.toContain('settings.gradle')
+    const edited = source.replace('}\n', '  id("io.github.jordond.kit.release")\n}\n')
+    expect(read(build)).toBe(edited)
+
+    const again = await fx.kit(['release', 'setup', 'android'])
+    expect(again.stderr).not.toContain('build.gradle')
+    expect(read(build)).toBe(edited)
+  })
+
+  test('notes a build file it cannot edit, and settings that do not resolve kit plugins', async () => {
+    fx = fixture('release', ['gh'])
+    const build = 'client/android/build.gradle'
+    mkdirSync(join(fx.dir, 'client/android'), { recursive: true })
+    writeFileSync(join(fx.dir, build), "apply plugin: 'com.android.application'\n")
+    const none = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])
+    expect(none.code).toBe(0)
+    expect(none.stderr).toContain(`${build} does not apply the kit release plugin and has no plugins block`)
+    expect(read(build)).toBe("apply plugin: 'com.android.application'\n")
+
+    writeFileSync(join(fx.dir, build), "plugins {\n    id 'com.android.application'\n}\n")
+    const groovy = await fx.kit(['release', 'setup', 'android'])
+    expect(read(build)).toBe(
+      "plugins {\n    id 'com.android.application'\n    id 'io.github.jordond.kit.release'\n}\n",
     )
-    const warned = await fx.kit(['release', 'setup', 'android', '--out', 'b.jks', '--force'])
-    expect(warned.stderr).toContain('client/android/build.gradle.kts does not apply the kit release plugin')
+    expect(groovy.stderr).toContain('settings.gradle(.kts) does not resolve io.github.jordond.kit plugins')
   })
 })
 
