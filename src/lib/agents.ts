@@ -100,6 +100,7 @@ export function agentGuide(config: KitConfig, facts: GuideFacts = { modules: [] 
     '- Arguments after `--` go to the underlying tool: `kit test -- <tool arguments>`.',
     '- `--dry-run` prints the commands without running them; `--json` writes one JSON document to stdout.',
     '- `kit --help` and `kit <command> --help` list everything else.',
+    '- A new repeatable task (a script, a multi-step command) is a kit command, not a standalone script: `.kit/commands/<name>.ts` adds `kit <name>` (see [repo commands](https://github.com/jordond/kit/blob/main/docs/commands.md)). A script file is fine only for a one-off, deleted once it has run.',
     ...(facts.localKit ? [`- When \`kit\` is not on PATH, run \`${facts.localKit}\`.`] : []),
     '',
     '_kit writes this block (`kit agents sync`); edit outside the markers._',

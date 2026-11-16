@@ -23,6 +23,10 @@ passthrough (`kit kotlin` or `kit gradle`), and for a Kotlin toolchain project t
 `project.yaml`. Module and platform rows appear only when the repo has a `gradle` or `kotlin` target. When
 kit lives in `.kit/`, it also names `./.kit/node_modules/.bin/kit` for a shell without `kit` on PATH.
 
+The block also tells the agent where new tooling goes: a task worth repeating becomes a repo command
+(`.kit/commands/<name>.ts`, see [commands.md](commands.md)) instead of a standalone script. A script file
+is for a one-off, deleted once it has run.
+
 All of this is opt-in. A repo without the block gets one dim line from `kit doctor` saying how to add it,
 never a warning. Once the block is there, `kit doctor` warns when it differs from what the config
 generates now (a new target, a new module, a kit upgrade) and `kit doctor --fix` runs the sync.
