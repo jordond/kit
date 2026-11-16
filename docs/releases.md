@@ -89,7 +89,8 @@ Files are decoded into a 0600 temp dir removed on exit; values are redacted from
 
 `kit release setup android` and `kit release setup ios` put a platform's release secrets into `.env`
 and, with `--github`, into GitHub Actions secrets (`gh secret set`, values on stdin). `--no-github` skips
-that; with neither flag kit asks in a terminal (`--yes` answers yes) and skips elsewhere. Both can be
+that; with neither flag kit asks in a terminal (`--yes` answers yes) and skips elsewhere. It does not ask
+when GitHub already has every secret by name and the run changes no value. Both can be
 run again: values `.env` already holds are kept, so `kit release setup ios --github` only pushes them.
 `--dry-run` shows the plan and writes nothing.
 
@@ -109,8 +110,11 @@ run again: values `.env` already holds are kept, so `kit release setup ios --git
 An app whose `.env` already holds an upload key keeps it; `--force` creates a new one (Play then needs
 an upload-key reset). kit never overwrites a keystore file. `--json` includes the password in the document.
 
-Nothing else is needed for a Kotlin toolchain app: `kit release android` writes
-`settings.android.signing` into `module.yaml` for the build. A Gradle app module must apply
+In a Kotlin toolchain app the command turns signing on in the app module's `module.yaml`
+(`settings.android.signing`, naming `./keystore.properties`) and writes that properties file beside it
+for the keystore on this machine, adding it to `.gitignore`; commit the `module.yaml` change. A build
+without the properties file is unaffected, and `kit release android` points signing at its own copy,
+built from the secrets, for the build. A Gradle app module must apply
 `dev.jordond.kit.release`, which reads these variables: the command adds it to the `plugins { }`
 block of the module's `build.gradle(.kts)` when it is missing, and says so when it cannot (no such block,
 or a settings file without kit's `pluginManagement`).

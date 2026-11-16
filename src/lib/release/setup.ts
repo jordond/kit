@@ -37,27 +37,56 @@ export function writeEnvSecrets(root: string, values: Record<string, string>): v
   writeAtomic(join(root, '.env'), text)
 }
 
+export interface GithubDecision {
+  /** Set the secrets; undefined in a dry run that neither flag decided. */
+  github: boolean | undefined
+  /** Not asked: GitHub already has every secret and this run changes none. */
+  present: boolean
+}
+
+/** The secrets a run leaves in `.env`, and whether it writes a new value for any of them. */
+export interface SecretState {
+  root: string
+  names: string[]
+  changed: boolean
+}
+
 /**
  * Whether to set GitHub Actions secrets: `--github` / `--no-github` decide; otherwise kit asks in a
- * terminal (`--yes` answers yes) and skips elsewhere. Fails early when gh is needed and missing.
+ * terminal (`--yes` answers yes) and skips elsewhere. It does not ask when GitHub already has every
+ * secret by name and the run changes no value: GitHub cannot show a value, so a name is all there is
+ * to compare. Fails early when gh is needed and missing.
  */
 export async function decideGithub(
   flags: Flags,
   arg: boolean | undefined,
   what: string,
-): Promise<boolean | undefined> {
+  state: SecretState,
+): Promise<GithubDecision> {
   let github = arg
   if (github === undefined && !flags.dryRun) {
-    github =
-      flags.interactive || flags.yes
-        ? await confirm(flags, `Set ${what} as GitHub Actions secrets?`, { initial: true })
-        : false
+    if (!flags.interactive && !flags.yes) github = false
+    else if (await githubHasAll(state)) return { github: false, present: true }
+    else github = await confirm(flags, `Set ${what} as GitHub Actions secrets?`, { initial: true })
   }
   if (github && !Bun.which('gh')) {
     throw new KitError('gh not found', 'Install the GitHub CLI, or pass --no-github', ExitCode.config)
   }
-  return github
+  return { github, present: false }
 }
+
+/** False when gh is missing or cannot list the secrets: the question is then asked as before. */
+async function githubHasAll(state: SecretState): Promise<boolean> {
+  if (state.changed || !state.names.length || !Bun.which('gh')) return false
+  const listed = await githubDestination(state.root, state.names).list()
+  return listed.ok && state.names.every((k) => listed.names.includes(k))
+}
+
+/** The closing line about GitHub when a run set no secrets there. */
+export const githubSkipped = (d: GithubDecision): string =>
+  d.present
+    ? 'GitHub Actions secrets already set (--github sets them again)'
+    : 'GitHub Actions secrets not set (--github sets them)'
 
 export interface GithubPush {
   pushed: string[]

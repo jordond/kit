@@ -36,6 +36,7 @@ export default defineCommand({
       throw new KitError('No release.android in kit.config.ts', undefined, ExitCode.config)
     }
 
+    const ANDROID_SECRETS = [...ks.KEYSTORE_SECRETS, 'PLAY_SERVICE_ACCOUNT_BASE64']
     const kind = moduleKind(config)
     const generator = ks.generatorFor(kind)
     const alias = ctx.args.alias?.trim() || ks.DEFAULT_ALIAS
@@ -63,15 +64,22 @@ export default defineCommand({
     const play = ctx.args['play-json'] ? setup.playServiceAccount(resolve(ctx.args['play-json'])) : undefined
 
     const { notes, apply } = ks.buildConfigPlan(root, config, kind)
-    const github = await setup.decideGithub(ctx.flags, ctx.args.github, 'the Android release secrets')
-
     const write = [...(create ? ks.KEYSTORE_SECRETS : []), ...(play ? ['PLAY_SERVICE_ACCOUNT_BASE64'] : [])]
+    const held = setup.dotenvValues(root)
+    const decision = await setup.decideGithub(ctx.flags, ctx.args.github, 'the Android release secrets', {
+      root,
+      names: ANDROID_SECRETS.filter((k) => k in held || write.includes(k)),
+      changed: write.length > 0,
+    })
+    const { github } = decision
+
     const plan = {
       keystore: create ? file : null,
       alias: create ? alias : null,
       generator: create ? generator : null,
       env: write,
-      plugin: apply?.rel ?? null,
+      plugin: kind === 'gradle' ? (apply?.rel ?? null) : null,
+      signing: kind === 'toolchain' ? (apply?.rel ?? null) : null,
       github: github ?? null,
     }
     if (ctx.flags.dryRun) {
@@ -80,7 +88,7 @@ export default defineCommand({
         if (create) ctx.log.step(`create ${file} (alias ${alias}) with ${generator}`)
         else ctx.log.step('keep the upload key .env already holds')
         if (write.length) ctx.log.step(`write ${write.join(', ')} to .env`)
-        if (apply) ctx.log.step(`apply the kit release plugin in ${apply.rel}`)
+        if (apply) ctx.log.step(`${apply.what} in ${apply.rel}`)
         if (github) ctx.log.step('set the Android release secrets as GitHub Actions secrets')
         for (const n of notes) ctx.log.warn(n)
       }
@@ -97,10 +105,11 @@ export default defineCommand({
     if (play) values.PLAY_SERVICE_ACCOUNT_BASE64 = play
     setup.writeEnvSecrets(root, values)
     if (apply) writeFileSync(apply.file, apply.content)
+    const props = kind === 'toolchain' ? await ks.writeSigningProperties(root, config, file) : undefined
 
     // GitHub gets every Android release secret .env now holds, not only what this run wrote.
     const stored = setup.dotenvValues(root)
-    const names = [...ks.KEYSTORE_SECRETS, 'PLAY_SERVICE_ACCOUNT_BASE64'].filter((k) => k in stored)
+    const names = ANDROID_SECRETS.filter((k) => k in stored)
     const push = github
       ? await setup.pushGithub(root, Object.fromEntries(names.map((k) => [k, stored[k]!])))
       : { pushed: [] }
@@ -112,7 +121,10 @@ export default defineCommand({
       if (create) ctx.log.success(`created ${file}`)
       else ctx.log.info('upload key already in .env; kept (--force creates a new one)')
       if (write.length) ctx.log.success(`wrote ${write.join(', ')} to .env`)
-      if (apply) ctx.log.success(`applied the kit release plugin in ${apply.rel}`)
+      if (apply) ctx.log.success(`${apply.what} in ${apply.rel}`)
+      if (props) {
+        ctx.log.success(`wrote ${props.rel}${props.gitignored ? ' and added it to .gitignore' : ''}`)
+      }
       if (push.pushed.length) ctx.log.success(`set GitHub Actions secrets: ${push.pushed.join(', ')}`)
       if (password) {
         // The one time the password is printed. Written raw: nothing here redacts it.
@@ -137,7 +149,7 @@ export default defineCommand({
       if (playMissing) {
         ctx.log.dim('PLAY_SERVICE_ACCOUNT_BASE64 not set; add it with --play-json <service-account.json>')
       }
-      if (!github) ctx.log.dim('GitHub Actions secrets not set (--github sets them)')
+      if (!github) ctx.log.dim(setup.githubSkipped(decision))
     }
     setup.assertPushed(push, names)
   },

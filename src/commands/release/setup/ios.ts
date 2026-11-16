@@ -168,9 +168,14 @@ export default defineCommand({
       matchError = repo.error
     }
 
-    const github = await setup.decideGithub(ctx.flags, ctx.args.github, 'the iOS release secrets')
     const names = [...REQUIRED, ...(next[BASIC] ? [BASIC] : [])]
     const write = names.filter((k) => stored[k] !== next[k])
+    const decision = await setup.decideGithub(ctx.flags, ctx.args.github, 'the iOS release secrets', {
+      root,
+      names,
+      changed: write.length > 0,
+    })
+    const { github } = decision
     const plan = { env: write, github: github ?? null, verified }
     const warnings = (): void => {
       if (verified.asc === 'unreachable')
@@ -222,7 +227,7 @@ export default defineCommand({
         )
       }
       warnings()
-      if (!github) ctx.log.dim('GitHub Actions secrets not set (--github sets them)')
+      if (!github) ctx.log.dim(setup.githubSkipped(decision))
       ctx.log.dim('next: `kit release certs --add` creates the certificates and profiles this app is missing')
     }
     setup.assertPushed(push, names)

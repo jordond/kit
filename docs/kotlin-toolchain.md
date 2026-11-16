@@ -53,7 +53,8 @@ directory holding the Xcode project. See [Modules](CONFIG.md#modules) for statin
 `kit release android` runs `./kotlin package -m <module name>`. The toolchain takes no build
 properties, so kit writes `versionName`, `versionCode` and `signing` (a `keystore.properties` in kit's
 0600 temp dir, built from the `ANDROID_KEYSTORE_*` secrets) into the module's `module.yaml` for the build and
-restores the file afterwards, also on failure or Ctrl-C. `release.android.gates` tasks are `./kotlin`
+restores the file afterwards, also on failure or Ctrl-C. `kit release setup android` commits
+`signing` with `propertiesFile: ./keystore.properties` and writes that file for the local keystore. `release.android.gates` tasks are `./kotlin`
 arguments (`test -m shared`). `kit version bump` also rewrites `settings.android.versionName` in the app's
 `module.yaml`, and releases and `kit doctor` fail if it differs from the TOML. There is no `BuildConstants.IS_INTERNAL`:
 it comes from kit's Gradle plugin.

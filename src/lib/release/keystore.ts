@@ -1,14 +1,21 @@
 import { randomInt } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
-import { type ModuleKind, releaseAndroidModule } from '../module'
+import { type ModuleKind, moduleYaml, releaseAndroidModule } from '../module'
 import { runPiped } from '../proc'
 import { redact, registerSecret, secretFile } from '../secrets'
 import { dotenvValues } from './setup'
-import { keystoreProperties, requireWrapper, WRAPPER } from '../toolchain'
+import {
+  ANDROID_SIGNING,
+  getYamlScalar,
+  keystoreProperties,
+  requireWrapper,
+  setYaml,
+  WRAPPER,
+} from '../toolchain'
 
 /**
  * `kit release setup android`: create the Android upload keystore and store it under the canonical
@@ -161,21 +168,78 @@ export function applyReleasePlugin(source: string, kts: boolean): string | undef
 export interface BuildConfigPlan {
   /** What is left for the user to do; empty when nothing. */
   notes: string[]
-  /** The build file edit that applies the kit release plugin. */
-  apply?: { file: string; rel: string; content: string }
+  /** The build file edit: the kit release plugin (Gradle) or `settings.android.signing` (toolchain). */
+  apply?: { file: string; rel: string; content: string; what: string }
+}
+
+/** The properties file the committed `settings.android.signing` names, beside module.yaml. */
+export const SIGNING_PROPERTIES = 'keystore.properties'
+
+function toolchainConfigPlan(root: string, config: KitConfig): BuildConfigPlan {
+  const module = releaseAndroidModule(root, config, 'toolchain')
+  if (!module) return { notes: ['Set release.android.module in kit.config.ts to the Android app module'] }
+  const rel = moduleYaml(module)
+  const file = join(root, rel)
+  if (!existsSync(file)) return { notes: [`No ${rel}; check release.android.module`] }
+  const source = readFileSync(file, 'utf8')
+  const enabled =
+    getYamlScalar(source, ANDROID_SIGNING) === 'enabled' ||
+    getYamlScalar(source, [...ANDROID_SIGNING, 'enabled']) === 'true'
+  if (enabled) return { notes: [] }
+  const content = setYaml(
+    source,
+    ANDROID_SIGNING,
+    { enabled: 'true', propertiesFile: `./${SIGNING_PROPERTIES}` },
+    rel,
+  )
+  return { notes: [], apply: { file, rel, content, what: 'enable Android signing' } }
+}
+
+/**
+ * Write `<module>/keystore.properties` (0600) for the keystore at `storeFile`, so `./kotlin package`
+ * signs on this machine without kit, and keep it out of git. An existing file is left alone.
+ * Returns the repo-relative path written and whether .gitignore gained a line, or undefined.
+ */
+export async function writeSigningProperties(
+  root: string,
+  config: KitConfig,
+  storeFile: string,
+): Promise<{ rel: string; gitignored: boolean } | undefined> {
+  const module = releaseAndroidModule(root, config, 'toolchain')
+  if (!module || !existsSync(join(root, moduleYaml(module)))) return undefined
+  const rel = join(module.dir, SIGNING_PROPERTIES)
+  const file = join(root, rel)
+  const env = dotenvValues(root)
+  const alias = env.ANDROID_KEYSTORE_ALIAS
+  const password = env.ANDROID_KEYSTORE_PASSWORD
+  if (existsSync(file) || !existsSync(storeFile) || !alias || !password) return undefined
+  // Only for the upload key .env holds: another keystore at that path would sign with the wrong key.
+  if (readFileSync(storeFile).toString('base64') !== env.ANDROID_KEYSTORE_BASE64) return undefined
+  writeFileSync(file, keystoreProperties(storeFile, alias, password), { mode: 0o600 })
+  chmodSync(file, 0o600)
+  const gitignored = await committable(root, file)
+  if (gitignored) {
+    const gitignore = join(root, '.gitignore')
+    const text = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : ''
+    appendFileSync(gitignore, `${text === '' || text.endsWith('\n') ? '' : '\n'}${SIGNING_PROPERTIES}\n`)
+  }
+  return { rel, gitignored }
 }
 
 /**
  * What the build still needs before a release signs with this keystore.
  * - Gradle: the app module must apply `dev.jordond.kit.release`, which reads ANDROID_KEYSTORE_*.
  *   kit adds it to the module's `plugins { }` block; the settings file pins its version.
- * - Kotlin toolchain: nothing. kit writes `settings.android.signing` into module.yaml for the build.
+ * - Kotlin toolchain: module.yaml gets `settings.android.signing` naming `./keystore.properties`. A
+ *   build without that file (a debug build, another machine) is unaffected; `kit release android`
+ *   points signing at its own properties file for the build.
  */
 export function buildConfigPlan(
   root: string,
   config: KitConfig,
   kind: ModuleKind | undefined,
 ): BuildConfigPlan {
+  if (kind === 'toolchain') return toolchainConfigPlan(root, config)
   if (kind !== 'gradle') return { notes: [] }
   const module = releaseAndroidModule(root, config, kind)
   if (!module) return { notes: ['Set release.android.module in kit.config.ts to the Android app module'] }
@@ -203,7 +267,7 @@ export function buildConfigPlan(
       `${settings ? relative(root, settings) : 'settings.gradle(.kts)'} does not resolve dev.jordond.kit plugins; add kit's pluginManagement block (see gradle/README.md in kit) or the build cannot find ${RELEASE_PLUGIN_ID}`,
     )
   }
-  return { notes, apply: { file, rel, content } }
+  return { notes, apply: { file, rel, content, what: 'apply the kit release plugin' } }
 }
 
 /** `--out` resolved against the repo root. */

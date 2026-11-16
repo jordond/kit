@@ -133,6 +133,40 @@ describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
     expect(bad.stderr).toContain('is not a Google service-account JSON')
   })
 
+  test('does not ask about GitHub when it already has every secret and none changed', async () => {
+    fx = fixture('release', ['gh'])
+    expect((await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])).code).toBe(0)
+    const listing = (names: string[]) =>
+      fx.script(
+        'gh',
+        `${recordingGh()}\nif [ "$1" = secret ] && [ "$2" = list ]; then echo '${JSON.stringify(names.map((name) => ({ name })))}'; fi`,
+      )
+    const sets = () => fx.calls().filter((c) => c.argv[1] === 'set').length
+
+    listing(['OTHER', 'ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_ALIAS', 'ANDROID_KEYSTORE_PASSWORD'])
+    const kept = await fx.kit(['release', 'setup', 'android', '--yes'])
+    expect(kept.code).toBe(0)
+    expect(kept.stderr).toContain('GitHub Actions secrets already set (--github sets them again)')
+    expect(sets()).toBe(0)
+
+    // A value this run writes is not on GitHub yet, whatever the names say.
+    writeFileSync(join(fx.dir, 'play.json'), '{ "type": "service_account" }')
+    listing([
+      'ANDROID_KEYSTORE_BASE64',
+      'ANDROID_KEYSTORE_ALIAS',
+      'ANDROID_KEYSTORE_PASSWORD',
+      'PLAY_SERVICE_ACCOUNT_BASE64',
+    ])
+    expect((await fx.kit(['release', 'setup', 'android', '--play-json', 'play.json', '--yes'])).code).toBe(0)
+    expect(sets()).toBe(4)
+
+    // A name GitHub lacks: asked (--yes answers), and every secret is set.
+    listing(['ANDROID_KEYSTORE_BASE64'])
+    const missing = await fx.kit(['release', 'setup', 'android', '--yes'])
+    expect(missing.stderr).toContain('set GitHub Actions secrets: ANDROID_KEYSTORE_BASE64')
+    expect(sets()).toBe(8)
+  })
+
   test('applies the kit release plugin to the app module build file, once', async () => {
     fx = fixture('release', ['gh'])
     const build = 'client/android/build.gradle.kts'
@@ -152,7 +186,7 @@ describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
 
     const applied = await fx.kit(['release', 'setup', 'android'])
     expect(applied.code).toBe(0)
-    expect(applied.stderr).toContain(`applied the kit release plugin in ${build}`)
+    expect(applied.stderr).toContain(`apply the kit release plugin in ${build}`)
     expect(applied.stderr).not.toContain('settings.gradle')
     const edited = source.replace('}\n', '  id("dev.jordond.kit.release")\n}\n')
     expect(read(build)).toBe(edited)
@@ -222,8 +256,30 @@ fs.writeFileSync("kotlin.log", JSON.stringify({ argv, props, mode }))' -- "$@"
 `,
     )
     chmodSync(join(fx.dir, 'kotlin'), 0o755)
+    Bun.spawnSync(['git', 'init', '-q'], { cwd: fx.dir })
+    const yaml = read('androidApp/module.yaml')
+    const dry = await fx.kit(['release', 'setup', 'android', '--dry-run', '--json'], {
+      env: { HOME: fx.dir },
+    })
+    expect(JSON.parse(dry.stdout)).toMatchObject({ signing: 'androidApp/module.yaml', plugin: null })
+    expect(read('androidApp/module.yaml')).toBe(yaml)
+
     const r = await fx.kit(['release', 'setup', 'android'], { env: { HOME: fx.dir } })
     expect(r.code).toBe(0)
+    // module.yaml names a properties file beside it; that file holds this machine's key and is ignored.
+    const signed = `${yaml.trimEnd()}\n    signing:\n      enabled: true\n      propertiesFile: ./keystore.properties\n`
+    expect(read('androidApp/module.yaml')).toBe(signed)
+    expect(r.stderr).toContain('enable Android signing in androidApp/module.yaml')
+    expect(r.stderr).toContain('wrote androidApp/keystore.properties and added it to .gitignore')
+    expect(statSync(join(fx.dir, 'androidApp/keystore.properties')).mode & 0o777).toBe(0o600)
+    expect(read('androidApp/keystore.properties')).toContain(
+      `keyAlias=key0\nkeyPassword=${envValue('ANDROID_KEYSTORE_PASSWORD')}\n`,
+    )
+    expect(read('.gitignore')).toEndWith('keystore.properties\n')
+    const again = await fx.kit(['release', 'setup', 'android'], { env: { HOME: fx.dir } })
+    expect(again.stderr).not.toContain('module.yaml')
+    expect(again.stderr).not.toContain('keystore.properties')
+    expect(read('androidApp/module.yaml')).toBe(signed)
     const file = join(fx.dir, '.keystores/app.keystore')
     const password = envValue('ANDROID_KEYSTORE_PASSWORD')
     const log = JSON.parse(read('kotlin.log')) as { argv: string[]; props: string; mode: string }
