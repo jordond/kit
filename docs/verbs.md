@@ -1,4 +1,4 @@
-# Affected targets, step timings and clean
+# Affected targets, missing installs, step timings and clean
 
 ## Affected targets
 
@@ -37,6 +37,20 @@ target, and the workspace commands run whenever anything changed. Nothing change
 `--staged` picks targets by the same `dir` and `paths` rule, but a staged file no target claims selects
 none (the workspace commands still get it), so pre-commit hooks stay fast.
 `--json` adds `affected` (the target names) and `base`.
+
+## Missing installs
+
+In a fresh clone a JS target (`worker`, `vite`, `astro`, `custom`) has no `node_modules`, and its
+tools fail with errors like `astro: command not found`. The verbs (`lint`, `format`, `typecheck`,
+`check`, `test`, `build`) and `kit dev` install first in that case: an `install` group runs
+`<pm> install` once per install root, ahead of the workspace and the targets. `--dry-run` lists it.
+
+- The package manager is the one of the nearest lockfile, and the install runs in that lockfile's
+  directory (the repo root for a workspace), as `kit doctor --fix` does for a missing wrangler.
+- It only runs when `node_modules` is missing and the `package.json` has dependencies. An install
+  that is out of date is not detected: run the package manager yourself after pulling.
+- The repo root is installed the same way when the run has `workspace` commands.
+- `kit deploy` never installs.
 
 ## Step timings
 

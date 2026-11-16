@@ -3,7 +3,14 @@ import { join, relative, resolve } from 'node:path'
 import type { CommandValue, Kind, KitConfig, TargetConfig, Verb } from '../config/schema'
 import { ExitCode, KitError } from './errors'
 import { MAESTRO_GROUP, maestroLintGroup } from './maestro/lint'
-import { detectPackageManager, type PackageManager, packageScripts, pmExec, runScript } from './pm'
+import {
+  detectPackageManager,
+  missingInstall,
+  type PackageManager,
+  packageScripts,
+  pmExec,
+  runScript,
+} from './pm'
 import { shell } from './proc'
 import { releaseAndroidModule, resolveModule } from './module'
 
@@ -14,6 +21,8 @@ import { releaseAndroidModule, resolveModule } from './module'
  */
 
 export const WORKSPACE = 'workspace'
+/** The group of package installs a run starts with when node_modules is missing. */
+export const INSTALL = 'install'
 
 export interface PlannedCommand {
   title: string
@@ -118,6 +127,38 @@ function kotlinScopedArgs(c: Ctx): string[] {
 const PREPARES: readonly Verb[] = ['lint', 'typecheck', 'test', 'build']
 /** Kinds whose targets pull in the workspace when named. */
 const JS_KINDS: readonly Kind[] = ['worker', 'vite', 'astro', 'custom']
+
+/**
+ * `<pm> install` for the JS targets in `names` (and the repo root with `workspace`) whose
+ * node_modules is missing: a fresh clone runs without a manual install. One command per install
+ * root; undefined when everything is installed.
+ */
+export function installGroup(
+  root: string,
+  config: KitConfig,
+  names: string[],
+  workspace = false,
+): PlannedGroup | undefined {
+  const dirs = [
+    ...(workspace ? [root] : []),
+    ...names
+      .map((n) => config.targets[n])
+      .filter((t): t is TargetConfig => !!t && JS_KINDS.includes(t.kind))
+      .map((t) => resolve(root, t.dir)),
+  ]
+  const commands = new Map<string, PlannedCommand>()
+  for (const dir of dirs) {
+    const install = missingInstall(dir, root)
+    if (!install || commands.has(install.cwd)) continue
+    const where = relative(root, install.cwd)
+    commands.set(install.cwd, {
+      title: `${install.cmd.join(' ')}${where ? ` (${where})` : ''}`,
+      cmd: install.cmd,
+      cwd: install.cwd,
+    })
+  }
+  return commands.size ? { title: INSTALL, commands: [...commands.values()] } : undefined
+}
 
 export interface Selection {
   targets: [string, TargetConfig][]
@@ -412,7 +453,8 @@ export function affectedTargets(root: string, config: KitConfig, files: string[]
 
 /**
  * Plan a run of `verbs` (one, or `check` = lint + typecheck) over the selected targets.
- * Groups: workspace first (prepare, then each verb), then each target in config order.
+ * Groups: missing package installs, the workspace (prepare, then each verb), then each target in
+ * config order.
  */
 export function planVerbs(
   root: string,
@@ -438,6 +480,13 @@ export function planVerbs(
     const commands = verbs.flatMap((v) => targetCommands(root, config, name, v, opts) ?? [])
     if (commands.length) groups.push({ title: name, commands })
   }
+  const install = installGroup(
+    root,
+    config,
+    groups.map((g) => g.title),
+    groups.some((g) => g.title === WORKSPACE),
+  )
+  if (install) groups.unshift(install)
   // The flow check runs with an unrestricted lint or when named; staged and affected narrow it to flow files.
   if (
     verbs.includes('lint') &&

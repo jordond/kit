@@ -69,3 +69,27 @@ export function installRoot(dir: string, root: string): string {
     resolve(dir)
   )
 }
+
+/** `<dir>/package.json` declares something to install: dependencies of any sort, or workspaces. */
+function hasDependencies(dir: string): boolean {
+  try {
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as Record<string, unknown>
+    const filled = (v: unknown) => !!v && typeof v === 'object' && Object.keys(v).length > 0
+    return ['dependencies', 'devDependencies', 'optionalDependencies', 'workspaces'].some((k) =>
+      filled(pkg[k]),
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * `<pm> install` for `dir` when its packages were never installed: the install root (see
+ * `installRoot`) has a package.json with dependencies and no node_modules. Undefined otherwise;
+ * an install that is merely out of date is left alone.
+ */
+export function missingInstall(dir: string, root: string): { cmd: string[]; cwd: string } | undefined {
+  const cwd = installRoot(dir, root)
+  if (existsSync(join(cwd, 'node_modules')) || !hasDependencies(cwd)) return undefined
+  return { cmd: [detectPackageManager(dir, root), 'install'], cwd }
+}

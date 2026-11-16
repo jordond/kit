@@ -16,9 +16,9 @@ export default defineCommand({
   async run(ctx) {
     const { relative } = await import('node:path')
     const { requireProject } = await import('../cli/command')
-    const { selectTargets, targetCommands, WORKSPACE } = await import('../lib/targets')
+    const { installGroup, selectTargets, targetCommands, WORKSPACE } = await import('../lib/targets')
     const { envsFor } = await import('./deploy')
-    const { runInteractive, shell } = await import('../lib/proc')
+    const { run, runInteractive, runToStderr, shell } = await import('../lib/proc')
     const { interrupted } = await import('../lib/cleanup')
     const { emitJson } = await import('../lib/log')
     const { ExitCode, KitError } = await import('../lib/errors')
@@ -67,21 +67,36 @@ export default defineCommand({
       )
     }
 
+    // A fresh clone: install what the servers need before any of them starts.
+    const install = installGroup(
+      root,
+      config,
+      lanes.map((l) => l.name),
+      lanes.some((l) => l.name === WORKSPACE),
+    )
+    const planned = install ? [{ name: install.title, commands: install.commands }, ...lanes] : lanes
+
     const where = (cwd: string) => relative(root, cwd) || '.'
     if (ctx.flags.dryRun) {
       if (ctx.flags.json) {
         emitJson({
           dryRun: true,
-          plan: lanes.map((l) => ({
+          plan: planned.map((l) => ({
             target: l.name,
             commands: l.commands.map((c) => ({ cmd: c.cmd, cwd: where(c.cwd) })),
           })),
         })
       } else {
-        for (const l of lanes)
+        for (const l of planned)
           for (const c of l.commands) ctx.log.step(`${l.name}  ${where(c.cwd)} $ ${c.cmd.join(' ')}`)
       }
       return
+    }
+
+    for (const c of install?.commands ?? []) {
+      ctx.log.step(c.title)
+      const code = await (ctx.flags.json ? runToStderr : run)(c.cmd, { cwd: c.cwd })
+      if (code !== 0) throw new KitError(`${c.title} failed (exit ${code})`, undefined, ExitCode.precondition)
     }
 
     let results: { name: string; code: number }[]
