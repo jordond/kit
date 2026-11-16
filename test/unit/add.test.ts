@@ -363,7 +363,7 @@ describe('names', () => {
 
   test('the plugin still derives namespaces the way modulePackage mirrors', () => {
     const kt = readFileSync(
-      join(KIT, 'gradle/plugins/src/main/kotlin/io/github/jordond/kit/KitNamespaces.kt'),
+      join(KIT, 'gradle/plugins/src/main/kotlin/dev/jordond/kit/KitNamespaces.kt'),
       'utf8',
     )
     expect(kt).toContain(".flatMap { it.split('-', '.') }")
@@ -439,9 +439,9 @@ describe('plans', () => {
     ])
     const [build, kt, edit] = plan.actions as { content: string }[]
     expect(build!.content).toBe(
-      'plugins {\n    id("io.github.jordond.kit.kmp.library")\n}\n\nkit {\n    targets {\n        android()\n        ios()\n        jvm()\n    }\n}\n',
+      'plugins {\n    id("dev.jordond.kit.kmp.library")\n}\n\nkit {\n    targets {\n        android()\n        ios()\n        jvm()\n    }\n}\n',
     )
-    expect(build!.content.match(/id\("([^"]+)"\)/g)).toEqual(['id("io.github.jordond.kit.kmp.library")'])
+    expect(build!.content.match(/id\("([^"]+)"\)/g)).toEqual(['id("dev.jordond.kit.kmp.library")'])
     expect(kt!.content).toStartWith('package com.example.app.feature.login\n')
     expect(kt!.content).toContain(':feature:login')
     expect(edit!.content).toBe('include(":shared")\ninclude(":feature:login")\n')
@@ -452,7 +452,7 @@ describe('plans', () => {
     const [build, , edit] = plan.actions as { path: string; content: string }[]
     expect(build!.path).toBe('apps/client/libs/login/build.gradle.kts')
     expect(build!.content).toContain(
-      'id("io.github.jordond.kit.kmp.library")\n    id("io.github.jordond.kit.compose")\n}',
+      'id("dev.jordond.kit.kmp.library")\n    id("dev.jordond.kit.compose")\n}',
     )
     expect(build!.content).toContain('targets {\n        js()\n    }')
     expect(edit!.content).toContain('project(":feature:login").projectDir = file("libs/login")')

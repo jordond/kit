@@ -155,7 +155,7 @@ export function planGradleModule(input: ModuleInput & { settings: string }): Add
       [
         join(root, dir, 'build.gradle.kts'),
         render(input.templates, 'gradle-module/build.gradle.kts', {
-          compose: input.compose ? '\n    id("io.github.jordond.kit.compose")' : '',
+          compose: input.compose ? '\n    id("dev.jordond.kit.compose")' : '',
           targets: input.targets.map((t) => `        ${t}()`).join('\n'),
         }),
       ],

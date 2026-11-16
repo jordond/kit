@@ -137,10 +137,7 @@ describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
     fx = fixture('release', ['gh'])
     const build = 'client/android/build.gradle.kts'
     mkdirSync(join(fx.dir, 'client/android'), { recursive: true })
-    writeFileSync(
-      join(fx.dir, 'client/settings.gradle.kts'),
-      'plugins { id("io.github.jordond.kit.settings") }\n',
-    )
+    writeFileSync(join(fx.dir, 'client/settings.gradle.kts'), 'plugins { id("dev.jordond.kit.settings") }\n')
     writeFileSync(join(fx.dir, build), 'plugins {\n  alias(libs.plugins.kit.release)\n}\n')
     const r = await fx.kit(['release', 'setup', 'android', '--out', 'a.jks'])
     expect(r.code).toBe(0)
@@ -157,7 +154,7 @@ describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
     expect(applied.code).toBe(0)
     expect(applied.stderr).toContain(`applied the kit release plugin in ${build}`)
     expect(applied.stderr).not.toContain('settings.gradle')
-    const edited = source.replace('}\n', '  id("io.github.jordond.kit.release")\n}\n')
+    const edited = source.replace('}\n', '  id("dev.jordond.kit.release")\n}\n')
     expect(read(build)).toBe(edited)
 
     const again = await fx.kit(['release', 'setup', 'android'])
@@ -178,9 +175,9 @@ describe.skipIf(!hasKeytool)('release setup android (gradle, keytool)', () => {
     writeFileSync(join(fx.dir, build), "plugins {\n    id 'com.android.application'\n}\n")
     const groovy = await fx.kit(['release', 'setup', 'android'])
     expect(read(build)).toBe(
-      "plugins {\n    id 'com.android.application'\n    id 'io.github.jordond.kit.release'\n}\n",
+      "plugins {\n    id 'com.android.application'\n    id 'dev.jordond.kit.release'\n}\n",
     )
-    expect(groovy.stderr).toContain('settings.gradle(.kts) does not resolve io.github.jordond.kit plugins')
+    expect(groovy.stderr).toContain('settings.gradle(.kts) does not resolve dev.jordond.kit plugins')
   })
 })
 

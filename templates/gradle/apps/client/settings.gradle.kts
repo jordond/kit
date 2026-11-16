@@ -10,15 +10,15 @@ pluginManagement {
     repositories {
         exclusiveContent {
             forRepository { maven(kit.resolve("gradle/maven")) }
-            filter { includeGroupAndSubgroups("io.github.jordond.kit") }
+            filter { includeGroupAndSubgroups("dev.jordond.kit") }
         }
         gradlePluginPortal(); google(); mavenCentral()
     }
     resolutionStrategy.eachPlugin {
-        if (requested.id.id.startsWith("io.github.jordond.kit")) useVersion(kitVersion)
+        if (requested.id.id.startsWith("dev.jordond.kit")) useVersion(kitVersion)
     }
 }
-plugins { id("io.github.jordond.kit.settings") }
+plugins { id("dev.jordond.kit.settings") }
 
 rootProject.name = "{{name}}"
 

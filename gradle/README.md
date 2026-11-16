@@ -3,8 +3,8 @@
 Two artifacts, published by `bun run build:gradle` (`./gradlew publishKit`) into `gradle/maven`, the
 file Maven repo inside the npm package (PLAN §13.2):
 
-- `io.github.jordond.kit:kit-settings`: the settings plugin. It never references AGP, KGP or Compose types (spike S7).
-- `io.github.jordond.kit:kit-plugins`: every project plugin.
+- `dev.jordond.kit:kit-settings`: the settings plugin. It never references AGP, KGP or Compose types (spike S7).
+- `dev.jordond.kit:kit-plugins`: every project plugin.
 
 Both POMs carry no dependencies. AGP, KGP, Compose and spotless come from the app's root
 `plugins { alias(...) apply false }`, so kit never forces an upgrade.
@@ -13,17 +13,17 @@ Both POMs carry no dependencies. AGP, KGP, Compose and spotless come from the ap
 
 | Id                                         | Apply to                                         | Does                                                                                                                                                                                                                                       |
 | ------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `io.github.jordond.kit.settings`           | `settings.gradle.kts`                            | `TYPESAFE_PROJECT_ACCESSORS`; the foojay resolver if it is on the settings classpath; Google (filtered to androidx/com.android/com.google) + Maven Central dependency repos                                                                |
-| `io.github.jordond.kit.release`            | Android app module and/or the shared KMP module  | App: versionName/versionCode from `-Pkit.*`, release signing, fails an unsigned release build. KMP: generates `BuildConstants` into commonMain                                                                                             |
-| `io.github.jordond.kit.lint`               | root `build.gradle.kts`, once                    | spotless + ktlint on every subproject: kotlin (`src/**/*.kt`), kotlinGradle (`*.gradle.kts`), xml (`src/**/*.xml`); root scripts opt in; ktlint reads the nearest `.editorconfig` at or above the Gradle root                                                      |
-| `io.github.jordond.kit.kmp.library`        | shared KMP modules                               | KMP, default hierarchy, shared opt-ins, `-Xexpect-actual-classes`, `-Xexport-kdoc` on native; targets via `kit { targets { } }`; Android through `com.android.kotlin.multiplatform.library` with namespace `<app-name>.<module path>` (`:core:api` → `.core.api`) |
-| `io.github.jordond.kit.compose`            | KMP modules using Compose                        | Compose compiler + Compose Multiplatform plugins; runtime, foundation, ui (+ components-resources) at the Compose plugin's version; Compose opt-ins                                                                                        |
-| `io.github.jordond.kit.android.application`| Android app module                               | SDK levels, Java target, packaging excludes, release minify + shrink + default proguard (+ `proguard-rules.pro` if present), Compose build feature when the Compose compiler is applied; namespace/applicationId defaults               |
-| `io.github.jordond.kit.android.baseline`   | app module (consumer) / `com.android.test` module (producer) | Consumer: androidx.baselineprofile, `dexLayoutOptimization`, producer dependency, debug signing for `nonMinifiedRelease`/`benchmarkRelease`, `verifyBaselineProfile` + `writeBaselineProfileStamp`. Producer: SDKs, runner, managed device |
-| `io.github.jordond.kit.jvm.app`            | JVM server / CLI modules                         | Kotlin JVM with a Java toolchain of `app-jvm-target` (or `kit { jvmTarget }`); optional `application`                                                                                                                                     |
+| `dev.jordond.kit.settings`           | `settings.gradle.kts`                            | `TYPESAFE_PROJECT_ACCESSORS`; the foojay resolver if it is on the settings classpath; Google (filtered to androidx/com.android/com.google) + Maven Central dependency repos                                                                |
+| `dev.jordond.kit.release`            | Android app module and/or the shared KMP module  | App: versionName/versionCode from `-Pkit.*`, release signing, fails an unsigned release build. KMP: generates `BuildConstants` into commonMain                                                                                             |
+| `dev.jordond.kit.lint`               | root `build.gradle.kts`, once                    | spotless + ktlint on every subproject: kotlin (`src/**/*.kt`), kotlinGradle (`*.gradle.kts`), xml (`src/**/*.xml`); root scripts opt in; ktlint reads the nearest `.editorconfig` at or above the Gradle root                                                      |
+| `dev.jordond.kit.kmp.library`        | shared KMP modules                               | KMP, default hierarchy, shared opt-ins, `-Xexpect-actual-classes`, `-Xexport-kdoc` on native; targets via `kit { targets { } }`; Android through `com.android.kotlin.multiplatform.library` with namespace `<app-name>.<module path>` (`:core:api` → `.core.api`) |
+| `dev.jordond.kit.compose`            | KMP modules using Compose                        | Compose compiler + Compose Multiplatform plugins; runtime, foundation, ui (+ components-resources) at the Compose plugin's version; Compose opt-ins                                                                                        |
+| `dev.jordond.kit.android.application`| Android app module                               | SDK levels, Java target, packaging excludes, release minify + shrink + default proguard (+ `proguard-rules.pro` if present), Compose build feature when the Compose compiler is applied; namespace/applicationId defaults               |
+| `dev.jordond.kit.android.baseline`   | app module (consumer) / `com.android.test` module (producer) | Consumer: androidx.baselineprofile, `dexLayoutOptimization`, producer dependency, debug signing for `nonMinifiedRelease`/`benchmarkRelease`, `verifyBaselineProfile` + `writeBaselineProfileStamp`. Producer: SDKs, runner, managed device |
+| `dev.jordond.kit.jvm.app`            | JVM server / CLI modules                         | Kotlin JVM with a Java toolchain of `app-jvm-target` (or `kit { jvmTarget }`); optional `application`                                                                                                                                     |
 
 Module build files need no version: the settings snippet's `eachPlugin.useVersion` pins every
-`io.github.jordond.kit.*` id to the npm version.
+`dev.jordond.kit.*` id to the npm version.
 
 ## Required catalog keys (`gradle/libs.versions.toml`, `[versions]`)
 

@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.api.Action
 import org.gradle.api.Plugin
@@ -8,7 +8,7 @@ import org.gradle.api.plugins.UnknownPluginException
 import javax.inject.Inject
 
 /**
- * `io.github.jordond.kit.settings`: shared settings conventions.
+ * `dev.jordond.kit.settings`: shared settings conventions.
  *
  * - `TYPESAFE_PROJECT_ACCESSORS` (idempotent).
  * - The foojay toolchain resolver, when `org.gradle.toolchains.foojay-resolver-convention` is on the

@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -6,7 +6,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 /**
- * `io.github.jordond.kit.kmp.library`: Kotlin Multiplatform with kit's shared conventions.
+ * `dev.jordond.kit.kmp.library`: Kotlin Multiplatform with kit's shared conventions.
  *
  * Applies KMP, the default hierarchy, the shared opt-ins and `-Xexpect-actual-classes`, and
  * `-Xexport-kdoc` on native. Targets come from `kit { targets { android(); ios(); jvm(); js() } }`;

@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DynamicContainer

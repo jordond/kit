@@ -1,5 +1,5 @@
 plugins {
-    id("io.github.jordond.kit.kmp.library"){{compose}}
+    id("dev.jordond.kit.kmp.library"){{compose}}
 }
 
 kit {

@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.api.Action
 import org.gradle.api.Project

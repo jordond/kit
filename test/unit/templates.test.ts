@@ -76,7 +76,7 @@ describe('templates/gradle', () => {
   test('settings.gradle.kts resolves kit plugins from node_modules and applies kit.settings', () => {
     const text = render('apps/client/settings.gradle.kts')
     expect(text).toContain('node_modules/@jordond/kit')
-    expect(text).toContain('plugins { id("io.github.jordond.kit.settings") }')
+    expect(text).toContain('plugins { id("dev.jordond.kit.settings") }')
     expect(text).toContain('rootProject.name = "Demo"')
   })
 
@@ -157,7 +157,7 @@ describe('templates/toolchain', () => {
 describe('templates/add', () => {
   const ADD = join(KIT, 'templates/add')
   const ADD_VARS: Record<string, string> = {
-    compose: '\n    id("io.github.jordond.kit.compose")',
+    compose: '\n    id("dev.jordond.kit.compose")',
     targets: '        android()\n        jvm()',
     package: 'com.example.app.core',
     module: ':core',
@@ -197,8 +197,8 @@ describe('templates/add', () => {
   test('gradle module: only kit plugin ids, and the kit { targets { } } block', () => {
     const text = add('gradle-module/build.gradle.kts')
     expect([...text.matchAll(/id\("([^"]+)"\)/g)].map((m) => m[1])).toEqual([
-      'io.github.jordond.kit.kmp.library',
-      'io.github.jordond.kit.compose',
+      'dev.jordond.kit.kmp.library',
+      'dev.jordond.kit.compose',
     ])
     expect(text).toContain('kit {\n    targets {\n        android()\n        jvm()\n    }\n}')
     expect(add('Placeholder.kt')).toStartWith('package com.example.app.core\n')

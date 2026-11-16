@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import com.android.build.api.dsl.ManagedVirtualDevice
 import com.android.build.api.dsl.TestExtension
@@ -10,7 +10,7 @@ import org.gradle.api.Project
 import org.gradle.kotlin.dsl.withGroovyBuilder
 
 /**
- * `io.github.jordond.kit.android.baseline`: Baseline Profiles on both ends (ported from WhaleSay).
+ * `dev.jordond.kit.android.baseline`: Baseline Profiles on both ends (ported from WhaleSay).
  *
  * Consumer (`com.android.application`): androidx.baselineprofile with `dexLayoutOptimization`, the
  * producer dependency from `kit { producer = ":android:baseline" }`, debug signing for the

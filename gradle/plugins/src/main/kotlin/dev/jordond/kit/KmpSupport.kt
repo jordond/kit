@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import com.android.build.api.dsl.KotlinMultiplatformAndroidLibraryTarget
 import org.gradle.api.GradleException
@@ -47,7 +47,7 @@ internal object KmpSupport {
 
     private fun Project.kotlinMultiplatform(): KotlinMultiplatformExtension =
         extensions.findByType(KotlinMultiplatformExtension::class.java)
-            ?: throw GradleException("kit.$PLUGIN: apply io.github.jordond.kit.kmp.library to $path before `kit { targets { } }`")
+            ?: throw GradleException("kit.$PLUGIN: apply dev.jordond.kit.kmp.library to $path before `kit { targets { } }`")
 
     fun explicitApi(
         project: Project,

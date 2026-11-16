@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import com.android.build.api.variant.ApplicationAndroidComponentsExtension
 import org.gradle.api.GradleException
@@ -7,7 +7,7 @@ import org.gradle.api.Project
 import org.gradle.api.provider.Provider
 
 /**
- * `io.github.jordond.kit.release`: the CLI <-> Gradle contract (PLAN §13.4).
+ * `dev.jordond.kit.release`: the CLI <-> Gradle contract (PLAN §13.4).
  *
  * On `com.android.application`:
  * - versionName = -Pkit.versionName ?: catalog `app-android-version`

@@ -128,8 +128,8 @@ export function keystoreSecretValues(file: string, alias: string, password: stri
   }
 }
 
-const RELEASE_PLUGIN_ID = 'io.github.jordond.kit.release'
-const RELEASE_PLUGIN = /kit[.-]release|io\.github\.jordond\.kit\.release/
+const RELEASE_PLUGIN_ID = 'dev.jordond.kit.release'
+const RELEASE_PLUGIN = /kit[.-]release|dev\.jordond\.kit\.release/
 
 /**
  * `source` with the kit release plugin as the last entry of its top-level `plugins { }` block, or
@@ -167,7 +167,7 @@ export interface BuildConfigPlan {
 
 /**
  * What the build still needs before a release signs with this keystore.
- * - Gradle: the app module must apply `io.github.jordond.kit.release`, which reads ANDROID_KEYSTORE_*.
+ * - Gradle: the app module must apply `dev.jordond.kit.release`, which reads ANDROID_KEYSTORE_*.
  *   kit adds it to the module's `plugins { }` block; the settings file pins its version.
  * - Kotlin toolchain: nothing. kit writes `settings.android.signing` into module.yaml for the build.
  */
@@ -198,9 +198,9 @@ export function buildConfigPlan(
   const settings = ['settings.gradle.kts', 'settings.gradle']
     .map((f) => join(root, config.gradle?.root ?? '.', f))
     .find((f) => existsSync(f))
-  if (!settings || !readFileSync(settings, 'utf8').includes('io.github.jordond.kit')) {
+  if (!settings || !readFileSync(settings, 'utf8').includes('dev.jordond.kit')) {
     notes.push(
-      `${settings ? relative(root, settings) : 'settings.gradle(.kts)'} does not resolve io.github.jordond.kit plugins; add kit's pluginManagement block (see gradle/README.md in kit) or the build cannot find ${RELEASE_PLUGIN_ID}`,
+      `${settings ? relative(root, settings) : 'settings.gradle(.kts)'} does not resolve dev.jordond.kit plugins; add kit's pluginManagement block (see gradle/README.md in kit) or the build cannot find ${RELEASE_PLUGIN_ID}`,
     )
   }
   return { notes, apply: { file, rel, content } }

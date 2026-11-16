@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.api.GradleException
 import org.gradle.api.Project

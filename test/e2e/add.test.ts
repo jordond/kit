@@ -47,8 +47,8 @@ describe('kit add module (Gradle)', () => {
     expect(read('apps/client/feature/login/build.gradle.kts')).toBe(
       [
         'plugins {',
-        '    id("io.github.jordond.kit.kmp.library")',
-        '    id("io.github.jordond.kit.compose")',
+        '    id("dev.jordond.kit.kmp.library")',
+        '    id("dev.jordond.kit.compose")',
         '}',
         '',
         'kit {',
@@ -113,7 +113,7 @@ describe('kit add module (Gradle)', () => {
     const forced = await f.kit(['add', 'module', 'core', '--force', '--json'])
     expect(forced.code).toBe(0)
     expect(JSON.parse(forced.stdout)).toMatchObject({ ok: true, dryRun: false, name: ':core' })
-    expect(read('apps/client/core/build.gradle.kts')).toContain('io.github.jordond.kit.kmp.library')
+    expect(read('apps/client/core/build.gradle.kts')).toContain('dev.jordond.kit.kmp.library')
     // The include is there now: a second forced run leaves the settings file alone.
     const settings = read(SETTINGS)
     expect((await f.kit(['add', 'module', ':core', '--force'])).code).toBe(0)

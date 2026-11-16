@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
@@ -8,7 +8,7 @@ import org.gradle.api.plugins.JavaPluginExtension
 import org.gradle.jvm.toolchain.JavaLanguageVersion
 
 /**
- * `io.github.jordond.kit.jvm.app`: a Kotlin/JVM library or application (SIGO's server and CLI).
+ * `dev.jordond.kit.jvm.app`: a Kotlin/JVM library or application (SIGO's server and CLI).
  *
  * Applies Kotlin JVM with a Java toolchain of `kit { jvmTarget }` ?: catalog `app-jvm-target` (KGP
  * derives the bytecode target from it). `kit { application("pkg.MainKt") }` applies `application`

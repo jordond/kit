@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.variant.ApplicationVariant

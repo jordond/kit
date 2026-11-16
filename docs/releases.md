@@ -111,7 +111,7 @@ an upload-key reset). kit never overwrites a keystore file. `--json` includes th
 
 Nothing else is needed for a Kotlin toolchain app: `kit release android` writes
 `settings.android.signing` into `module.yaml` for the build. A Gradle app module must apply
-`io.github.jordond.kit.release`, which reads these variables: the command adds it to the `plugins { }`
+`dev.jordond.kit.release`, which reads these variables: the command adds it to the `plugins { }`
 block of the module's `build.gradle(.kts)` when it is missing, and says so when it cannot (no such block,
 or a settings file without kit's `pluginManagement`).
 

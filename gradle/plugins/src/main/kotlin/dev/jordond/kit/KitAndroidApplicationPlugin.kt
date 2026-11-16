@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.variant.ApplicationAndroidComponentsExtension
@@ -7,7 +7,7 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 
 /**
- * `io.github.jordond.kit.android.application`: an Android app module with kit's defaults.
+ * `dev.jordond.kit.android.application`: an Android app module with kit's defaults.
  *
  * At apply time (so the module's own `android { }` overrides them): SDK levels and Java
  * compatibility from the catalog, packaging excludes, release minify + resource shrinking with the

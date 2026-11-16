@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.testkit.runner.BuildResult
 import org.gradle.testkit.runner.GradleRunner
@@ -123,18 +123,18 @@ class Fixture(
                 repositories {
                     exclusiveContent {
                         forRepository { maven(file("$testRepo")) }
-                        filter { includeGroupAndSubgroups("io.github.jordond.kit") }
+                        filter { includeGroupAndSubgroups("dev.jordond.kit") }
                     }
                     gradlePluginPortal()
                     google()
                     mavenCentral()
                 }
                 resolutionStrategy.eachPlugin {
-                    if (requested.id.id.startsWith("io.github.jordond.kit")) useVersion("$kitVersion")
+                    if (requested.id.id.startsWith("dev.jordond.kit")) useVersion("$kitVersion")
                 }
             }
             plugins {
-                id("io.github.jordond.kit.settings")
+                id("dev.jordond.kit.settings")
             }
             rootProject.name = "fixture"
             include(":shared", ":android")
@@ -154,7 +154,7 @@ class Fixture(
                 ${if (withB3) "id(\"com.android.test\") version \"${cell.agp}\" apply false" else ""}
                 ${if (withB3) "id(\"androidx.baselineprofile\") version \"$BASELINE_PROFILE\" apply false" else ""}
                 id("com.diffplug.spotless") version "$SPOTLESS" apply false
-                id("io.github.jordond.kit.lint")
+                id("dev.jordond.kit.lint")
             }
             """,
         )
@@ -162,9 +162,9 @@ class Fixture(
             "shared/build.gradle.kts",
             """
             plugins {
-                id("io.github.jordond.kit.kmp.library")
-                id("io.github.jordond.kit.compose")
-                id("io.github.jordond.kit.release")
+                id("dev.jordond.kit.kmp.library")
+                id("dev.jordond.kit.compose")
+                id("dev.jordond.kit.release")
             }
             kit {
                 targets {
@@ -197,9 +197,9 @@ class Fixture(
             "android/build.gradle.kts",
             """
             plugins {
-                id("io.github.jordond.kit.android.application")
-                id("io.github.jordond.kit.release")
-                ${if (withB3) "id(\"io.github.jordond.kit.android.baseline\")" else ""}
+                id("dev.jordond.kit.android.application")
+                id("dev.jordond.kit.release")
+                ${if (withB3) "id(\"dev.jordond.kit.android.baseline\")" else ""}
             }
             kit {
                 applicationId = "dev.kit.fixture.app"
@@ -237,7 +237,7 @@ class Fixture(
             """
             plugins {
                 id("com.android.test")
-                id("io.github.jordond.kit.android.baseline")
+                id("dev.jordond.kit.android.baseline")
             }
             """,
         )
@@ -252,7 +252,7 @@ class Fixture(
             "server/build.gradle.kts",
             """
             plugins {
-                id("io.github.jordond.kit.jvm.app")
+                id("dev.jordond.kit.jvm.app")
             }
             kit {
                 application("dev.kit.fixture.server.MainKt")

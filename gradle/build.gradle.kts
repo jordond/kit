@@ -5,7 +5,7 @@ val kitVersion: String =
     (JsonSlurper().parse(layout.projectDirectory.file("../package.json").asFile) as Map<*, *>)["version"] as String
 
 allprojects {
-    group = "io.github.jordond.kit"
+    group = "dev.jordond.kit"
     version = kitVersion
 }
 

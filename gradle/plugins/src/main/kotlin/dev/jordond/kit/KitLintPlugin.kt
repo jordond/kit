@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import com.diffplug.gradle.spotless.SpotlessExtension
 import org.gradle.api.GradleException
@@ -7,7 +7,7 @@ import org.gradle.api.Project
 import java.io.File
 
 /**
- * `io.github.jordond.kit.lint`, applied once in the root build: spotless + ktlint for every project
+ * `dev.jordond.kit.lint`, applied once in the root build: spotless + ktlint for every project
  * (ported from brewd's and WhaleSay's root `subprojects { }` block).
  *
  * - kotlin: every .kt file under src, minus resources and build output
@@ -21,7 +21,7 @@ import java.io.File
 class KitLintPlugin : Plugin<Project> {
     override fun apply(project: Project) {
         if (project != project.rootProject) {
-            throw GradleException("kit.lint: apply io.github.jordond.kit.lint once, in the root build.gradle.kts (not ${project.path})")
+            throw GradleException("kit.lint: apply dev.jordond.kit.lint once, in the root build.gradle.kts (not ${project.path})")
         }
         val kit = project.kitExtension()
         project.allprojects { applyRequired(PluginIds.SPOTLESS, PLUGIN) }

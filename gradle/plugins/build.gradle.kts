@@ -20,8 +20,8 @@ gradlePlugin {
             id: String,
             implementation: String,
         ) = register(name) {
-            this.id = "io.github.jordond.kit.$id"
-            implementationClass = "io.github.jordond.kit.$implementation"
+            this.id = "dev.jordond.kit.$id"
+            implementationClass = "dev.jordond.kit.$implementation"
         }
         plugin("kitRelease", "release", "KitReleasePlugin")
         plugin("kitLint", "lint", "KitLintPlugin")

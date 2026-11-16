@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.gradle.api.GradleException
 import org.gradle.api.Plugin
@@ -6,7 +6,7 @@ import org.gradle.api.Project
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
 /**
- * `io.github.jordond.kit.compose`: Compose compiler + Compose Multiplatform on a KMP module, the common
+ * `dev.jordond.kit.compose`: Compose compiler + Compose Multiplatform on a KMP module, the common
  * Compose dependencies (runtime, foundation, ui, and components-resources unless
  * `kit { resources = false }`) at the Compose Multiplatform plugin's own version, and the shared
  * Compose opt-ins. `kit { hotReload = true }` applies org.jetbrains.compose.hot-reload.

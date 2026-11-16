@@ -1,4 +1,4 @@
-package io.github.jordond.kit
+package dev.jordond.kit
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -105,7 +105,7 @@ internal object SigningScenarios {
                 "${path.removePrefix(":").replace(':', '/')}/build.gradle.kts",
                 """
                 plugins {
-                    id("io.github.jordond.kit.kmp.library")
+                    id("dev.jordond.kit.kmp.library")
                 }
                 kit {
                     targets { android() }
