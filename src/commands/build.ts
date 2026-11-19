@@ -39,6 +39,13 @@ export default defineCommand({
         ExitCode.usage,
       )
     }
+    if (!release && !ctx.flags.dryRun) {
+      const { requireProject } = await import('../cli/command')
+      const { invalidateStaleApk } = await import('../lib/toolchain')
+      const { log } = await import('../lib/log')
+      const { root, config } = requireProject(ctx)
+      invalidateStaleApk(root, config, log)
+    }
     await runVerb(ctx, {
       name: 'build',
       verbs: ['build'],

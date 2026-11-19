@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, type Stats, statSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import type { KitConfig } from '../config/schema'
 import { ExitCode, KitError } from './errors'
-import { moduleYaml, requireModule, type ResolvedModule, toolchainTaskDir } from './module'
+import { appAndroidModule, moduleYaml, requireModule, type ResolvedModule, toolchainTaskDir } from './module'
 
 /**
  * JetBrains Kotlin Toolchain (formerly Amper) support: `toolchain.root` in kit.config.ts holds the
@@ -248,6 +248,57 @@ export function findAab(toolchainDir: string, module: ResolvedModule, since = 0)
     }
   }
   return hits.sort((a, b) => b.mtime - a.mtime)[0]?.path
+}
+
+/**
+ * App-module files the APK is built from that the toolchain's `buildAndroid<Variant>` task does not
+ * list as inputs (0.13.0). The task reruns only when the module's compiled `.aar`s change, so an edit
+ * to just these reports success and leaves the old APK. `bundleAndroid` lists them: releases are fine.
+ */
+const APK_UNTRACKED = ['res', 'assets', 'jniLibs', 'src/AndroidManifest.xml', 'proguard-rules.pro']
+
+/** Newest mtime at or under `path`, directories included so a deleted file counts; 0 when absent. */
+function newestMtime(path: string): number {
+  let st: Stats
+  try {
+    st = statSync(path)
+  } catch {
+    return 0
+  }
+  if (!st.isDirectory()) return st.mtimeMs
+  return readdirSync(path).reduce((n, name) => Math.max(n, newestMtime(join(path, name))), st.mtimeMs)
+}
+
+/**
+ * Make the next `./kotlin build` rebuild the app's APK when an `APK_UNTRACKED` file changed after
+ * it last ran: deletes that task's incremental state (`build/incremental.state/_<module>_buildAndroid*`),
+ * which the toolchain rewrites only when the task runs. The Gradle build inside stays incremental, so
+ * this costs seconds. A no-op without a toolchain or an Android app module. Returns the files removed.
+ */
+export function invalidateStaleApk(
+  root: string,
+  config: KitConfig,
+  log: { dim: (msg: string) => unknown },
+): string[] {
+  if (!config.toolchain || config.gradle) return []
+  if (config.app?.android?.module === undefined && config.release?.android?.module === undefined) return []
+  const stateDir = join(toolchainRoot(root, config), 'build', 'incremental.state')
+  if (!existsSync(stateDir)) return []
+  const module = appAndroidModule(root, config)
+  const states = readdirSync(stateDir)
+    .filter((f) => f.startsWith(`_${module.name}_buildAndroid`))
+    .map((f) => join(stateDir, f))
+  if (!states.length) return []
+  const moduleDir = resolve(root, module.dir)
+  const changed = Math.max(...APK_UNTRACKED.map((p) => newestMtime(join(moduleDir, p))))
+  const stale = states.filter((s) => statSync(s).mtimeMs < changed)
+  for (const s of stale) rmSync(s, { force: true })
+  if (stale.length) {
+    log.dim(
+      `  › ${module.dir}: res/, assets/ or AndroidManifest.xml changed since the last APK build, which the toolchain misses; rebuilding it`,
+    )
+  }
+  return stale
 }
 
 /** versionName in the app module's module.yaml, or undefined when it doesn't set one. */

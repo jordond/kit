@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -20,6 +20,7 @@ import {
   aabFromOutput,
   findAab,
   getYamlScalar,
+  invalidateStaleApk,
   keystoreProperties,
   releaseModuleYaml,
   setYaml,
@@ -169,6 +170,84 @@ describe('artifacts', () => {
     expect(findAab(dir, module)).toBe(aab)
     expect(findAab(dir, module, Date.now() + 60_000)).toBeUndefined()
     expect(findAab(join(dir, 'none'), module)).toBeUndefined()
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('invalidateStaleApk', () => {
+  const at = (path: string, year: number) => utimesSync(path, new Date(year, 0, 1), new Date(year, 0, 1))
+  const base = { name: 'X', targets: { app: { kind: 'kotlin', dir: '.' } } }
+  const android = { android: { packageName: 'app.x', module: 'mobile/android' } }
+  const nested = configSchema.parse({ ...base, toolchain: { root: '.' }, release: android })
+
+  function project() {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-tc-'))
+    const mod = join(dir, 'mobile/android')
+    const state = join(dir, 'build/incremental.state')
+    mkdirSync(join(mod, 'res/values'), { recursive: true })
+    mkdirSync(join(mod, 'src'), { recursive: true })
+    mkdirSync(state, { recursive: true })
+    const file = (path: string, year: number) => {
+      writeFileSync(path, '')
+      at(path, year)
+      return path
+    }
+    file(join(mod, 'src/AndroidManifest.xml'), 2020)
+    file(join(mod, 'src/MainActivity.kt'), 2030)
+    file(join(mod, 'res/values/themes.xml'), 2024)
+    for (const d of ['res/values', 'res', 'src']) at(join(mod, d), 2020)
+    const states = {
+      debug: file(join(state, '_android_buildAndroidDebug-1a801bad65'), 2023),
+      release: file(join(state, '_android_buildAndroidRelease-0b4c1d2e3f'), 2025),
+      aar: file(join(state, '_android_aarAndroidDebug-2bb56a7865'), 2023),
+      other: file(join(state, '_other_buildAndroidDebug-91467ffe5b'), 2023),
+    }
+    return { dir, mod, states }
+  }
+
+  test('removes the APK task state older than a res/ or manifest change, nothing else', () => {
+    const { dir, mod, states } = project()
+    const lines: string[] = []
+    const log = { dim: (m: string) => lines.push(m) }
+
+    // The toolchain tracks Kotlin sources itself (MainActivity.kt, 2030): only res/ (2024) counts.
+    expect(invalidateStaleApk(dir, nested, log)).toEqual([states.debug])
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('mobile/android')
+    expect(existsSync(states.release)).toBe(true)
+    expect(existsSync(states.aar)).toBe(true)
+    expect(existsSync(states.other)).toBe(true)
+
+    expect(invalidateStaleApk(dir, nested, log)).toEqual([])
+    at(join(mod, 'src/AndroidManifest.xml'), 2026)
+    expect(invalidateStaleApk(dir, nested, log)).toEqual([states.release])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('a deleted resource counts through its directory', () => {
+    const { dir, mod, states } = project()
+    at(states.debug, 2025)
+    at(join(mod, 'res/values'), 2026)
+    expect(invalidateStaleApk(dir, nested, { dim: () => {} }).sort()).toEqual([states.debug, states.release])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('no-op without toolchain state, an Android module or the toolchain', () => {
+    const { dir, states } = project()
+    const quiet = { dim: () => {} }
+    const gradle = configSchema.parse({
+      name: 'X',
+      gradle: { root: '.' },
+      targets: { app: { kind: 'gradle', dir: '.' } },
+      release: android,
+    })
+    expect(invalidateStaleApk(dir, gradle, quiet)).toEqual([])
+    expect(invalidateStaleApk(dir, configSchema.parse({ ...base, toolchain: { root: '.' } }), quiet)).toEqual(
+      [],
+    )
+    expect(existsSync(states.debug)).toBe(true)
+    rmSync(join(dir, 'build'), { recursive: true, force: true })
+    expect(invalidateStaleApk(dir, nested, quiet)).toEqual([])
     rmSync(dir, { recursive: true, force: true })
   })
 })

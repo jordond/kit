@@ -11,7 +11,7 @@ import {
   type ResolvedModule,
   toolchainTaskDir,
 } from '../module'
-import { requireWrapper, WRAPPER } from '../toolchain'
+import { invalidateStaleApk, requireWrapper, WRAPPER } from '../toolchain'
 import { iosApp } from './config'
 
 /**
@@ -155,6 +155,7 @@ export async function buildApp(
   if (platform === 'ios') requireMac('Building the iOS app')
   if (env.config.toolchain && !env.config.gradle) requireWrapper(env.root, env.config)
   if (plan.module) requireModule(env.root, env.config, plan.module)
+  if (platform === 'android') invalidateStaleApk(env.root, env.config, env.log)
   env.log.step(plan.cmd.join(' '))
   await runChecked(plan.cmd, plan.cwd)
   const artifact = findArtifact(plan.artifactDir, plan.ext)

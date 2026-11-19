@@ -40,6 +40,13 @@ export default defineConfig({
 there is no reason to call the wrapper directly: see [Modules and platforms](CONFIG.md#modules-and-platforms).
 [Coding agents](agents.md) covers telling an agent so.
 
+The toolchain (0.13.0) does not count the app module's `res/`, `assets/`, `jniLibs/`, `src/AndroidManifest.xml`
+or `proguard-rules.pro` as inputs of the APK task (`buildAndroid<Variant>`). It reruns only when compiled code
+changes, so an edit to just those files reports success and keeps the old APK. `kit build`,
+`kit app build android` and `kit app run android` check for this: when one of those files is newer than the
+task's last run, they delete its state under `build/incremental.state/` so the toolchain runs it again.
+A bare `./kotlin build` or `kit kotlin build` does not. Release bundles (`bundleAndroid`) are not affected.
+
 The toolchain has no linter, so `kotlin` targets use the standalone `ktlint` binary: pin it in `mise.toml`
 (`ktlint = "1.8.0"`) and style it with `.editorconfig`. `kit lint --staged --fix` passes only the staged
 Kotlin files. Override with `lint:` / `format:` on the target, or `false` to turn one off.
