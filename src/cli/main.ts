@@ -1,6 +1,5 @@
 import type { Args, Command } from 'gunshi'
 import { cli } from 'gunshi/bone'
-import { dirname } from 'node:path'
 import pc from 'picocolors'
 import pkg from '../../package.json' with { type: 'json' }
 import { findRoot, loadConfig, loadDotEnv } from '../config/load'
@@ -11,6 +10,7 @@ import { emitJson, jsonEmitted, log } from '../lib/log'
 import { builtins, groupDescriptions } from './builtins'
 import { computeFlags, type KitCommand, type Runtime, toGunshi, withBuiltin } from './command'
 import { importRepoCommand, listRepoCommands } from './discover'
+import { ensureCopy } from './repo-copy'
 import { kitGlobals, SHOW_USAGE } from './plugin'
 import { renderUsage } from './usage'
 
@@ -126,54 +126,14 @@ function suggest(token: string, candidates: string[]): string | undefined {
   return best && best[1] <= 2 ? best[0] : undefined
 }
 
-/** Commands that must work with any kit: they inspect or repair the install, or never touch the repo. */
-const ANY_COPY = ['doctor', 'upgrade', 'init', 'completion', 'complete']
-
-/**
- * The launcher hands off to the repo's own kit, but only for the layouts its release knows: an
- * older global kit can end up running itself in a repo pinned to a newer one. Before anything of
- * the repo loads, run the repo's copy instead when there is one, and refuse to run a copy the
- * repo's pin excludes. A source checkout (`KIT_DEV`, `bun src/cli.ts`) is always left alone.
- * Returns the exit code of the handed-off run, or undefined to carry on in this process.
- */
 async function ensureRepoCopy(root: string, argv: string[]): Promise<number | undefined> {
-  if (process.env.KIT_DEV || process.env.KIT_HANDOFF || import.meta.path.endsWith('.ts')) return undefined
-  const { copyVerdict, kitCopyAt } = await import('../lib/kit-copy')
-  const own = kitCopyAt(import.meta.dir)
-  if (!own) return undefined
-  const verdict = copyVerdict(root, own)
-  const tokens = commandTokens(argv)
-  const quiet = tokens[0] === 'complete' || tokens[0] === 'completion'
-  if (verdict.kind !== 'mismatch' && verdict.stale && !quiet) {
-    // Typically a pulled kit bump without a reinstall: the old copy runs and rejects newer config.
-    const { range, manifest, version } = verdict.stale
-    const where = dirname(manifest) === '.' ? 'the repo root' : dirname(manifest)
-    log.warn(`The installed kit is ${version} but ${manifest} pins "${range}"`)
-    log.dim(`  › Run the package manager's install in ${where} (bun install)`)
-  }
-  if (verdict.kind === 'ok') return undefined
-  if (verdict.kind === 'handoff') {
-    const child = Bun.spawn([process.execPath, '--no-env-file', verdict.cli, ...argv], {
-      stdio: ['inherit', 'inherit', 'inherit'],
-      env: { ...process.env, KIT_ROOT: root, KIT_HANDOFF: '1' },
-    })
-    return child.exited
-  }
-  const message = `This repo pins ${pkg.name} "${verdict.range}" (${verdict.manifest}) but it is not installed, and this kit is ${own.version}`
-  const hint = `Install the repo's kit: run the package manager's install in ${dirname(verdict.manifest) === '.' ? 'the repo root' : dirname(verdict.manifest)}`
-  if (
-    tokens.length === 0 ||
-    ANY_COPY.includes(tokens[0]!) ||
-    argv.includes('--version') ||
-    argv.includes('-V')
-  ) {
-    if (!quiet) {
-      log.warn(message)
-      log.dim(`  › ${hint}`)
-    }
-    return undefined
-  }
-  throw new KitError(message, hint, ExitCode.precondition)
+  const { kitCopyAt } = await import('../lib/kit-copy')
+  return ensureCopy(root, argv, {
+    tokens: commandTokens(argv),
+    own: kitCopyAt(import.meta.dir),
+    skip: Boolean(process.env.KIT_DEV || process.env.KIT_HANDOFF || import.meta.path.endsWith('.ts')),
+    log,
+  })
 }
 
 /** Set when the repo's own kit ran the command: that copy speaks for the run, this one stays quiet. */

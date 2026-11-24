@@ -34,7 +34,7 @@ export function repoKit(root: string): RepoKit | undefined {
   const pkg = readJson(join(root, manifest))
   if (!pkg) return undefined
   const range = resolveCatalog(
-    pkg,
+    dir === '.' ? [pkg] : [pkg, readJson(join(root, 'package.json'))],
     (['devDependencies', 'dependencies'] as const)
       .map((key) => (pkg[key] as Record<string, unknown> | undefined)?.[KIT_PACKAGE])
       .find((v): v is string => typeof v === 'string'),
@@ -51,20 +51,29 @@ export function repoKit(root: string): RepoKit | undefined {
 
 /**
  * A `catalog:` / `catalog:<name>` reference resolved through bun's catalogs (`workspaces.catalog`,
- * `workspaces.catalogs.<name>`, or the top-level forms). Unresolvable references stay as they are.
+ * `workspaces.catalogs.<name>`, or the top-level forms), in each manifest in turn: the install
+ * dir's own, then the repo root's (a `.kit/package.json` takes its catalog from the root).
+ * pnpm-workspace.yaml and yarn catalogs are not read. Unresolvable references stay as they are.
  */
-function resolveCatalog(pkg: Record<string, unknown>, range: string | undefined): string | undefined {
+function resolveCatalog(
+  manifests: (Record<string, unknown> | undefined)[],
+  range: string | undefined,
+): string | undefined {
   const m = range?.match(/^catalog:(.*)$/)
   if (!m) return range
-  const ws =
-    pkg.workspaces && !Array.isArray(pkg.workspaces) ? (pkg.workspaces as Record<string, unknown>) : {}
   const name = m[1]!.trim()
   const pick = (from: Record<string, unknown>): unknown =>
     name && name !== 'default'
       ? (from.catalogs as Record<string, Record<string, unknown>> | undefined)?.[name]?.[KIT_PACKAGE]
       : (from.catalog as Record<string, unknown> | undefined)?.[KIT_PACKAGE]
-  const resolved = pick(ws) ?? pick(pkg)
-  return typeof resolved === 'string' ? resolved : range
+  for (const pkg of manifests) {
+    if (!pkg) continue
+    const ws =
+      pkg.workspaces && !Array.isArray(pkg.workspaces) ? (pkg.workspaces as Record<string, unknown>) : {}
+    const resolved = pick(ws) ?? pick(pkg)
+    if (typeof resolved === 'string') return resolved
+  }
+  return range
 }
 
 /** A range kit can judge: a version with an optional `^`, `~` or comparison in front. */
