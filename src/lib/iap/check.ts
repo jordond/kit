@@ -38,6 +38,7 @@ const PLAY_OPTION_ID = /^[a-z0-9][a-z0-9-]*$/
 const APPLE_ID = /^[A-Za-z0-9._-]+$/
 const LOCALE = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
+const LOOKUP_KEY = /^\S+$/
 
 /** Length in code points, as the stores count characters (an emoji is one). */
 const chars = (s: string): number => Array.from(s).length
@@ -222,5 +223,29 @@ export function checkProductFile(file: ProductFile, opts: CheckOptions): Issue[]
       price(`${pat}.price`, plan.price)
     }
   }
+
+  // Offerings: RevenueCat lookup keys; packages point at file products or `subscription:plan`.
+  const refs = new Set<string>(file.products.map((p) => p.id))
+  for (const s of file.subscriptions ?? []) for (const plan of s.plans) refs.add(`${s.id}:${plan.id}`)
+  const offerings = new Set<string>()
+  const current: string[] = []
+  for (const [i, o] of (file.offerings ?? []).entries()) {
+    const at = `offerings[${i}]`
+    if (!LOOKUP_KEY.test(o.id)) error(`${at}.id`, `"${o.id}" must not be empty or hold spaces`)
+    if (offerings.has(o.id)) error(`${at}.id`, `offering "${o.id}" appears twice`)
+    offerings.add(o.id)
+    if (o.current) current.push(o.id)
+    const packages = new Set<string>()
+    for (const [j, pk] of o.packages.entries()) {
+      const pat = `${at}.packages[${j}]`
+      if (!LOOKUP_KEY.test(pk.id)) error(`${pat}.id`, `"${pk.id}" must not be empty or hold spaces`)
+      if (packages.has(pk.id)) error(`${pat}.id`, `package "${pk.id}" appears twice in ${o.id}`)
+      packages.add(pk.id)
+      if (!refs.has(pk.product)) {
+        error(`${pat}.product`, `"${pk.product}" is not a product id or "subscription:plan" in this file`)
+      }
+    }
+  }
+  if (current.length > 1) error('offerings', `only one offering can be current: ${current.join(', ')}`)
   return issues
 }

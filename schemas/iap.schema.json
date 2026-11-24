@@ -134,7 +134,7 @@
       }
     },
     "subscriptions": {
-      "description": "Phase 2: kit iap sync rejects them for now",
+      "description": "Auto-renewing subscriptions, one per Play subscription / Apple group",
       "type": "array",
       "items": {
         "type": "object",
@@ -263,6 +263,59 @@
           "name",
           "description",
           "plans"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "offerings": {
+      "description": "RevenueCat offerings and their packages",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "RevenueCat offering lookup key; permanent once created"
+          },
+          "name": {
+            "description": "Display name; default: id",
+            "type": "string"
+          },
+          "current": {
+            "description": "The current offering (at most one)",
+            "type": "boolean"
+          },
+          "packages": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "RevenueCat package lookup key, like \"$rc_monthly\" or \"lifetime\""
+                },
+                "name": {
+                  "description": "Display name; default: the product's name",
+                  "type": "string"
+                },
+                "product": {
+                  "type": "string",
+                  "description": "A product id, or \"subscription:plan\" for a subscription plan"
+                }
+              },
+              "required": [
+                "id",
+                "product"
+              ],
+              "additionalProperties": false
+            },
+            "description": "In display order"
+          }
+        },
+        "required": [
+          "id",
+          "packages"
         ],
         "additionalProperties": false
       }

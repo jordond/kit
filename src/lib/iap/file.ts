@@ -99,6 +99,23 @@ const subscriptionSchema = z
   })
   .strict()
 
+const packageSchema = z
+  .object({
+    id: z.string().describe('RevenueCat package lookup key, like "$rc_monthly" or "lifetime"'),
+    name: z.string().optional().describe("Display name; default: the product's name"),
+    product: z.string().describe('A product id, or "subscription:plan" for a subscription plan'),
+  })
+  .strict()
+
+const offeringSchema = z
+  .object({
+    id: z.string().describe('RevenueCat offering lookup key; permanent once created'),
+    name: z.string().optional().describe('Display name; default: id'),
+    current: z.boolean().optional().describe('The current offering (at most one)'),
+    packages: z.array(packageSchema).min(1).describe('In display order'),
+  })
+  .strict()
+
 export const productFileSchema = z
   .object({
     $schema: z.string().optional(),
@@ -107,13 +124,15 @@ export const productFileSchema = z
     subscriptions: z
       .array(subscriptionSchema)
       .optional()
-      .describe('Phase 2: kit iap sync rejects them for now'),
+      .describe('Auto-renewing subscriptions, one per Play subscription / Apple group'),
+    offerings: z.array(offeringSchema).optional().describe('RevenueCat offerings and their packages'),
   })
   .strict()
 
 export type ProductFile = z.output<typeof productFileSchema>
 export type FileProduct = ProductFile['products'][number]
 export type FileSubscription = NonNullable<ProductFile['subscriptions']>[number]
+export type FileOffering = NonNullable<ProductFile['offerings']>[number]
 
 export const SCHEMA_URL_PREFIX = 'https://cdn.jsdelivr.net/npm/@jordond/kit@'
 export const schemaUrl = (version: string): string =>

@@ -8,10 +8,13 @@ import { checkProductFile, type Issue } from '../../src/lib/iap/check'
 import { iapJsonSchema, productFileSchema, type ProductFile, schemaUrl } from '../../src/lib/iap/file'
 import {
   appleDesired,
+  appleSubscriptionsDesired,
   effectivePrices,
   pacificToday,
   playDesired,
+  playSubscriptionsDesired,
   rcDesired,
+  rcOfferingsDesired,
   resolveCatalog,
   samePrice,
 } from '../../src/lib/iap/model'
@@ -272,6 +275,48 @@ describe('check rules', () => {
     expect(errors(sub(['b'.repeat(41)]))[0]).toContain('limit is 40')
   })
 
+  test('offerings: unique ids, one current, packages point at the file', () => {
+    const sub = {
+      id: 'pro',
+      name: 'Pro',
+      description: 'All of it.',
+      plans: [{ id: 'monthly', period: 'P1M', price: '4.99' }],
+    }
+    const offering = (over: Record<string, unknown> = {}) => ({
+      id: 'default',
+      current: true,
+      packages: [
+        { id: '$rc_monthly', product: 'pro:monthly' },
+        { id: 'lifetime', product: 'membership_card' },
+      ],
+      ...over,
+    })
+    expect(errors({ products: [product()], subscriptions: [sub], offerings: [offering()] })).toEqual([])
+    expect(
+      errors({
+        products: [product()],
+        subscriptions: [sub],
+        offerings: [
+          offering(),
+          offering({
+            packages: [
+              { id: 'a b', product: 'pro:yearly' },
+              { id: 'x', product: 'pro' },
+              { id: 'x', product: 'membership_card' },
+            ],
+          }),
+        ],
+      }),
+    ).toEqual([
+      'offerings[1].id: offering "default" appears twice',
+      'offerings[1].packages[0].id: "a b" must not be empty or hold spaces',
+      'offerings[1].packages[0].product: "pro:yearly" is not a product id or "subscription:plan" in this file',
+      'offerings[1].packages[1].product: "pro" is not a product id or "subscription:plan" in this file',
+      'offerings[1].packages[2].id: package "x" appears twice in default',
+      'offerings: only one offering can be current: default, default',
+    ])
+  })
+
   test('consumables cannot be family sharable', () => {
     expect(
       errors({ products: [product({ type: 'consumable', apple: { familySharable: true } })] })[0],
@@ -364,6 +409,84 @@ describe('model', () => {
       apple: 'membership_card',
       play: undefined,
     })
+  })
+
+  test('subscriptions and offerings per store', () => {
+    const c = resolveCatalog(
+      root,
+      iap,
+      parse({
+        products: [product()],
+        subscriptions: [
+          {
+            id: 'pro',
+            name: 'Pro',
+            description: 'All of it.',
+            benefits: ['No ads'],
+            localizations: { 'fr-FR': { name: 'Pro FR', description: 'Tout.' } },
+            plans: [
+              { id: 'yearly', period: 'P1Y', price: '29.99', trial: 'P1W' },
+              { id: 'monthly-v2', period: 'P1M', price: '3.99' },
+            ],
+            apple: { groupName: 'PocketVCR Pro', reviewScreenshot: 'opaque.png' },
+          },
+        ],
+        offerings: [
+          {
+            id: 'default',
+            current: true,
+            packages: [
+              { id: '$rc_annual', product: 'pro:yearly' },
+              { id: 'lifetime', name: 'Forever', product: 'membership_card' },
+            ],
+          },
+        ],
+      }),
+    )
+    const [sub] = c.subscriptions
+    expect(sub!.entitlement).toBe('pro')
+    expect(sub!.apple.familySharable).toBe(true)
+    expect(sub!.plans.map((p) => p.appleProductId)).toEqual(['pro_yearly', 'pro_monthly_v2'])
+
+    const [group] = appleSubscriptionsDesired(c)
+    expect(group!.groupLocalizations).toEqual({ 'en-US': 'PocketVCR Pro' })
+    expect(group!.plans[0]).toMatchObject({
+      ref: 'pro:yearly',
+      productId: 'pro_yearly',
+      name: 'Pro (yearly)',
+      period: 'ONE_YEAR',
+      groupLevel: 1,
+      trial: 'ONE_WEEK',
+      screenshot: { fileName: 'opaque.png' },
+    })
+    expect(group!.plans[1]).toMatchObject({ period: 'ONE_MONTH', groupLevel: 2, trial: undefined })
+
+    const [play] = playSubscriptionsDesired(c)
+    expect(play!.listings['fr-FR']).toEqual({ title: 'Pro FR', description: 'Tout.', benefits: ['No ads'] })
+    expect(play!.basePlans.map((b) => [b.basePlanId, b.legacyCompatible, b.trial])).toEqual([
+      ['yearly', true, 'P1W'],
+      ['monthly-v2', false, undefined],
+    ])
+
+    const rc = rcDesired(c, { apple: true, play: true })
+    expect(rc.map((r) => [r.id, r.type, r.apple, r.play, r.displayName])).toEqual([
+      ['membership_card', 'non_consumable', 'membership_card', 'membership_card', 'Membership Card'],
+      ['pro:yearly', 'subscription', 'pro_yearly', 'pro:yearly', 'Pro (yearly)'],
+      ['pro:monthly-v2', 'subscription', 'pro_monthly_v2', 'pro:monthly-v2', 'Pro (monthly)'],
+    ])
+    expect(rc[1]!.entitlementName).toBe('Pro')
+
+    expect(rcOfferingsDesired(c)).toEqual([
+      {
+        lookupKey: 'default',
+        displayName: 'default',
+        current: true,
+        packages: [
+          { lookupKey: '$rc_annual', displayName: 'Pro', position: 1, product: 'pro:yearly' },
+          { lookupKey: 'lifetime', displayName: 'Forever', position: 2, product: 'membership_card' },
+        ],
+      },
+    ])
   })
 
   test('helpers', () => {

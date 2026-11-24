@@ -56,8 +56,9 @@ export function runCheck(root: string, config: KitConfig, flags: Pick<Flags, 'js
     if (!errors) {
       const n = catalog!.products.length
       const s = catalog!.subscriptions.length
+      const o = catalog!.offerings.length
       log.success(
-        `${label}: ${n} product${n === 1 ? '' : 's'}${s ? `, ${s} subscription${s === 1 ? '' : 's'}` : ''}`,
+        `${label}: ${n} product${n === 1 ? '' : 's'}${s ? `, ${s} subscription${s === 1 ? '' : 's'}` : ''}${o ? `, ${o} offering${o === 1 ? '' : 's'}` : ''}`,
       )
     }
   }
@@ -72,9 +73,14 @@ export function requireCatalog(root: string, config: KitConfig, log: Logger): { 
     printIssues(log, label, issues)
     throw new KitError(`${label} has errors`, 'Fix them; `kit iap check` lists them')
   }
-  if (catalog.subscriptions.length) {
+  // Until the subscription and offering adapters are wired in (plan-4 §14, slice 2e).
+  const pending = [
+    catalog.subscriptions.length ? 'subscriptions' : '',
+    catalog.offerings.length ? 'offerings' : '',
+  ].filter(Boolean)
+  if (pending.length) {
     throw new KitError(
-      `${label} has subscriptions; kit iap syncs one-time products only (subscriptions are phase 2)`,
+      `${label} has ${pending.join(' and ')}; kit iap syncs one-time products only (subscriptions are phase 2)`,
       'Move them out of the file for now, or sync them by hand in each console',
       ExitCode.usage,
     )
