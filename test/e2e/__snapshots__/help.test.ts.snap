@@ -26,6 +26,7 @@ Quality
   format      Format every target
   typecheck   Typecheck every target
   check       Lint and typecheck every target
+  codegen     Run code generation; --check fails on uncommitted output
   test        Run the test suites
   qa          Run the Maestro flows on a device: build, install, fixture, flows
   shots       Capture screenshots with the Maestro flows: 9:41 status bar, fixture, PNGs …
@@ -663,6 +664,7 @@ Examples
   kit check api admin web
   kit check --fix
   kit check --affected
+  kit check --codegen
 
 Options
   -h, --help           Show help
@@ -676,6 +678,7 @@ Options
       --affected       Only targets changed since the base (commits, staged, unstaged and untracked files)
       --base <string>  Ref --affected compares against (default: origin/<default branch>, then main)
   -f, --fix            Format instead of lint, then typecheck
+      --codegen        Also run codegen and fail when its outputs are not committed (always on in CI)
 
 "
 `;
@@ -702,6 +705,30 @@ Options
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
       --deep     Also node_modules, .wrangler/state (local D1/KV data) and Xcode DerivedData
+
+"
+`;
+
+exports[`help kit codegen --help 1`] = `
+"Run code generation; --check fails when the generated files are not committed
+
+Usage
+  kit codegen [options]
+
+Examples
+  kit codegen
+  kit codegen --check
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+      --check    Run it, then fail if a codegen output differs from HEAD or is untracked
 
 "
 `;

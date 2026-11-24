@@ -46,11 +46,11 @@ export async function runCodegen(
  * pathspecs, so globs work; an output git ignores never shows up.
  */
 export async function driftedOutputs(root: string, outputs: readonly string[]): Promise<string[]> {
-  const { code, stdout, stderr } = await runCapture(
+  const { code, stdout } = await runCapture(
     ['git', 'status', '--porcelain', '-z', '-uall', '--', ...outputs],
     { cwd: root },
   )
-  if (code !== 0) throw new KitError(`git status failed: ${stderr.trim()}`, undefined, ExitCode.failed)
+  if (code !== 0) throw new KitError('git status failed', undefined, ExitCode.failed)
   // Entries are "XY path"; a rename adds a second, bare path entry, which is a changed file too.
   return stdout
     .split('\0')
