@@ -5,6 +5,8 @@
  */
 
 export interface Req {
+  /** Set on the shared log: which fake answered. */
+  store?: 'asc' | 'play' | 'rc' | 'token' | 'upload'
   method: string
   path: string
   query: URLSearchParams
@@ -829,7 +831,7 @@ export interface Fakes {
 }
 
 export function startFakes(): Fakes {
-  const log: (Req & { store: 'asc' | 'play' | 'rc' | 'token' | 'upload' })[] = []
+  const log: Req[] = []
   let origin = ''
   const asc = new FakeAsc(() => origin)
   const play = new FakePlay()
