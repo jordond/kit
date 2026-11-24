@@ -351,6 +351,68 @@ describe('diffAppleSubscriptions', () => {
     expect(d.rows[0]!.notes!.join(' ')).toContain('change it in App Store Connect')
   })
 
+  test('trial: one an earlier sync left half made is finished in the missing territories only', () => {
+    const want = sub([yearly({ trial: 'ONE_WEEK' })])
+    const offers = ['USA', 'CAN'].map((t) => ({
+      id: t,
+      mode: 'FREE_TRIAL',
+      duration: 'ONE_WEEK',
+      territory: t,
+    }))
+    const state = {
+      ...observed([obsGroup([obsPlan(yearly(), { offers })])]),
+      territories: ['USA', 'CAN', 'FRA', 'DEU'],
+    }
+    const d = diffAppleSubscriptions([want], state)
+    expect(d.actions.map((a) => a.payload)).toEqual([
+      { plan: 'app.pro.yearly', duration: 'ONE_WEEK', territories: ['FRA', 'DEU'] },
+    ])
+    expect(d.rows[0]!.notes!.join(' ')).toContain('missing in 2 territories')
+    // Complete: in sync. A different duration somewhere: never touched.
+    expect(diffAppleSubscriptions([want], { ...state, territories: ['USA', 'CAN'] }).actions).toEqual([])
+    const mixed = [{ ...offers[0]!, duration: 'THREE_DAYS' }, offers[1]!]
+    expect(
+      diffAppleSubscriptions([want], {
+        ...observed([obsGroup([obsPlan(yearly(), { offers: mixed })])]),
+        territories: ['USA', 'CAN', 'FRA'],
+      }).actions,
+    ).toEqual([])
+  })
+
+  test('price: prices the store lists but kit cannot read never reprice without the flag', () => {
+    const unreadable = observed([obsGroup([obsPlan(monthly(), { prices: [], priceRows: 2 })])])
+    const plain = diffAppleSubscriptions([sub([monthly()])], unreadable)
+    expect(plain.actions).toEqual([])
+    expect(plain.rows[0]!.notes!.join(' ')).toContain('no current USA price kit can read')
+    const allowed = diffAppleSubscriptions([sub([monthly()])], unreadable, { allowPriceChange: true })
+    expect(allowed.actions[0]).toMatchObject({ kind: 'price', payload: { preserve: true } })
+    // Only a scheduled price: same rule.
+    const scheduled = observed([
+      obsGroup([
+        obsPlan(monthly(), { prices: [{ startDate: '2027-03-01', endDate: null, customerPrice: '9.99' }] }),
+      ]),
+    ])
+    expect(diffAppleSubscriptions([sub([monthly()])], scheduled).actions).toEqual([])
+  })
+
+  test('price: after an allowed change, the new price next to a preserved one is in sync', () => {
+    for (const preserved of [true, false]) {
+      const both = observed([
+        obsGroup([
+          obsPlan(monthly({ price: '5.99' }), {
+            prices: [
+              { startDate: null, endDate: null, customerPrice: '4.99', preserved },
+              { startDate: null, endDate: null, customerPrice: '5.99', preserved: !preserved },
+            ],
+          }),
+        ]),
+      ])
+      expect(
+        diffAppleSubscriptions([sub([monthly({ price: '5.99' })])], both, { allowPriceChange: true }).actions,
+      ).toEqual([])
+    }
+  })
+
   test('trial: a matching trial is in sync', () => {
     const want = sub([yearly({ trial: 'ONE_WEEK' })])
     expect(diffAppleSubscriptions([want], inSync(want)).actions).toEqual([])

@@ -177,23 +177,29 @@ function build(store: Store, input: BuildInput): Unit {
 
 const message = (e: unknown): string => redact(e instanceof Error ? e.message : String(e))
 
-/** Parts observe one after another (they share the store's client and its pacing). */
+/**
+ * Parts observe one after another (they share the store's client and its pacing). A part that
+ * fails to read is reported on its own; the store's other parts still plan and apply. Under a
+ * `--product` filter a part with nothing asked of it is not read at all.
+ */
 async function observe(unit: Unit, extras: boolean): Promise<void> {
-  try {
-    for (const part of unit.parts) {
+  const errors: string[] = []
+  for (const part of unit.parts) {
+    if (!extras && !part.desired.length) continue
+    try {
       part.observed = await part.adapter.observe(part.desired)
       const { rows, actions } = part.adapter.diff(part.desired, part.observed, { extras })
       const planned = part.adapter.prepare ? await part.adapter.prepare(actions, part.observed) : actions
       unit.report.rows.push(...rows)
       unit.report.actions.push(...planned)
       for (const a of planned) unit.owner.set(a, part)
+    } catch (e) {
+      const hint = e instanceof KitError ? e.hint : undefined
+      const text = `${message(e)}${hint ? ` (${hint})` : ''}`
+      errors.push(unit.parts.length > 1 ? `${part.adapter.label}: ${text}` : text)
     }
-  } catch (e) {
-    unit.report.error = message(e)
-    const hint = e instanceof KitError ? e.hint : undefined
-    if (hint) unit.report.error += ` (${hint})`
-    unit.report.actions = []
   }
+  if (errors.length) unit.report.error = errors.join('; ')
 }
 
 async function apply(unit: Unit): Promise<void> {

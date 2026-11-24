@@ -76,6 +76,8 @@ export class FakeAscSubscriptions {
   bulkPricePatch = true
   /** False: `subscriptionPlanAvailabilities` is refused (the new endpoint is not usable), so kit uses the deprecated one. */
   planAvailability = true
+  /** True: listing subscription groups fails (400), as an unverified read shape would. */
+  failGroupList = false
   groups = new Map<string, Group>()
   subs = new Map<string, Sub>()
   versions = new Map<string, { parent: string; state: string }>()
@@ -234,6 +236,7 @@ export class FakeAscSubscriptions {
     let m: RegExpMatchArray | null
 
     if (req.method === 'GET' && (m = p.match(/^v1\/apps\/(\w+)\/subscriptionGroups$/))) {
+      if (this.failGroupList) return error(400, 'PARAMETER_ERROR.INVALID', 'include=versions is not allowed')
       const { items, next } = this.asc.page([...this.groups.values()], req, p)
       const included = items.flatMap((g) => this.versionResources(g.versions, 'subscriptionGroupVersions'))
       return json({
@@ -484,6 +487,7 @@ export class FakeAscSubscriptions {
             numberOfPeriods: o.numberOfPeriods,
             endDate: o.endDate,
           },
+          relationships: { territory: { data: { type: 'territories', id: o.territory } } },
         }))
       return json({ data, links: {} })
     }

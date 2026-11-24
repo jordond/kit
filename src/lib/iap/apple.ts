@@ -127,7 +127,7 @@ export interface AppleIap {
   localizations: { id: string; locale: string; name: string; description: string }[]
   scheduleId?: string
   /** USA manual prices. */
-  prices: { startDate: string | null; endDate: string | null; customerPrice: string }[]
+  prices: { startDate: string | null; endDate: string | null; customerPrice: string; preserved?: boolean }[]
   availability: boolean
   screenshot?: { id: string; checksum?: string; fileName?: string; fileSize?: number; state?: string }
 }
@@ -151,17 +151,26 @@ const DRAFT = 'PREPARE_FOR_SUBMISSION'
 export function observedPrices(
   prices: AppleIap['prices'],
   today: string,
-): { current?: string; scheduled: { from: string; price: string }[] } {
+): { current?: string; inEffect: string[]; scheduled: { from: string; price: string }[] } {
   let current: { start: string; price: string } | undefined
   const scheduled: { from: string; price: string }[] = []
+  let tied: string[] = []
   for (const p of prices) {
     if (p.endDate && p.endDate <= today) continue
+    const start = p.startDate ?? ''
     if (p.startDate && p.startDate > today) scheduled.push({ from: p.startDate, price: p.customerPrice })
-    else if (!current || (p.startDate ?? '') >= current.start)
-      current = { start: p.startDate ?? '', price: p.customerPrice }
+    else if (!current || start > current.start) {
+      current = { start, price: p.customerPrice }
+      tied = [p.customerPrice]
+    } else if (start === current.start) {
+      tied.push(p.customerPrice)
+      // Ties (an old price kept for subscribers next to the new one, both in effect): prefer the
+      // one not marked preserved; which of the two Apple marks is unverified, so `inEffect` keeps both.
+      if (!p.preserved) current = { start, price: p.customerPrice }
+    }
   }
   scheduled.sort((a, b) => a.from.localeCompare(b.from))
-  return { current: current?.price, scheduled }
+  return { current: current?.price, inEffect: tied, scheduled }
 }
 
 // ---- actions --------------------------------------------------------------------------------------
@@ -177,6 +186,29 @@ export type AppleAction =
 const priceText = (price: string, scheduled: { from: string; price: string }[]) =>
   `${price}${scheduled.map((s) => ` (${s.price} from ${s.from})`).join('')}`
 
+/**
+ * Why an observed review screenshot is not the file's, or undefined when it is. Only a COMPLETE
+ * upload counts: one reserved but never uploaded (AWAITING_UPLOAD) has no checksum and would
+ * otherwise pass on name and size alone. kit never deletes, so every case is a note.
+ */
+export function screenshotProblem(
+  s: { checksum?: string | null; fileSize?: number | null; fileName?: string | null; state?: string | null },
+  want: { md5: string; size: number; fileName: string },
+): string | undefined {
+  if (s.state === 'FAILED')
+    return 'the review screenshot upload FAILED: delete it in App Store Connect, then sync again'
+  if (s.state === 'AWAITING_UPLOAD' || (s.state && s.state !== 'COMPLETE' && s.state !== 'UPLOAD_COMPLETE')) {
+    return `the review screenshot is ${s.state}: its upload never finished; delete it in App Store Connect, then sync again`
+  }
+  if (s.state === 'UPLOAD_COMPLETE')
+    return 'the review screenshot is still processing: check status again shortly'
+  const same = s.checksum
+    ? s.checksum.toLowerCase() === want.md5
+    : s.fileSize === want.size && s.fileName === want.fileName
+  return same
+    ? undefined
+    : 'the review screenshot differs: kit never deletes, so replace it in App Store Connect (or delete it there and sync again)'
+}
 export function diffApple(
   desired: AppleDesired[],
   observed: AppleObserved,
@@ -290,16 +322,10 @@ export function diffApple(
         fields.push('screenshot')
         act(d.productId, 'screenshot', 'screenshot', { screenshot: d.screenshot })
       } else {
-        const same = s.checksum
-          ? s.checksum.toLowerCase() === d.screenshot.md5
-          : s.fileSize === d.screenshot.size && s.fileName === d.screenshot.fileName
-        if (!same || s.state === 'FAILED') {
+        const problem = screenshotProblem(s, d.screenshot)
+        if (problem) {
           fields.push('screenshot')
-          notes.push(
-            s.state === 'FAILED'
-              ? 'the review screenshot upload FAILED: delete it in App Store Connect, then sync again'
-              : 'the review screenshot differs: kit never deletes, so replace it in App Store Connect (or delete it there and sync again)',
-          )
+          notes.push(problem)
         }
       }
     }

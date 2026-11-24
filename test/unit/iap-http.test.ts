@@ -80,6 +80,27 @@ describe('http client', () => {
     expect(seen).toHaveLength(2)
   })
 
+  test('a Retry-After over a minute fails at once instead of hanging', async () => {
+    handler = () => json({}, 429, { 'retry-after': '3600' })
+    const { c, waits } = client('play')
+    const err = (await c.request('GET', 'x', { schema: ok }).catch((e: unknown) => e)) as StoreError
+    expect(err.status).toBe(429)
+    expect(err.message).toContain('the store asks to wait 3600 s, run again later')
+    expect(waits).toEqual([])
+    expect(seen).toHaveLength(1)
+  })
+
+  test('the request line is kept out of detail (so androidpublisher paths match nothing)', async () => {
+    handler = () => json({ error: { status: 'INVALID_ARGUMENT', message: 'bad title' } }, 400)
+    const { c } = client('play')
+    const err = (await c
+      .request('GET', 'applications/x', { schema: ok })
+      .catch((e: unknown) => e)) as StoreError
+    expect(err.detail).toBe('bad title')
+    expect(err.request).toMatch(/^GET \//)
+    expect(err.message).toContain(`${err.request}: bad title`)
+  })
+
   test('429 waits RevenueCat backoff_ms; a second failure throws', async () => {
     handler = () => json({ type: 'rate_limit_error', message: 'slow down', backoff_ms: 1500 }, 429)
     const { c, waits } = client()

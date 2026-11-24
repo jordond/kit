@@ -216,18 +216,19 @@ export class FakePlay {
       plan.state = 'ACTIVE'
       return json(this.subscriptions.get(m![1]!))
     }
-    if (route('PATCH', /^subscriptions\/([^/]+)\/basePlans\/([^/]+)\/offers\/([^/]+)$/)) {
-      const [, sub, plan, offerId] = m!
+    // offers.create: POST …/offers?offerId=…; an existing id is a conflict, never an update.
+    if (route('POST', /^subscriptions\/([^/]+)\/basePlans\/([^/]+)\/offers$/)) {
+      const [, sub, plan] = m!
+      const offerId = req.query.get('offerId')
+      if (!offerId) return this.error(400, 'INVALID_ARGUMENT', 'offerId is required')
       const base = ((this.subscriptions.get(sub!)?.basePlans as Json[]) ?? []).find(
         (pl) => pl.basePlanId === plan,
       )
       if (!base) return this.error(404, 'NOT_FOUND', 'no base plan')
-      if (!req.query.get('updateMask')) return this.error(400, 'INVALID_ARGUMENT', 'updateMask is required')
       if (req.query.get('regionsVersion.version') !== this.regionVersion)
         return this.error(400, 'INVALID_ARGUMENT', 'Invalid regions version')
       const key = `${sub}/${plan}/${offerId}`
-      if (!this.offers.has(key) && req.query.get('allowMissing') !== 'true')
-        return this.error(404, 'NOT_FOUND', 'no offer')
+      if (this.offers.has(key)) return this.error(409, 'ALREADY_EXISTS', `offer ${offerId} already exists`)
       const b = req.body as Json
       const regions = ((b.regionalConfigs as Json[]) ?? [])
         .map((r) => String(r.regionCode))
@@ -245,7 +246,7 @@ export class FakePlay {
       }
       if (!regions.length || !(b.phases as Json[])?.length)
         return this.error(400, 'INVALID_ARGUMENT', 'regionalConfigs and phases are required')
-      const offer = { ...b, state: (this.offers.get(key)?.state as string | undefined) ?? 'DRAFT' }
+      const offer = { ...b, offerId, state: 'DRAFT' }
       this.offers.set(key, offer)
       return json(offer)
     }

@@ -513,13 +513,10 @@ export function playSubscriptionsAdapter(
       if (action.kind !== 'trial') throw new Error(`unknown Play action ${action.kind}`)
       const regions = await regionsOf(d, payload.basePlanId)
       const version = regionsVersion ?? (await convert(d.basePlans[0]!.price)).regionVersion.version
+      // Create only (offers.create): an existing free-trial offer is a conflict, never overwritten.
       await withHint(() =>
-        client.request('PATCH', offerPath, {
-          query: {
-            allowMissing: true,
-            updateMask: 'phases,regionalConfigs,otherRegionsConfig,targeting',
-            'regionsVersion.version': version,
-          },
+        client.request('POST', `${planPath(d.productId, payload.basePlanId)}/offers`, {
+          query: { offerId: TRIAL_OFFER_ID, 'regionsVersion.version': version },
           body: {
             packageName: pkg,
             productId: d.productId,

@@ -310,6 +310,21 @@ describe('kit iap', () => {
     ).toBe(false)
   })
 
+  test('a subscription read that fails does not block one-time products on that store', async () => {
+    writeFile(WITH_SUBS())
+    fakes.asc.subs.failGroupList = true
+    const r = await iap(['sync', '--yes', '--store', 'apple'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('App Store Connect subscriptions (app.example): App Store Connect: HTTP 400')
+    expect(fakes.asc.iaps.size).toBe(3)
+    expect(fakes.asc.subs.groups.size).toBe(0)
+
+    // --product on a one-time product does not read subscriptions at all.
+    const before = fakes.log.length
+    expect((await iap(['status', '--store', 'apple', '--product', 'tokens_10'])).code).toBe(0)
+    expect(fakes.log.slice(before).some((x) => x.path.includes('subscriptionGroups'))).toBe(false)
+  })
+
   test('a subscription price change needs --allow-price-change', async () => {
     writeFile(WITH_SUBS())
     expect((await iap(['sync', '--yes'])).code).toBe(0)

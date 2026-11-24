@@ -325,8 +325,10 @@ describe('play subscriptions adapter against the fake', () => {
     })
     const body = patch.body as { basePlans: { autoRenewingBasePlanType: { legacyCompatible?: boolean } }[] }
     expect(body.basePlans[1]!.autoRenewingBasePlanType.legacyCompatible).toBeUndefined()
-    const offer = fakes.log.find((x) => x.method === 'PATCH' && x.path.endsWith('/offers/free-trial'))!
-    expect(offer.path).toBe('applications/app.example/subscriptions/pro/basePlans/monthly/offers/free-trial')
+    const offer = fakes.log.find((x) => x.method === 'POST' && x.path.endsWith('/offers'))!
+    expect(offer.path).toBe('applications/app.example/subscriptions/pro/basePlans/monthly/offers')
+    expect(offer.query.get('offerId')).toBe('free-trial')
+    expect(fakes.log.some((x) => x.method === 'PATCH' && x.path.includes('/offers/'))).toBe(false)
     expect(offer.body).toMatchObject({
       offerId: 'free-trial',
       phases: [{ duration: 'P1W', recurrenceCount: 1 }],
@@ -345,7 +347,10 @@ describe('play subscriptions adapter against the fake', () => {
         .writes('play')
         .every(
           (w) =>
-            w.method === 'PATCH' || w.path.includes('activate') || w.path.includes('convertRegionPrices'),
+            w.method === 'PATCH' ||
+            w.path.includes('activate') ||
+            w.path.includes('convertRegionPrices') ||
+            (w.method === 'POST' && w.path.endsWith('/offers')),
         ),
     ).toBe(true)
   })

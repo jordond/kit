@@ -65,7 +65,13 @@ export const pricesResponse = z.object({
   data: z.array(
     z.object({
       id: z.string(),
-      attributes: z.object({ startDate: z.string().nullish(), endDate: z.string().nullish() }).optional(),
+      attributes: z
+        .object({
+          startDate: z.string().nullish(),
+          endDate: z.string().nullish(),
+          preserved: z.boolean().nullish(),
+        })
+        .optional(),
       relationships: z.object({ subscriptionPricePoint: toOne }).optional(),
     }),
   ),
@@ -94,6 +100,7 @@ export const offersResponse = z.object({
         offerMode: z.string(),
         endDate: z.string().nullish(),
       }),
+      relationships: z.object({ territory: toOne }).optional(),
     }),
   ),
   links,

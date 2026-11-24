@@ -350,6 +350,7 @@ export function appleSubscriptionsAdapter(
         wanted: new Set(desired.map((d) => d.id)),
         groupIds,
         subIds,
+        territories: allTerritories,
       })
       return observed
     },
@@ -461,9 +462,17 @@ export function appleSubscriptionsAdapter(
           return
         }
         case 'trial': {
-          const { plan, duration } = p as { plan: string; duration: string }
+          const {
+            plan,
+            duration,
+            territories: only,
+          } = p as {
+            plan: string
+            duration: string
+            territories?: string[]
+          }
           const id = subId(plan)
-          for (const territory of await allTerritories()) {
+          for (const territory of only ?? (await allTerritories())) {
             await client.request('POST', 'v1/subscriptionIntroductoryOffers', {
               body: {
                 data: {

@@ -246,6 +246,7 @@ export function revenuecatOfferingsAdapter(
             e.detail,
             e.pointer,
             e.hint ? `${e.hint}. ${SCOPES}` : SCOPES,
+            e.request,
           )
         }
         throw e

@@ -208,6 +208,25 @@ describe('diffApple', () => {
     expect(other.actions).toEqual([])
   })
 
+  test('a screenshot that never finished uploading is not in sync', () => {
+    const r = diffApple(
+      [desired({ screenshot: { path: '/s.png', fileName: 's.png', size: 3, md5: 'abc' } })],
+      observed([
+        iap({
+          screenshot: {
+            id: 's1',
+            fileName: 's.png',
+            fileSize: 3,
+            state: 'AWAITING_UPLOAD',
+          },
+        }),
+      ]),
+    )
+    expect(r.rows[0]).toMatchObject({ sync: 'differs', fields: ['screenshot'] })
+    expect(r.rows[0]!.notes!.join()).toContain('its upload never finished')
+    expect(r.actions).toEqual([])
+  })
+
   test('observed prices: past changes are current, expired ones dropped, future ones scheduled', () => {
     expect(
       observedPrices(
@@ -218,7 +237,22 @@ describe('diffApple', () => {
         ],
         TODAY,
       ),
-    ).toEqual({ current: '4.99', scheduled: [{ from: '2027-02-01', price: '7.99' }] })
+    ).toEqual({ current: '4.99', inEffect: ['4.99'], scheduled: [{ from: '2027-02-01', price: '7.99' }] })
+    // A kept-for-subscribers price next to the new one: the unpreserved one is current, both in effect.
+    for (const order of [
+      [false, true],
+      [true, false],
+    ]) {
+      const tied = observedPrices(
+        [
+          { startDate: null, endDate: null, customerPrice: order[0] ? '3.99' : '4.99', preserved: order[0] },
+          { startDate: null, endDate: null, customerPrice: order[1] ? '3.99' : '4.99', preserved: order[1] },
+        ],
+        TODAY,
+      )
+      expect(tied.current).toBe('4.99')
+      expect(tied.inEffect.sort()).toEqual(['3.99', '4.99'])
+    }
     // A store that moved to the scheduled price matches a file whose change date has passed.
     const r = diffApple(
       [desired({ price: '7.99' })],

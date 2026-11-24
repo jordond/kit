@@ -93,6 +93,13 @@ describe('diffPlay', () => {
       const r = diffPlay([desired(d)], observed([product(o)]))
       expect({ fields: r.rows[0]!.fields, kinds: r.actions.map((a) => a.kind) }).toEqual({ fields, kinds })
     }
+    // Turned off in Play Console: left alone, noted, never re-activated.
+    for (const state of ['INACTIVE', 'INACTIVE_PUBLISHED']) {
+      const off = diffPlay([desired()], observed([product({ purchaseOptions: [option({ state })] })]))
+      expect(off.actions).toEqual([])
+      expect(off.rows[0]!.sync).toBe('in-sync')
+      expect(off.rows[0]!.notes!.join()).toContain(`buy is ${state}: turned off in Play Console`)
+    }
     const priced = diffPlay([desired({ price: '5.99' })], observed([product()]))
     expect(priced.actions[0]!.payload).toEqual({ convert: true })
     const listed = diffPlay(

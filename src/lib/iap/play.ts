@@ -158,7 +158,12 @@ export function diffPlay(
         payload: { convert },
       })
     }
-    if (mine?.state !== 'ACTIVE') {
+    // A new option starts DRAFT. INACTIVE ones were turned off in Play Console: kit leaves them.
+    if (mine && mine.state !== 'ACTIVE' && mine.state !== 'DRAFT') {
+      notes.push(
+        `${d.purchaseOptionId} is ${mine.state}: turned off in Play Console; activate it there (kit leaves it)`,
+      )
+    } else if (mine?.state !== 'ACTIVE') {
       fields.push('state')
       actions.push({
         store: 'play',

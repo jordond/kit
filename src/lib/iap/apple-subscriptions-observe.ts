@@ -64,6 +64,8 @@ export interface ObserveContext {
   /** Filled while reading: file subscription id → group id, product id → subscription id. */
   groupIds: Map<string, string>
   subIds: Map<string, string>
+  /** Every territory id (cached by the adapter); read only when a plan already has a trial. */
+  territories: () => Promise<string[]>
 }
 
 export async function observeSubscriptions(
@@ -118,6 +120,7 @@ export async function observeSubscriptions(
     )) {
       const points = new Map((page.included ?? []).map((r) => [`${r.type}/${r.id}`, r.attributes ?? {}]))
       for (const p of page.data) {
+        plan.priceRows = (plan.priceRows ?? 0) + 1
         const pt = p.relationships?.subscriptionPricePoint?.data
         const price = pt
           ? (points.get(`${pt.type}/${pt.id}`)?.customerPrice as string | undefined)
@@ -127,13 +130,14 @@ export async function observeSubscriptions(
           startDate: p.attributes?.startDate ?? null,
           endDate: p.attributes?.endDate ?? null,
           customerPrice: price,
+          preserved: p.attributes?.preserved ?? false,
         })
       }
     }
     plan.availability = await hasAvailability(plan.ascId)
     for (const page of await pages(
       `v1/subscriptions/${plan.ascId}/introductoryOffers`,
-      { limit: 200 },
+      { limit: 200, include: 'territory' },
       offersResponse,
     )) {
       for (const o of page.data) {
@@ -143,6 +147,7 @@ export async function observeSubscriptions(
           id: o.id,
           mode: o.attributes.offerMode,
           duration: o.attributes.duration,
+          territory: o.relationships?.territory?.data?.id,
           ...(o.attributes.endDate ? { endDate: o.attributes.endDate } : {}),
         })
       }
@@ -231,5 +236,8 @@ export async function observeSubscriptions(
     }
     for (const plan of g.plans) await planDetails(plan)
   }
-  return { appId: app.id, bundleId: ctx.bundleId, today, groups }
+  // A trial is one offer per territory: knowing them all shows a trial an earlier run left half made.
+  const trials = groups.some((g) => g.plans.some((p) => p.offers.some((o) => o.mode === 'FREE_TRIAL')))
+  const territories = trials ? await ctx.territories() : undefined
+  return { appId: app.id, bundleId: ctx.bundleId, today, groups, ...(territories ? { territories } : {}) }
 }

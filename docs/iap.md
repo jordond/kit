@@ -61,8 +61,9 @@ A store takes part only when its key is present. See [`iap` in the config refere
 }
 ```
 
-The JSON schema ships with kit (`schemas/iap.schema.json`); `$schema` points editors at it. `check`
-warns when `$schema` is missing or names another kit version.
+The JSON schema ships with kit (`schemas/iap.schema.json`); `$schema` points editors at it. The URL
+carries your kit's major.minor (`@0.12` above is an example): `check` warns when `$schema` is missing
+or names another kit version, and prints the exact URL to use.
 
 | Field                                                      | App Store Connect                                                          | Google Play                                       | RevenueCat                                              |
 | ---------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------- |
@@ -177,8 +178,8 @@ delete it in App Store Connect and sync again).
 buy option (`legacyCompatible: true`, which RevenueCat and older billing libraries read). On create and
 when the US price changes, Play's `convertRegionPrices` sets every other region; listing-only changes
 send the regional prices back as Play has them. "In sync" compares the listings, the buy option and the
-US price only, since converted prices move with exchange rates. A purchase option that is not active is
-activated. Other purchase options and listings in other languages are kept.
+US price only, since converted prices move with exchange rates. A new (draft) purchase option is activated;
+one turned off in Play Console is left off and noted. Other purchase options and listings in other languages are kept.
 
 **App Store Connect subscriptions.** Creates the subscription group (and its localization), then per
 plan the subscription (reference name, product id, period, group level, Family Sharing, review note),
@@ -207,7 +208,10 @@ RevenueCat's attachment), and notes. It exits 0 when things differ; `--json` giv
 `{ stores: { apple: { label, rows, actions, skipped?, error? }, … }, ok }`. `sync --json` adds
 `results: [{ id, kind, ok, skipped?, error? }]` per store.
 
-A store without credentials is skipped with a warning while the others run. A failed step skips the
+A store without credentials is skipped with a warning while the others run. When one part of a
+store cannot be read (its subscriptions, say), that part is reported as failed and the store's other
+parts still sync; the run exits 1. A store that asks kit to wait more than a minute before retrying
+fails that request with the wait it asked for. A failed step skips the
 rest of that product on that store; the summary lists every failure and the run exits 1.
 
 ## Credentials

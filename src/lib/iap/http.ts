@@ -36,10 +36,12 @@ export class StoreError extends Error {
     readonly detail: string,
     readonly pointer?: string,
     readonly hint?: string,
+    /** `PATCH /v1/…`: kept out of `detail` so callers can match the store's own words. */
+    readonly request?: string,
   ) {
     super(
       redact(
-        `${STORE_NAME[store]}: HTTP ${status}${code ? ` ${code}` : ''}: ${detail}${pointer ? ` (${pointer})` : ''}${hint ? `. ${hint}` : ''}`,
+        `${STORE_NAME[store]}: HTTP ${status}${code ? ` ${code}` : ''}: ${request ? `${request}: ` : ''}${detail}${pointer ? ` (${pointer})` : ''}${hint ? `. ${hint}` : ''}`,
       ),
     )
     this.name = 'StoreError'
@@ -154,6 +156,9 @@ function record(
   writeFileSync(join(dir, `${name}.json`), `${redact(JSON.stringify(doc, null, 2))}\n`)
 }
 
+/** The longest a store may ask kit to wait before the one retry; a longer ask fails the request. */
+export const MAX_RETRY_WAIT_MS = 60_000
+
 function retryWait(res: Response, backoffMs: number | undefined, fallback: number): number {
   const after = res.headers.get('retry-after')
   if (after !== null && /^\d+(\.\d+)?$/.test(after.trim())) return Number(after) * 1000
@@ -209,11 +214,24 @@ export function createClient(opts: ClientOptions): Client {
           const err = parseError(opts.store, json, text)
           const retryable = res.status === 429 || res.status === 423 || res.status >= 500
           if (retryable && attempt === 1) {
-            await sleep(retryWait(res, err.backoffMs, opts.retryMs ?? 2000))
-            continue
+            const wait = retryWait(res, err.backoffMs, opts.retryMs ?? 2000)
+            // An hourly quota can ask for a long wait: fail with it rather than hang the run.
+            if (wait <= MAX_RETRY_WAIT_MS) {
+              await sleep(wait)
+              continue
+            }
+            throw new StoreError(
+              opts.store,
+              res.status,
+              err.code,
+              `${err.detail}; the store asks to wait ${Math.ceil(wait / 1000)} s, run again later`,
+              err.pointer,
+              undefined,
+              label,
+            )
           }
           const hint = res.status === 401 || res.status === 403 ? AUTH_HINT[opts.store] : undefined
-          throw new StoreError(opts.store, res.status, err.code, `${label}: ${err.detail}`, err.pointer, hint)
+          throw new StoreError(opts.store, res.status, err.code, err.detail, err.pointer, hint, label)
         }
         if (json === undefined) {
           throw new StoreError(opts.store, res.status, undefined, `${label}: response is not JSON`)

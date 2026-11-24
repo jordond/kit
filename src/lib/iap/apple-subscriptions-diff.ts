@@ -1,4 +1,4 @@
-import { observedPrices } from './apple'
+import { observedPrices, screenshotProblem } from './apple'
 import { type AppleSubscriptionDesired, type AppleSubscriptionPlanDesired, samePrice } from './model'
 import { type Action, type Diff, errorAction, type StatusRow } from './types'
 
@@ -22,10 +22,12 @@ export interface AppleSubPlan {
   hasDraft: boolean
   localizations: { id: string; locale: string; name: string; description: string }[]
   /** USA prices. */
-  prices: { startDate: string | null; endDate: string | null; customerPrice: string }[]
+  prices: { startDate: string | null; endDate: string | null; customerPrice: string; preserved?: boolean }[]
+  /** Every USA price row the store listed, including ones kit could not read a price from. */
+  priceRows?: number
   availability: boolean
   /** Introductory offers (any mode). */
-  offers: { id: string; mode: string; duration: string; endDate?: string }[]
+  offers: { id: string; mode: string; duration: string; territory?: string; endDate?: string }[]
   screenshot?: { id: string; checksum?: string; fileName?: string; fileSize?: number; state?: string }
 }
 
@@ -44,6 +46,8 @@ export interface AppleSubscriptionsObserved {
   bundleId: string
   today: string
   groups: AppleSubGroup[]
+  /** Every territory id; set when some plan already has a trial. */
+  territories?: string[]
 }
 
 export interface AppleSubscriptionsDiffOptions {
@@ -133,7 +137,19 @@ export function diffAppleSubscriptions(
         }
         continue
       }
-      existingPlan(act, actions, fields, notes, d, plan, short, o, observed.today, !!opts.allowPriceChange)
+      existingPlan(
+        act,
+        actions,
+        fields,
+        notes,
+        d,
+        plan,
+        short,
+        o,
+        observed.today,
+        !!opts.allowPriceChange,
+        observed.territories,
+      )
     }
 
     for (const p of g?.plans ?? []) {
@@ -214,6 +230,7 @@ function existingPlan(
   o: AppleSubPlan,
   today: string,
   allowPriceChange: boolean,
+  territories?: string[],
 ): void {
   const field = (f: string) => fields.push(`${short}: ${f}`)
   const productId = p.productId
@@ -273,10 +290,23 @@ function existingPlan(
   }
 
   const have = observedPrices(o.prices, today)
-  if (have.current === undefined) {
+  if (have.current === undefined && !(o.priceRows ?? o.prices.length)) {
+    // No price at all: the plan is new (or its first pricing never finished).
     field('price')
     act(d.id, 'price', `${short}: price ${p.price}`, { plan: productId, price: p.price, preserve: false })
-  } else if (!samePrice(have.current, p.price)) {
+  } else if (have.current === undefined) {
+    // Prices exist but none reads as current: never reprice without keeping subscribers.
+    field('price')
+    if (!allowPriceChange) {
+      notes.push(`${short}: the store has prices but no current USA price kit can read: ${PRICE_CHANGE_NOTE}`)
+    } else {
+      act(d.id, 'price', `${short}: price ${p.price} (existing subscribers keep theirs)`, {
+        plan: productId,
+        price: p.price,
+        preserve: true,
+      })
+    }
+  } else if (!have.inEffect.some((x) => samePrice(x, p.price))) {
     field('price')
     const move = `${have.current} in the store, ${p.price} in the file`
     if (!allowPriceChange) {
@@ -298,8 +328,21 @@ function existingPlan(
   const trials = o.offers.filter((x) => x.mode === 'FREE_TRIAL')
   const durations = [...new Set(trials.map((x) => x.duration))].join(', ')
   if (p.trial) {
+    const missing =
+      territories && trials.length === o.offers.length && trials.every((x) => x.territory)
+        ? territories.filter((t) => !trials.some((x) => x.territory === t))
+        : []
     if (!o.offers.length) {
       act(d.id, 'trial', `${short}: trial ${p.trial}`, { plan: productId, duration: p.trial })
+    } else if (missing.length && trials.every((x) => x.duration === p.trial)) {
+      // An earlier run stopped part way: finish the same trial, never change it.
+      field('trial')
+      notes.push(`${short}: the trial is missing in ${missing.length} territories (an earlier sync stopped)`)
+      act(d.id, 'trial', `${short}: trial ${p.trial} in ${missing.length} more territories`, {
+        plan: productId,
+        duration: p.trial,
+        territories: missing,
+      })
     } else if (!trials.length || trials.some((x) => x.duration !== p.trial)) {
       field('trial')
       notes.push(
@@ -319,16 +362,10 @@ function existingPlan(
       field('screenshot')
       act(d.id, 'screenshot', `${short}: screenshot`, { plan: productId, screenshot: p.screenshot })
     } else {
-      const same = s.checksum
-        ? s.checksum.toLowerCase() === p.screenshot.md5
-        : s.fileSize === p.screenshot.size && s.fileName === p.screenshot.fileName
-      if (!same || s.state === 'FAILED') {
+      const problem = screenshotProblem(s, p.screenshot)
+      if (problem) {
         field('screenshot')
-        notes.push(
-          s.state === 'FAILED'
-            ? `${short}: the review screenshot upload FAILED: delete it in App Store Connect, then sync again`
-            : `${short}: the review screenshot differs: kit never deletes, so replace it in App Store Connect (or delete it there and sync again)`,
-        )
+        notes.push(`${short}: ${problem}`)
       }
     }
   } else if (!o.screenshot) {
