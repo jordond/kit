@@ -64,6 +64,39 @@ describe('diffRevenuecat', () => {
     expect(d.actions.filter((a) => a.kind === 'attach')).toHaveLength(2)
   })
 
+  test("RevenueCat's one_time type matches consumable and non-consumable when the flag agrees", () => {
+    const oneTime = (is_consumable?: boolean) =>
+      observed({
+        products: ['app_ios', 'app_play'].map((app, i) =>
+          prod(`p${i + 1}`, app, 'membership_card', { type: 'one_time', one_time: { is_consumable } }),
+        ),
+      })
+    expect(diffRevenuecat([desired()], oneTime(false)).actions).toEqual([])
+    expect(diffRevenuecat([desired()], oneTime(undefined)).actions).toEqual([])
+    expect(diffRevenuecat([desired()], oneTime(true)).actions[0]!.kind).toBe('error')
+    expect(diffRevenuecat([desired({ type: 'subscription' })], oneTime(false)).actions[0]!.kind).toBe('error')
+  })
+
+  test('a shared entitlement is planned on the first product that can run', () => {
+    const d = diffRevenuecat(
+      [desired(), desired({ id: 'tokens', apple: 'tokens', play: 'tokens' })],
+      observed({
+        products: [prod('p1', 'app_ios', 'membership_card', { state: 'inactive' })],
+        entitlements: [],
+        attached: {},
+      }),
+    )
+    expect(d.actions.map((a) => `${a.id} ${a.kind}`)).toEqual([
+      'membership_card error',
+      'membership_card product',
+      'membership_card attach',
+      'tokens entitlement',
+      'tokens product',
+      'tokens product',
+      'tokens attach',
+    ])
+  })
+
   test('in sync', () => {
     const d = diffRevenuecat([desired()], observed())
     expect(d.actions).toEqual([])

@@ -300,6 +300,7 @@ describe('diffAppleSubscriptions', () => {
       { allowPriceChange: true },
     )
     expect(cut.rows[0]!.notes!.join(' ')).toContain('a price decrease reaches existing subscribers too')
+    expect(cut.actions[0]!.summary).toContain('(a decrease: existing subscribers get it too)')
     const none = diffAppleSubscriptions(
       [sub([monthly()])],
       observed([obsGroup([obsPlan(monthly(), { prices: [] })])]),

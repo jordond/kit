@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ExitCode, KitError } from '../errors'
 import { type Client, StoreError } from './http'
+import { isBillingPrecondition, withBillingHint, withoutState } from './play-shared'
 import { type PlayBasePlanDesired, type PlaySubscriptionDesired, samePrice } from './model'
 import { moneyValue, toMoney } from './play'
 import { type Action, type Diff, ERROR_KIND, errorAction, type StatusRow, type StoreAdapter } from './types'
@@ -279,29 +280,6 @@ export function diffPlaySubscriptions(
   return { rows, actions }
 }
 
-const PRECONDITION =
-  /billing|merchant|payment|payments profile|publish|apk|bundle|not allowed to create|has no (app|apk)/i
-
-/** A Play refusal that reads like a missing account or build gets the manual step as a hint. */
-async function withHint<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn()
-  } catch (e) {
-    if (e instanceof StoreError && e.status < 500 && PRECONDITION.test(e.detail)) {
-      throw new Error(
-        `${e.message}. Play needs a payments profile and an app bundle that declares com.android.vending.BILLING on a track (kit release android --track internal) before subscriptions`,
-      )
-    }
-    throw e
-  }
-}
-
-/** Strip what Play marks output-only before sending a base plan back. */
-function writable(p: PlayBasePlan): PlayBasePlan {
-  const { state: _state, ...rest } = p
-  return rest as PlayBasePlan
-}
-
 export function playSubscriptionsAdapter(
   client: Client,
   opts: { packageName: string; allowPriceChange?: boolean },
@@ -335,7 +313,7 @@ export function playSubscriptionsAdapter(
     updateMask: string,
     version: string,
   ) {
-    const res = await withHint(() =>
+    const res = await withBillingHint('subscriptions', () =>
       client.request('PATCH', `${app}/subscriptions/${encodeURIComponent(d.productId)}`, {
         query: { allowMissing: true, updateMask, 'regionsVersion.version': version },
         body: { packageName: pkg, productId: d.productId, ...body },
@@ -370,7 +348,7 @@ export function playSubscriptionsAdapter(
       }
       const type = planType(mine)
       plans.push({
-        ...(mine ? writable(mine) : {}),
+        ...(mine ? withoutState(mine) : {}),
         basePlanId: p.basePlanId,
         autoRenewingBasePlanType: {
           resubscribeState: 'RESUBSCRIBE_STATE_ACTIVE',
@@ -384,7 +362,7 @@ export function playSubscriptionsAdapter(
     }
     const others = (existing?.basePlans ?? [])
       .filter((x) => !d.basePlans.some((p) => p.basePlanId === x.basePlanId))
-      .map(writable)
+      .map((x) => withoutState(x))
     const version = regionsVersion ?? (await convert(d.basePlans[0]!.price)).regionVersion.version
     const listings = [
       ...Object.entries(d.listings).map(([languageCode, l]) => ({ languageCode, ...l })),
@@ -403,7 +381,7 @@ export function playSubscriptionsAdapter(
         e.status >= 500 ||
         e.status === 401 ||
         e.status === 403 ||
-        PRECONDITION.test(e.detail)
+        isBillingPrecondition(e)
       )
         throw e
       try {
@@ -487,7 +465,7 @@ export function playSubscriptionsAdapter(
       const payload = action.payload as { convertPlans: string[]; basePlanId: string; trial: string }
       if (action.kind === 'upsert') return upsert(d, payload.convertPlans)
       if (action.kind === 'activate') {
-        await withHint(() =>
+        await withBillingHint('subscriptions', () =>
           client.request('POST', `${planPath(d.productId, payload.basePlanId)}:activate`, {
             body: { packageName: pkg, productId: d.productId, basePlanId: payload.basePlanId },
             schema: anyJson,
@@ -497,7 +475,7 @@ export function playSubscriptionsAdapter(
       }
       const offerPath = `${planPath(d.productId, payload.basePlanId)}/offers/${TRIAL_OFFER_ID}`
       if (action.kind === 'activate-offer') {
-        await withHint(() =>
+        await withBillingHint('subscriptions', () =>
           client.request('POST', `${offerPath}:activate`, {
             body: {
               packageName: pkg,
@@ -514,7 +492,7 @@ export function playSubscriptionsAdapter(
       const regions = await regionsOf(d, payload.basePlanId)
       const version = regionsVersion ?? (await convert(d.basePlans[0]!.price)).regionVersion.version
       // Create only (offers.create): an existing free-trial offer is a conflict, never overwritten.
-      await withHint(() =>
+      await withBillingHint('subscriptions', () =>
         client.request('POST', `${planPath(d.productId, payload.basePlanId)}/offers`, {
           query: { offerId: TRIAL_OFFER_ID, 'regionsVersion.version': version },
           body: {

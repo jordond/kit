@@ -1,4 +1,4 @@
-import { observedPrices, screenshotProblem } from './apple'
+import { observedPrices, screenshotProblem } from './apple-diff'
 import { type AppleSubscriptionDesired, type AppleSubscriptionPlanDesired, samePrice } from './model'
 import { type Action, type Diff, errorAction, type StatusRow } from './types'
 
@@ -315,7 +315,11 @@ function existingPlan(
       if (Number(p.price) < Number(have.current)) {
         notes.push(`${short}: a price decrease reaches existing subscribers too (Apple cannot preserve it)`)
       }
-      act(d.id, 'price', `${short}: price ${have.current} → ${p.price} (existing subscribers keep theirs)`, {
+      const who =
+        Number(p.price) < Number(have.current)
+          ? 'a decrease: existing subscribers get it too'
+          : 'existing subscribers keep theirs'
+      act(d.id, 'price', `${short}: price ${have.current} → ${p.price} (${who})`, {
         plan: productId,
         price: p.price,
         preserve: true,

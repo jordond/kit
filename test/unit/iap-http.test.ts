@@ -207,6 +207,36 @@ describe('http client', () => {
     expect(JSON.parse(text).response.status).toBe(200)
     rmSync(dir, { recursive: true, force: true })
   })
+
+  test('KIT_IAP_RECORD masks pre-signed screenshot upload URLs and headers', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kit-iap-rec-'))
+    process.env.KIT_IAP_RECORD = dir
+    handler = () =>
+      json({
+        ok: true,
+        data: {
+          attributes: {
+            uploadOperations: [
+              {
+                method: 'PUT',
+                url: 'https://upload.example/x?sig=capability',
+                requestHeaders: [{ name: 'Content-Type', value: 'image/png-secret' }],
+                offset: 0,
+                length: 3,
+              },
+            ],
+          },
+        },
+      })
+    const { c } = client('apple')
+    await c.request('POST', 'v1/inAppPurchaseAppStoreReviewScreenshots', { schema: ok })
+    const text = readFileSync(join(dir, readdirSync(dir)[0]!), 'utf8')
+    expect(text).not.toContain('sig=capability')
+    expect(text).not.toContain('image/png-secret')
+    const op = JSON.parse(text).response.body.data.attributes.uploadOperations[0]
+    expect(op).toMatchObject({ url: '<masked>', method: 'PUT', length: 3 })
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
 
 describe('pacer', () => {

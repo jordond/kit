@@ -133,6 +133,28 @@ export interface ClientOptions {
 
 let recorded = 0
 
+/**
+ * Apple's screenshot reservations carry pre-signed upload URLs and headers: capabilities valid for
+ * days, not registered secrets. Recordings keep their shape, never their values.
+ */
+function maskUploads(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(maskUploads)
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value)) {
+    if (k === 'uploadOperations' && Array.isArray(v)) {
+      out[k] = v.map((op: Record<string, unknown>) => ({
+        ...op,
+        url: '<masked>',
+        requestHeaders: Array.isArray(op.requestHeaders)
+          ? op.requestHeaders.map((h: Record<string, unknown>) => ({ ...h, value: '<masked>' }))
+          : op.requestHeaders,
+      }))
+    } else out[k] = maskUploads(v)
+  }
+  return out
+}
+
 function record(
   store: Store,
   method: string,
@@ -152,7 +174,7 @@ function record(
   } catch {
     // Not JSON: kept as text.
   }
-  const doc = { request: { method, url, body }, response: { status, body: parsed } }
+  const doc = { request: { method, url, body }, response: { status, body: maskUploads(parsed) } }
   writeFileSync(join(dir, `${name}.json`), `${redact(JSON.stringify(doc, null, 2))}\n`)
 }
 

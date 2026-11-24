@@ -26,6 +26,7 @@ const product = z.object({
   state: z.string().nullish(),
   app_id: z.string(),
   display_name: z.string().nullish(),
+  one_time: z.object({ is_consumable: z.boolean().nullish() }).nullish(),
 })
 const entitlement = z.object({
   id: z.string(),
@@ -59,6 +60,20 @@ const STORE_WORD: Record<AppStore, string> = { apple: 'App Store', play: 'Play S
 const ARCHIVED = 'inactive'
 
 export type RcAction = Action
+
+/**
+ * RevenueCat reports some one-time products as `one_time` (with `one_time.is_consumable`) rather
+ * than `consumable` / `non_consumable`: both mean the file's type when the consumable flag agrees.
+ */
+function sameType(
+  p: { type: string; one_time?: { is_consumable?: boolean | null } | null },
+  want: string,
+): boolean {
+  if (p.type === want) return true
+  if (p.type !== 'one_time' || want === 'subscription') return false
+  const consumable = p.one_time?.is_consumable
+  return consumable == null || consumable === (want === 'consumable')
+}
 
 export function diffRevenuecat(
   desired: RcDesired[],
@@ -106,7 +121,7 @@ export function diffRevenuecat(
       existing++
       if (p.state === ARCHIVED)
         errors.push(`the ${STORE_WORD[store]} product ${storeId} is archived: unarchive it in RevenueCat`)
-      if (p.type !== d.type) {
+      if (!sameType(p, d.type)) {
         fields.push(`type ${store}`)
         errors.push(
           `the ${STORE_WORD[store]} product ${storeId} is type ${p.type}, the file says ${d.type}; change it in RevenueCat`,
@@ -127,7 +142,8 @@ export function diffRevenuecat(
 
     if (!ent) {
       fields.push('entitlement')
-      if (!plannedEntitlements.has(d.entitlement)) {
+      // Planned on the first product that can run: an erroring product skips its actions.
+      if (!plannedEntitlements.has(d.entitlement) && !errors.length) {
         plannedEntitlements.add(d.entitlement)
         mine.unshift({
           store: 'revenuecat',

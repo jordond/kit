@@ -1,20 +1,19 @@
-import { readFileSync } from 'node:fs'
 import {
   type AppleSubscriptionAction,
   type AppleSubscriptionsObserved,
   diffAppleSubscriptions,
 } from './apple-subscriptions-diff'
+import { uploadReviewScreenshot } from './apple-screenshot'
 import { createPager, DRAFT, observeSubscriptions, refused } from './apple-subscriptions-observe'
 import {
   anyJson,
   created,
   localizationsResponse,
   pricePointsResponse,
-  screenshotResponse,
   territoriesResponse,
   versionsResponse,
 } from './apple-subscriptions-schemas'
-import { type Client, StoreError } from './http'
+import type { Client } from './http'
 import { type AppleScreenshot, type AppleSubscriptionDesired, samePrice } from './model'
 import { ERROR_KIND, errorAction, type StoreAdapter } from './types'
 
@@ -277,67 +276,12 @@ export function appleSubscriptionsAdapter(
     }
   }
 
-  async function uploadScreenshot(id: string, shot: AppleScreenshot): Promise<void> {
-    const reserved = await client.request('POST', 'v1/subscriptionAppStoreReviewScreenshots', {
-      body: {
-        data: {
-          type: 'subscriptionAppStoreReviewScreenshots',
-          attributes: { fileName: shot.fileName, fileSize: shot.size },
-          relationships: { subscription: { data: { type: 'subscriptions', id } } },
-        },
-      },
-      schema: screenshotResponse,
+  const uploadScreenshot = (id: string, shot: AppleScreenshot) =>
+    uploadReviewScreenshot(client, 'subscription', id, shot, {
+      sleep,
+      pollMs: opts.pollMs,
+      pollLimitMs: opts.pollLimitMs,
     })
-    const sid = reserved.data.id
-    const bytes = readFileSync(shot.path)
-    for (const op of reserved.data.attributes?.uploadOperations ?? []) {
-      // Upload URLs are pre-signed: no App Store Connect token.
-      const headers = Object.fromEntries((op.requestHeaders ?? []).map((h) => [h.name, h.value]))
-      const res = await fetch(op.url, {
-        method: op.method,
-        headers,
-        body: bytes.subarray(op.offset, op.offset + op.length),
-        signal: AbortSignal.timeout(120_000),
-      })
-      if (!res.ok) {
-        throw new StoreError(
-          'apple',
-          res.status,
-          undefined,
-          `screenshot upload: ${(await res.text()).slice(0, 200)}`,
-        )
-      }
-    }
-    await client.request('PATCH', `v1/subscriptionAppStoreReviewScreenshots/${sid}`, {
-      body: {
-        data: {
-          type: 'subscriptionAppStoreReviewScreenshots',
-          id: sid,
-          attributes: { uploaded: true, sourceFileChecksum: shot.md5 },
-        },
-      },
-      schema: anyJson,
-    })
-    const limit = opts.pollLimitMs ?? 60_000
-    const every = opts.pollMs ?? 2000
-    for (let waited = 0; ; waited += every) {
-      const s = await client.request('GET', `v1/subscriptionAppStoreReviewScreenshots/${sid}`, {
-        schema: screenshotResponse,
-      })
-      const state = s.data.attributes?.assetDeliveryState?.state
-      if (state === 'COMPLETE') return
-      if (state === 'FAILED') {
-        const why = s.data.attributes?.assetDeliveryState?.errors?.map((e) => e.description).join('; ')
-        throw new Error(`App Store Connect could not process the review screenshot${why ? `: ${why}` : ''}`)
-      }
-      if (waited >= limit) {
-        throw new Error(
-          `the review screenshot is still ${state ?? 'processing'} after ${limit / 1000} s; run status later`,
-        )
-      }
-      await sleep(every)
-    }
-  }
 
   return {
     store: 'apple',

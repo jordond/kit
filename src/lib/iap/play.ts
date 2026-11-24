@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { ExitCode, KitError } from '../errors'
 import { type Client, StoreError } from './http'
+import { withBillingHint, withoutState } from './play-shared'
 import { type PlayDesired, samePrice } from './model'
 import { type Action, type Diff, ERROR_KIND, errorAction, type StatusRow, type StoreAdapter } from './types'
 
@@ -200,29 +201,6 @@ export function diffPlay(
   return { rows, actions }
 }
 
-const PRECONDITION =
-  /billing|merchant|payment|payments profile|publish|apk|bundle|not allowed to create|has no (app|apk)/i
-
-/** A Play refusal that reads like a missing account or build gets the manual step as a hint. */
-async function withHint<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn()
-  } catch (e) {
-    if (e instanceof StoreError && e.status < 500 && PRECONDITION.test(e.detail)) {
-      throw new Error(
-        `${e.message}. Play needs a payments profile and an app bundle that declares com.android.vending.BILLING on a track (kit release android --track internal) before products`,
-      )
-    }
-    throw e
-  }
-}
-
-/** Strip what Play marks output-only before sending an option back. */
-function writable(o: PlayOption): PlayOption {
-  const { state: _state, ...rest } = o
-  return rest as PlayOption
-}
-
 export function playAdapter(
   client: Client,
   opts: { packageName: string },
@@ -281,7 +259,7 @@ export function playAdapter(
       if (action.kind === ERROR_KIND) throw new Error((action.payload as { message: string }).message)
       if (!d) throw new Error(`${action.id} is not in the file`)
       if (action.kind === 'activate') {
-        await withHint(() =>
+        await withBillingHint('products', () =>
           client.request(
             'POST',
             `${app}/oneTimeProducts/${encodeURIComponent(d.productId)}/purchaseOptions:batchUpdateStates`,
@@ -334,7 +312,7 @@ export function playAdapter(
       }
 
       const ours: PlayOption = {
-        ...(mine ? writable(mine) : {}),
+        ...(mine ? withoutState(mine) : {}),
         purchaseOptionId: d.purchaseOptionId,
         buyOption: {
           ...mine?.buyOption,
@@ -346,7 +324,7 @@ export function playAdapter(
       }
       const others = (existing?.purchaseOptions ?? [])
         .filter((x) => x.purchaseOptionId !== d.purchaseOptionId)
-        .map(writable)
+        .map((x) => withoutState(x))
       const listings = [
         ...Object.entries(d.listings).map(([languageCode, l]) => ({
           languageCode,
@@ -355,7 +333,7 @@ export function playAdapter(
         })),
         ...(existing?.listings ?? []).filter((x) => !(x.languageCode in d.listings)),
       ]
-      await withHint(() =>
+      await withBillingHint('products', () =>
         client.request('PATCH', `${app}/onetimeproducts/${encodeURIComponent(d.productId)}`, {
           query: {
             allowMissing: true,

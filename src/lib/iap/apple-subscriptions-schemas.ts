@@ -107,29 +107,3 @@ export const offersResponse = z.object({
 })
 export const created = z.object({ data: z.object({ id: z.string() }) })
 export const anyJson = z.unknown()
-export const screenshotResponse = z.object({
-  data: z.object({
-    id: z.string(),
-    attributes: z
-      .object({
-        uploadOperations: z
-          .array(
-            z.object({
-              method: z.string(),
-              url: z.string(),
-              offset: z.number(),
-              length: z.number(),
-              requestHeaders: z.array(z.object({ name: z.string(), value: z.string() })).nullish(),
-            }),
-          )
-          .nullish(),
-        assetDeliveryState: z
-          .object({
-            state: z.string(),
-            errors: z.array(z.object({ description: z.string().nullish() })).nullish(),
-          })
-          .nullish(),
-      })
-      .optional(),
-  }),
-})
