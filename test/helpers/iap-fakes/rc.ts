@@ -27,6 +27,11 @@ export class FakeRc {
   products = new Map<string, Json>()
   entitlements = new Map<string, Json>()
   attached = new Map<string, Set<string>>()
+  offerings = new Map<string, Json>()
+  /** Package id → package (with its `offering_id`). */
+  packages = new Map<string, Json>()
+  /** Package id → attached product ids. */
+  packageProducts = new Map<string, Set<string>>()
   private seq = 0
 
   private error(status: number, type: string, message: string) {
@@ -82,6 +87,130 @@ export class FakeRc {
     })
     this.attached.set(id, new Set(products))
     return id
+  }
+
+  seedOffering(lookupKey: string, over: Json = {}): string {
+    const id = `ofrng${++this.seq}`
+    this.offerings.set(id, {
+      object: 'offering',
+      id,
+      lookup_key: lookupKey,
+      display_name: lookupKey,
+      is_current: false,
+      state: 'active',
+      project_id: this.projectId,
+      created_at: 1,
+      ...over,
+    })
+    return id
+  }
+
+  seedPackage(
+    offeringId: string,
+    lookupKey: string,
+    position: number,
+    products: string[] = [],
+    over: Json = {},
+  ): string {
+    const id = `pkge${++this.seq}`
+    this.packages.set(id, {
+      object: 'package',
+      id,
+      offering_id: offeringId,
+      lookup_key: lookupKey,
+      display_name: lookupKey,
+      position,
+      state: 'active',
+      created_at: 1,
+      ...over,
+    })
+    this.packageProducts.set(id, new Set(products))
+    return id
+  }
+
+  /** Offerings, packages and package attach (plan-4 §14). Returns undefined for other paths. */
+  private handleOfferings(req: Req, p: string, body: Json, prefix: string): Response | undefined {
+    let m: RegExpMatchArray | null
+    const write = req.method === 'POST'
+    if (req.method === 'GET' && p === 'offerings')
+      return this.list([...this.offerings.values()], req, `${prefix}offerings`)
+    if (write && p === 'offerings') {
+      if (!body.lookup_key || !body.display_name)
+        return this.error(400, 'parameter_error', 'lookup_key and display_name are required')
+      if ('is_current' in body)
+        return this.error(400, 'parameter_error', 'is_current cannot be set on create')
+      if ([...this.offerings.values()].some((o) => o.lookup_key === body.lookup_key))
+        return this.error(409, 'resource_already_exists', 'Offering already exists')
+      const id = this.seedOffering(body.lookup_key as string, { display_name: body.display_name })
+      return json(this.offerings.get(id), 201)
+    }
+    if (write && (m = p.match(/^offerings\/(\w+)$/))) {
+      const o = this.offerings.get(m[1]!)
+      if (!o) return this.error(404, 'resource_missing', 'Offering not found')
+      for (const k of Object.keys(body)) {
+        if (!['display_name', 'is_current', 'metadata'].includes(k))
+          return this.error(400, 'parameter_error', `${k} cannot be updated`)
+      }
+      if (body.is_current === true) for (const x of this.offerings.values()) x.is_current = false
+      Object.assign(o, body)
+      return json(o)
+    }
+    if (req.method === 'GET' && (m = p.match(/^offerings\/(\w+)\/packages$/))) {
+      if (!this.offerings.has(m[1]!)) return this.error(404, 'resource_missing', 'Offering not found')
+      const items = [...this.packages.values()].filter((x) => x.offering_id === m![1])
+      return this.list(items, req, `${prefix}offerings/${m[1]}/packages`)
+    }
+    if (write && (m = p.match(/^offerings\/(\w+)\/packages$/))) {
+      if (!this.offerings.has(m[1]!)) return this.error(404, 'resource_missing', 'Offering not found')
+      if (!body.lookup_key || !body.display_name || typeof body.position !== 'number')
+        return this.error(400, 'parameter_error', 'lookup_key, display_name and position are required')
+      const dup = [...this.packages.values()].some(
+        (x) => x.offering_id === m![1] && x.lookup_key === body.lookup_key,
+      )
+      if (dup) return this.error(409, 'resource_already_exists', 'Package already exists')
+      const id = this.seedPackage(m[1]!, body.lookup_key as string, body.position, [], {
+        display_name: body.display_name,
+      })
+      return json(this.packages.get(id), 201)
+    }
+    if (write && (m = p.match(/^packages\/(\w+)$/))) {
+      const pk = this.packages.get(m[1]!)
+      if (!pk) return this.error(404, 'resource_missing', 'Package not found')
+      for (const k of Object.keys(body)) {
+        if (!['display_name', 'position'].includes(k))
+          return this.error(400, 'parameter_error', `${k} cannot be updated`)
+      }
+      Object.assign(pk, body)
+      return json(pk)
+    }
+    if (req.method === 'GET' && (m = p.match(/^packages\/(\w+)\/products$/))) {
+      const set = this.packageProducts.get(m[1]!)
+      if (!set) return this.error(404, 'resource_missing', 'Package not found')
+      return this.list(
+        [...set].map((id) => this.products.get(id)!),
+        req,
+        `${prefix}packages/${m[1]}/products`,
+      )
+    }
+    if (write && (m = p.match(/^packages\/(\w+)\/actions\/attach_products$/))) {
+      const set = this.packageProducts.get(m[1]!)
+      if (!set) return this.error(404, 'resource_missing', 'Package not found')
+      const items = body.products as { product_id: string; eligibility_criteria?: string }[] | undefined
+      if (!items?.length) return this.error(400, 'parameter_error', 'products: at least one')
+      const apps = new Set([...set].map((id) => this.products.get(id)!.app_id))
+      for (const it of items) {
+        const prod = this.products.get(it.product_id)
+        if (!prod) return this.error(404, 'resource_missing', `Product ${it.product_id} not found`)
+        if (prod.state === 'inactive')
+          return this.error(422, 'entity_references_archived_entities', 'archived product')
+        if (apps.has(prod.app_id))
+          return this.error(422, 'invalid_request', 'package has a product for that app')
+        apps.add(prod.app_id)
+      }
+      for (const it of items) set.add(it.product_id)
+      return json(this.packages.get(m[1]!))
+    }
+    return undefined
   }
 
   handle(req: Req): Response {
@@ -158,6 +287,8 @@ export class FakeRc {
       for (const id of ids) set.add(id)
       return json(this.entitlements.get(m[1]!))
     }
+    const offerings = this.handleOfferings(req, p, body, prefix)
+    if (offerings) return offerings
     if (req.method === 'DELETE' || p.includes('detach') || p.includes('archive')) {
       return this.error(500, 'server_error', 'kit must never delete, detach or archive')
     }
