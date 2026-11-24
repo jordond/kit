@@ -113,7 +113,7 @@ A repo adds its own commands, or wraps a built-in, with a file in `.kit/commands
 | [Env](docs/env.md)                                   | The `.env` schema, `kit env push` and `kit env rotate`                                                  |
 | [Cloudflare Workers](docs/cloudflare.md)             | Preview deploys, rollback, logs, D1                                                                     |
 | [Kotlin toolchain](docs/kotlin-toolchain.md)         | Apps built with the JetBrains Kotlin Toolchain instead of Gradle                                        |
-| [Coding agents](docs/agents.md)                      | The `AGENTS.md` guide, `kit agents sync`, the Claude Code hook                                          |
+| [Coding agents](docs/agents.md)                      | The `AGENTS.md` guide, `kit agents sync`, the Claude Code hook, `kit agents migrate`                    |
 | [Repo commands](docs/commands.md)                    | Adding commands and wrapping built-ins                                                                  |
 | [Doctor](docs/doctor.md)                             | What `kit doctor` checks and what `--fix` repairs                                                       |
 | [Changelog](docs/changelog.md)                       | `kit changelog` from Conventional Commits                                                               |

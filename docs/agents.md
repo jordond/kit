@@ -2,12 +2,14 @@
 
 An agent that finds a `kotlin` wrapper or `gradlew` in a repo runs it. kit gives it three reasons not to:
 a guide it reads at the start of every session, a command that prints the same guide, and (opt-in) a
-Claude Code hook that refuses the direct build and names the kit command.
+Claude Code hook that refuses the direct build and names the kit command. For a repo not on kit yet, it
+prints a prompt that has an agent do the migration.
 
 ```sh
 kit agents sync            # AGENTS.md block + CLAUDE.md import
 kit agents sync --hooks    # and the Claude Code hook
 kit agents guide           # the block on stdout
+kit agents migrate         # a prompt for an agent to move this repo onto kit
 kit init --agents          # write the guide during init; --hooks adds the hook too
 ```
 
@@ -66,3 +68,45 @@ only with `toolchain` in the config, the Gradle one only with `gradle`.
 
 The hook is opt-in because it edits a file Claude Code owns and it only works there; the guide is what
 other agents get.
+
+## Migrating a repo
+
+`kit agents migrate` prints a prompt for a coding agent that moves an existing repo onto kit. It runs
+without a `kit.config.ts` (with a global kit or `bunx @jordond/kit agents migrate`) and writes nothing:
+
+```sh
+claude "$(kit agents migrate)"   # an interactive session: the agent stops for your approval
+kit agents migrate > migrate.md
+kit agents migrate --json        # { prompt, facts }
+```
+
+Hand the prompt to an interactive session, not a pipe: the agent asks before it changes anything.
+
+What the prompt has the agent do:
+
+1. Check that the working tree is clean (otherwise stop and ask), and branch off the default branch.
+2. Inventory the repo's tooling: what each script does, who calls it, where it goes.
+3. Run the existing lint, typecheck, test and build commands for a baseline.
+4. Show the plan (config outline, where each script goes, every file it will touch, open questions) and
+   wait for an explicit yes.
+5. Install kit and write the config.
+6. Give every script a kit home: a kind default or a target's verb field, `workspace`, `deploy.before`,
+   the `env`, `release` or device blocks, or a repo command in `.kit/commands/<name>.ts` (see
+   [commands.md](commands.md)). `package.json` scripts that a kind default runs, and scripts a build
+   tool calls, stay as they are.
+7. Point CI (through kit's setup action), git hooks and docs at kit, and delete what kit replaced.
+8. Run `kit agents sync`, then verify with `kit doctor --ci`, `check`, `test` and `build` against the
+   baseline.
+9. Report each old script and what replaced it, with one commit per step on the branch.
+
+Behaviour stays the same, secrets stay out of the config and commits, and nothing deploys, releases or
+pushes.
+
+kit adds what it can see three directories down from the git root: `package.json` scripts and git hook
+keys, scripts under any `scripts/`, `bin/`, `tools/` or `ci/` directory, task runners (Make, just, Task,
+Turborepo, Nx), Gradle and Kotlin toolchain wrappers, Worker, Vite, Astro and Docker configs, Fastfiles,
+`.env` templates, CI config (GitHub Actions, GitLab, CircleCI, Jenkins, Bitrise, Azure), git hooks and
+tool pins. Past 60 findings it gives a count. kit goes in `.kit/` when `.kit/package.json` exists, or for a
+Kotlin toolchain project without a root `package.json`. In a repo that already has a config, the prompt
+names its targets and says to extend it; a config that does not load stops this command like any other,
+so fix it first (`kit config` lists the problems).

@@ -45,7 +45,7 @@ Setup
   doctor      Check tools, versions and .env
   init        Set up a fresh clone, or add kit to a new repo
   add         Scaffold a module, a target or the Maestro flows into this repo …
-  agents      Point coding agents at kit: the AGENTS.md guide and the Claude Code hook …
+  agents      Point coding agents at kit: the AGENTS.md guide, the Claude Code hook, a migration prompt …
   deps        List or update npm dependencies (catalog-aware)
   upgrade     Move the repo to a kit release (npm pin, workflow SHAs); --global updates the kit on PATH
   config      Print the resolved kit.config.ts
@@ -73,15 +73,16 @@ Options
 `;
 
 exports[`help kit agents --help 1`] = `
-"Point coding agents at kit: the AGENTS.md guide and the Claude Code hook
+"Point coding agents at kit: the AGENTS.md guide, the Claude Code hook, a migration prompt
 
 Usage
   kit agents <command> [options]
 
 Commands
-  guide  Print the guide that tells coding agents how to drive this repo with kit
-  sync   Write the guide into AGENTS.md; --hooks adds the Claude Code hook
-  hook   The Claude Code PreToolUse hook: refuse a direct ./kotlin or ./gradlew build or test
+  guide    Print the guide that tells coding agents how to drive this repo with kit
+  sync     Write the guide into AGENTS.md; --hooks adds the Claude Code hook
+  hook     The Claude Code PreToolUse hook: refuse a direct ./kotlin or ./gradlew build or test
+  migrate  Print a prompt for a coding agent to migrate this repo to kit
 
 Options
   -h, --help     Show help
@@ -381,6 +382,30 @@ Usage
 
 Examples
   echo '{"tool_name":"Bash","tool_input":{"command":"./kotlin build -m core"}}' | kit agents hook
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit agents migrate --help 1`] = `
+"Print a prompt for a coding agent to migrate this repo to kit
+
+Usage
+  kit agents migrate [options]
+
+Examples
+  kit agents migrate
+  claude "$(kit agents migrate)"
+  kit agents migrate --json
 
 Options
   -h, --help     Show help

@@ -417,6 +417,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/agents/hook'),
   },
   {
+    path: ['agents', 'migrate'],
+    description: 'Print a prompt for a coding agent to migrate this repo to kit',
+    group: 'Setup',
+    load: () => import('../commands/agents/migrate'),
+  },
+  {
     path: ['deps'],
     description: 'List or update npm dependencies (catalog-aware)',
     group: 'Setup',
@@ -458,7 +464,7 @@ export const groupDescriptions: Record<string, string> = {
   env: 'Render, check and push env from .env',
   db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
   add: 'Scaffold a module, a target or the Maestro flows into this repo',
-  agents: 'Point coding agents at kit: the AGENTS.md guide and the Claude Code hook',
+  agents: 'Point coding agents at kit: the AGENTS.md guide, the Claude Code hook, a migration prompt',
   app: 'Build, install and launch the debug app on a device',
   device: 'Simulators, emulators and connected devices',
   fixture: 'Replay or capture app state on a device',
