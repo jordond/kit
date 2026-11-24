@@ -2088,7 +2088,7 @@ Usage
 Examples
   kit test
   kit test api
-  kit test client -- --rerun
+  kit test client -- --rerun-tasks
   kit test -m core -p jvm
   kit test --affected --base origin/develop
 

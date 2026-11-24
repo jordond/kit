@@ -7,7 +7,7 @@ export default defineCommand({
   group: 'Quality',
   args: { ...affectedArgs, ...scopeArgs },
   examples:
-    'kit test\nkit test api\nkit test client -- --rerun\nkit test -m core -p jvm\nkit test --affected --base origin/develop',
+    'kit test\nkit test api\nkit test client -- --rerun-tasks\nkit test -m core -p jvm\nkit test --affected --base origin/develop',
   async run(ctx) {
     const { runVerb } = await import('./_verb')
     const { resolveScope } = await import('./_scope')

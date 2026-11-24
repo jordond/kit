@@ -194,8 +194,12 @@ whatever the project's build tool wants, so the same command works in a Gradle a
 ```sh
 kit build -m core -p jvm
 kit test -m core -m data -p jvm -p iosSimulatorArm64
-kit test client -p jvm -- --rerun
+kit test client -p jvm -- --rerun-tasks
 ```
+
+Arguments after `--` go to the build tool. With Gradle, use `--rerun-tasks` to force a fresh run: kit
+hands every test task to one `./gradlew` call, and Gradle's `--rerun` applies only to the task just
+before it.
 
 |                            | Kotlin toolchain                | Gradle                                                     |
 | -------------------------- | ------------------------------- | ---------------------------------------------------------- |
