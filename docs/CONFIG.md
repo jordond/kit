@@ -74,6 +74,7 @@ export default defineConfig({
 | [`fixtures`](#fixtures)              | no                | App state to load onto a device: `kit fixture`                                   |
 | [`shots`](#shots)                    | no                | Store screenshot export and artwork pages: `kit shots export`, `kit shots pages` |
 | [`release`](#release)                | no                | Store releases, services, store listing: `kit release`                           |
+| [`iap`](#iap)                        | no                | In-app products synced to the stores: `kit iap`                                  |
 
 ## `name`
 
@@ -759,19 +760,49 @@ A map of name → service, released with `kit release <name>`: build, deploy, ta
 A service cannot be named `ios`, `android`, `certs`, `status`, `promote`, `rollout`, `metadata` or
 `rollback`.
 
+## `iap`
+
+In-app products as code: the product file is the source of truth for App Store Connect, Google Play
+and RevenueCat ([In-app products](iap.md)).
+
+```ts
+iap: {
+  products: 'contract/products.json',
+  apple: { familySharing: true },
+  play: {},
+  revenuecat: { projectId: 'projd2d1fc4a' },
+},
+```
+
+| Field                  | Type    | Meaning                                                                                    |
+| ---------------------- | ------- | ------------------------------------------------------------------------------------------ |
+| `products`             | string  | The product file (JSON), repo-relative. Required                                           |
+| `apple`                | object  | App Store Connect takes part                                                               |
+| `apple.bundleId`       | string  | The app. Default `release.ios.bundleIds[0]`                                                |
+| `apple.familySharing`  | boolean | Family Sharing for non-consumables that do not set `apple.familySharable`. Default `false` |
+| `play`                 | object  | Google Play takes part                                                                     |
+| `play.packageName`     | string  | The app. Default `release.android.packageName`                                             |
+| `revenuecat`           | object  | RevenueCat takes part                                                                      |
+| `revenuecat.projectId` | string  | The project id (`proj…`). Required in the block                                            |
+| `revenuecat.apiKeyEnv` | string  | The env var holding the project's v2 secret key. Default `REVENUECAT_API_KEY`              |
+
+The base currency is USD (territory USA, region US).
+
 ## Validation rules
 
 Beyond types and unknown keys, loading fails (exit 3) when:
 
-| Rule                                                            | Reported at                     |
-| --------------------------------------------------------------- | ------------------------------- |
-| Both `gradle` and `toolchain` are set                           | `toolchain`                     |
-| A D1 database names a target that does not exist                | `cloudflare.d1.<key>.target`    |
-| More than one D1 database has `default: true`                   | `cloudflare.d1`                 |
-| A suite extends a suite that is neither configured nor built-in | `maestro.suites.<name>.extends` |
-| `shots` has no `raw` and there is no `maestro` block            | `shots.raw`                     |
-| A target is named `workspace`                                   | `targets.workspace`             |
-| A service is named after a `kit release` command                | `release.services.<name>`       |
+| Rule                                                              | Reported at                     |
+| ----------------------------------------------------------------- | ------------------------------- |
+| Both `gradle` and `toolchain` are set                             | `toolchain`                     |
+| A D1 database names a target that does not exist                  | `cloudflare.d1.<key>.target`    |
+| More than one D1 database has `default: true`                     | `cloudflare.d1`                 |
+| A suite extends a suite that is neither configured nor built-in   | `maestro.suites.<name>.extends` |
+| `shots` has no `raw` and there is no `maestro` block              | `shots.raw`                     |
+| A target is named `workspace`                                     | `targets.workspace`             |
+| A service is named after a `kit release` command                  | `release.services.<name>`       |
+| `iap.apple` has no `bundleId` and there is no `release.ios`       | `iap.apple.bundleId`            |
+| `iap.play` has no `packageName` and there is no `release.android` | `iap.play.packageName`          |
 
 Other checks happen when a command needs the value: a missing `app` field with no `release` fallback,
 `--release` builds without `release.android.module`, `release.ios.xcconfig` without `versions.keys.ios`.
@@ -781,15 +812,16 @@ Other checks happen when a command needs the value: a missing `app` field with n
 
 Per-machine settings that sit beside the config. Set them in the shell or the repo's `.env`.
 
-| Variable                | Meaning                                                                                                                                |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `KIT_ROOT`              | The repo root, instead of walking up from the working directory                                                                        |
-| `KIT_EMULATOR_ARGS`     | Extra emulator arguments for this machine, after `devices.android.emulatorArgs`. Split on whitespace; quotes keep an argument together |
-| `KIT_DEVICE_TIMEOUT_MS` | How long an emulator boot may take. Default four minutes                                                                               |
-| `KIT_CHROME`            | The Chrome binary `kit shots export` and `kit shots pages` use                                                                         |
-| `KIT_OUTPUT_DIR`        | Where `kit release ios` writes `release.ios.output`. Default the repo root                                                             |
-| `KIT_NO_UPDATE_CHECK`   | Any value turns off the notice that the global kit is behind, and its daily npm lookup                                                 |
-| `KIT_CACHE_DIR`         | Where kit keeps what it remembers between runs (`update.json`). Default `$XDG_CACHE_HOME/kit`, else `~/.cache/kit`                     |
+| Variable                | Meaning                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `KIT_ROOT`              | The repo root, instead of walking up from the working directory                                                                          |
+| `KIT_EMULATOR_ARGS`     | Extra emulator arguments for this machine, after `devices.android.emulatorArgs`. Split on whitespace; quotes keep an argument together   |
+| `KIT_DEVICE_TIMEOUT_MS` | How long an emulator boot may take. Default four minutes                                                                                 |
+| `KIT_CHROME`            | The Chrome binary `kit shots export` and `kit shots pages` use                                                                           |
+| `KIT_OUTPUT_DIR`        | Where `kit release ios` writes `release.ios.output`. Default the repo root                                                               |
+| `KIT_NO_UPDATE_CHECK`   | Any value turns off the notice that the global kit is behind, and its daily npm lookup                                                   |
+| `KIT_CACHE_DIR`         | Where kit keeps what it remembers between runs (`update.json`). Default `$XDG_CACHE_HOME/kit`, else `~/.cache/kit`                       |
+| `KIT_IAP_RECORD`        | A directory: `kit iap` writes each store request and response there, secrets masked (see [In-app products](iap.md#recording-a-real-run)) |
 
 ## Examples
 

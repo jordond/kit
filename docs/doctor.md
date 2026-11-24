@@ -4,6 +4,9 @@
 a repo with `mise.toml` warns when mise isn't installed or a pinned version differs, and a repo with
 `lefthook.yml` warns when lefthook isn't installed or `lefthook install` hasn't been run in the clone.
 
+When the config has an `iap` block, `kit doctor` warns for each configured store whose credentials are
+missing (`iap-credentials`): `kit iap sync` skips such a store. See [In-app products](iap.md#credentials).
+
 When the config has a `shots` block, `kit doctor` also checks for Chrome, which `kit shots export` and `kit shots pages` use to render store artwork. It warns if Chrome or Chromium is missing or older than 112; install Google Chrome or set `KIT_CHROME` to a Chrome or Chromium binary.
 
 ```sh

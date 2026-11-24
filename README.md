@@ -91,7 +91,7 @@ Every field, with defaults and full examples, is in the [config reference](docs/
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Develop | `dev`, `build`, `deploy`, `app`, `device`, `fixture`, `open`, `clean`, and the passthroughs `gradle`, `kotlin`, `wrangler`, `maestro`, `xcode` |
 | Quality | `lint`, `format`, `typecheck`, `check`, `codegen`, `test`, `qa`, `shots`                                                                       |
-| Release | `release`, `version`, `fastlane`, `changelog`                                                                                                  |
+| Release | `release`, `iap`, `version`, `fastlane`, `changelog`                                                                                           |
 | Infra   | `env`, `db`, `logs`                                                                                                                            |
 | Setup   | `doctor`, `init`, `add`, `deps`, `upgrade`, `config`, `completion`                                                                             |
 
@@ -108,6 +108,7 @@ A repo adds its own commands, or wraps a built-in, with a file in `.kit/commands
 | [Affected targets, timings and clean](docs/verbs.md) | `--affected`, `--staged`, step timings, `kit clean`                                                     |
 | [Devices and the debug app](docs/devices.md)         | `kit device`, `kit app`, emulator images and arguments                                                  |
 | [Maestro](docs/maestro.md)                           | `kit qa`, `kit shots`, suites, fixtures, the reusable QA workflow                                       |
+| [In-app products](docs/iap.md)                       | `kit iap`: one product file synced to App Store Connect, Google Play and RevenueCat                     |
 | [Store screenshots](docs/shots.md)                   | `kit shots export`, `pages`, `studio` and `migrate`                                                     |
 | [Releases](docs/releases.md)                         | Versions, `kit release`, promote, rollout, preflight checks, the store listing, the distribute workflow |
 | [Env](docs/env.md)                                   | The `.env` schema, `kit env`, `push` and `rotate`                                                       |
