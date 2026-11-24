@@ -1,7 +1,7 @@
 # In-app products
 
-`kit iap` keeps one-time in-app products as code: one JSON file in the repo is the source of truth for
-App Store Connect, Google Play and RevenueCat. `sync` creates what is missing and updates what differs;
+`kit iap` keeps in-app products, subscriptions and RevenueCat offerings as code: one JSON file in the
+repo is the source of truth for App Store Connect, Google Play and RevenueCat. `sync` creates what is missing and updates what differs;
 it never deletes. `status` reports drift, `check` validates the file offline.
 
 ```sh
@@ -11,13 +11,15 @@ kit iap sync --dry-run                # the plan, nothing applied
 kit iap sync                          # the plan, a confirmation, then the writes
 kit iap sync --store play --yes       # one store, no question (CI)
 kit iap status --product membership_card --json
+kit iap sync --allow-price-change      # also apply changed subscription prices (new subscribers)
 ```
 
 `--store apple|play|revenuecat` and `--product <id>` repeat; the default is every configured store
-and every product in the file. `kit check` runs `kit iap check` when `iap` is configured.
+and everything in the file. `--product` takes product, subscription and offering ids. `kit check` runs `kit iap check` when `iap` is configured.
 
-Phase 1 covers non-consumable and consumable products. Subscriptions already have their place in the
-file format (below), but `status` and `sync` refuse a file that has any until they are supported.
+kit iap is built against each store's documentation and tested against stateful fakes of all three.
+Subscriptions and offerings have not been run against a real account yet: run `sync --dry-run` and
+read the plan before the first real sync, and set `KIT_IAP_RECORD` (below) for that run.
 
 ## Config
 
@@ -78,9 +80,66 @@ warns when `$schema` is missing or names another kit version.
 
 Ids are permanent: neither store lets a deleted product id be used again, and `sync` never renames.
 
-Subscriptions (not synced yet) sit in a top-level `subscriptions` array: `id`, `name`, `description`,
-`benefits` (Play, up to 4), `entitlement`, `plans: [{ id, appleProductId?, period, price, trial? }]` with
-`period` one of `P1W P1M P2M P3M P6M P1Y`, and `apple: { groupName, reviewNote, reviewScreenshot }`.
+### Subscriptions
+
+```json
+"subscriptions": [
+  {
+    "id": "pro",
+    "name": "Pro",
+    "description": "Everything, every month.",
+    "benefits": ["No ads", "Cloud sync"],
+    "entitlement": "pro",
+    "plans": [
+      { "id": "yearly", "period": "P1Y", "price": "29.99", "trial": "P1W" },
+      { "id": "monthly", "period": "P1M", "price": "3.99" }
+    ],
+    "apple": { "groupName": "Pro", "reviewNote": "…", "reviewScreenshot": "contract/review/pro.png" }
+  }
+]
+```
+
+| Field                              | App Store Connect                                                 | Google Play                                    | RevenueCat                               |
+| ---------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------- |
+| `id`                               | subscription group reference name                                 | subscription id                                |                                          |
+| `name`, `description`              | each plan's localization; reference name `Pro (yearly)`           | listing title and description                  | product display name `Pro (yearly)`      |
+| `benefits` (up to 4)               |                                                                   | listing benefits                               |                                          |
+| `entitlement` (default `id`)       |                                                                   |                                                | every plan's products are attached to it |
+| `plans[].id`                       |                                                                   | base plan id                                   | Play store identifier `pro:yearly`       |
+| `plans[].appleProductId`           | product id (default `pro_yearly`: `<id>_<plan>`, `-` becomes `_`) |                                                | App Store store identifier               |
+| `plans[].period`                   | `P1W P1M P2M P3M P6M P1Y`; cannot change after create             | billing period; cannot change after create     |                                          |
+| `plans[].price`                    | USA price; the other storefronts from Apple's equalized prices    | US price; other regions converted by Play      |                                          |
+| `plans[].trial`                    | free trial introductory offer (`P3D` to `P1Y`)                    | offer `free-trial` on the base plan            |                                          |
+| plan order                         | group level: the first plan is the highest                        | the first plan is the backwards-compatible one |                                          |
+| `apple.groupName` (default `name`) | the group's display name                                          |                                                |                                          |
+
+Prices are set when a plan is created. A changed price on an existing plan shows as
+`differs (monthly: price)` and is applied only with `sync --allow-price-change`, for new subscribers:
+Apple keeps existing subscribers on their price (a decrease reaches them too: Apple cannot preserve
+it), and kit never calls Play's price migration. A trial is created only on a plan that has none; a
+trial that differs is reported, never replaced (offers cannot be edited, and kit never deletes).
+
+### Offerings
+
+```json
+"offerings": [
+  {
+    "id": "default",
+    "current": true,
+    "packages": [
+      { "id": "$rc_annual", "product": "pro:yearly" },
+      { "id": "$rc_monthly", "product": "pro:monthly" },
+      { "id": "lifetime", "name": "Lifetime", "product": "membership_card" }
+    ]
+  }
+]
+```
+
+RevenueCat only. `id` is the offering's lookup key and each package `id` the package's (both
+permanent). `product` is a product id or `subscription:plan`; the package gets that product's App
+Store and Play products. Packages show in array order; a package `name` defaults to the product's,
+an offering `name` to its `id`. `current: true` (at most one) makes kit set it as the current offering.
+A package that holds another product is reported, not changed.
 
 ### What `check` enforces
 
@@ -98,6 +157,8 @@ Subscriptions (not synced yet) sit in a top-level `subscriptions` array: `id`, `
 | `priceChanges`                   | real dates, increasing, at most the end of next year; one that has passed warns (move it into `price`) |
 | `apple.reviewScreenshot`         | exists, PNG or JPEG, no alpha channel                                                                  |
 | locales                          | BCP-47 (`fr-FR`); the default locale is not repeated in `localizations`                                |
+| benefits                         | at most 4, 40 characters each                                                                          |
+| offerings                        | unique ids, no spaces; one `current`; each package `product` is in the file                            |
 
 Whether a price is one of Apple's price points needs the network: `sync --dry-run` checks it and fails
 that product when it is not.
@@ -119,11 +180,26 @@ send the regional prices back as Play has them. "In sync" compares the listings,
 US price only, since converted prices move with exchange rates. A purchase option that is not active is
 activated. Other purchase options and listings in other languages are kept.
 
+**App Store Connect subscriptions.** Creates the subscription group (and its localization), then per
+plan the subscription (reference name, product id, period, group level, Family Sharing, review note),
+its localizations, availability in every territory, the USA price with Apple's equalized price for
+every other territory, the free trial in every territory, and the review screenshot. A product id
+already used in another group, a changed period or Family Sharing turned off fail that subscription.
+The first subscription ships with an app version, like the first one-time product.
+
+**Google Play subscriptions.** One `subscriptions` PATCH per subscription with the listings (title,
+description, benefits) and one auto-renewing base plan per file plan, priced from the US price by
+`convertRegionPrices`. Draft base plans are activated; an inactive one is left alone (someone turned it
+off) and noted. The trial is the `free-trial` offer, created and activated. Base plans and offers not
+in the file are kept.
+
 **RevenueCat.** Needs the App Store and Play Store apps already connected in the project (matched by
-bundle id and package name). Creates a product per app with the product id as store identifier, the
-entitlement, and attaches the products to it. A changed name is updated; a changed type or an archived
-product or entitlement fails that product with what to do in RevenueCat. RevenueCat runs after the two
-stores.
+bundle id and package name). Creates a product per app with the product id as store identifier
+(subscriptions: the Apple product id and `subscription:plan`), the entitlement, and attaches the
+products to it. A changed name is updated; a changed type or an archived product or entitlement fails
+that product with what to do in RevenueCat. Then the offerings: creates or renames them, creates
+packages, sets their position and name, attaches each package's products, and sets the current
+offering. RevenueCat runs after the two stores, so the products it points at exist.
 
 `status` prints, per product per store: `missing`, `in sync`, `differs (fields)` or `extra` (in the
 store, not in the file), the store's state (Apple's IAP and version state, Play's purchase option state,
@@ -136,11 +212,11 @@ rest of that product on that store; the summary lists every failure and the run 
 
 ## Credentials
 
-| Store             | Variables                                                                | Needs                                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| App Store Connect | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (the release secrets) | an API key with App Manager or Admin                                                                                                                          |
-| Google Play       | `PLAY_SERVICE_ACCOUNT_BASE64` (the release secret)                       | the service account invited to the app with permission to manage store presence (products)                                                                    |
-| RevenueCat        | `REVENUECAT_API_KEY` (or `iap.revenuecat.apiKeyEnv`)                     | a v2 secret key (`sk_…`) with `project_configuration:apps:read`, `project_configuration:products:read_write`, `project_configuration:entitlements:read_write` |
+| Store             | Variables                                                                | Needs                                                                                                                                                                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| App Store Connect | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64` (the release secrets) | an API key with App Manager or Admin                                                                                                                                                                                                                                            |
+| Google Play       | `PLAY_SERVICE_ACCOUNT_BASE64` (the release secret)                       | the service account invited to the app with permission to manage store presence (products)                                                                                                                                                                                      |
+| RevenueCat        | `REVENUECAT_API_KEY` (or `iap.revenuecat.apiKeyEnv`)                     | a v2 secret key (`sk_…`) with `project_configuration:apps:read`, `project_configuration:products:read_write`, `project_configuration:entitlements:read_write`; with offerings also `project_configuration:offerings:read_write` and `project_configuration:packages:read_write` |
 
 `kit doctor` warns per configured store whose variables are missing (`iap-credentials`). A 401 or 403
 from a store names what the credentials need.
@@ -148,13 +224,13 @@ from a store names what the credentials need.
 ## What kit never does
 
 Delete, archive, deactivate or detach anything; submit for review; unarchive in RevenueCat; move
-existing subscribers to a new price. Those stay console actions.
+existing subscribers to a new price; replace a free trial. Those stay console actions.
 
 ## Manual steps, once per app
 
 - **Apple**: the Paid Apps agreement. The first consumable and the first non-consumable each ship with
   a new app version: select them on the version page in App Store Connect and submit. `status` notes
-  this until one of that type is approved. A product stays `MISSING_METADATA` until it has a review
+  this until one of that type is approved. The same goes for the first subscription. A product stays `MISSING_METADATA` until it has a review
   screenshot.
 - **Google Play**: a payments profile, and an app bundle that declares
   `com.android.vending.BILLING` uploaded to any track (`kit release android --track internal`). When
