@@ -58,7 +58,7 @@ const isGroup = (s: Step | StepGroup): s is StepGroup => 'steps' in s
 export async function runSteps(
   items: (Step | StepGroup)[],
   flags: StepFlags,
-  opts: { bail?: boolean } = {},
+  opts: { bail?: boolean; concurrent?: boolean } = {},
 ): Promise<StepResult[]> {
   const results: StepResult[] = []
   const stream = colorEnabled() ? process.stderr : plainStderr()
@@ -75,7 +75,9 @@ export async function runSteps(
       const start = performance.now()
       const update = (raw: string) => {
         const line = redact(raw)
-        if (streaming) stream.write(`${pc.dim('│')} ${line}\n`)
+        // Concurrent steps interleave: name the step on each streamed line.
+        if (streaming)
+          stream.write(`${pc.dim('│')} ${opts.concurrent ? `${pc.dim(`${s.title}:`)} ` : ''}${line}\n`)
         else task.output = line
       }
       try {
@@ -103,7 +105,7 @@ export async function runSteps(
   )
 
   const list = new Listr(tasks, {
-    concurrent: false,
+    concurrent: opts.concurrent ?? false,
     exitOnError: opts.bail ?? false,
     renderer: 'default',
     rendererOptions: { logger, collapseSubtasks: false, collapseErrors: true, showErrorMessage: false },

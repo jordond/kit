@@ -129,6 +129,8 @@ export interface ClientOptions {
   sleep?: (ms: number) => Promise<void>
   /** Default 2000: the wait when a retryable response names none. */
   retryMs?: number
+  /** Told about each request as it goes out, and about a retry's wait: progress lines. */
+  onProgress?: (line: string) => void
 }
 
 let recorded = 0
@@ -212,6 +214,7 @@ export function createClient(opts: ClientOptions): Client {
       const label = `${method} ${new URL(url).pathname}`
       for (let attempt = 1; ; attempt++) {
         await opts.pace?.wait()
+        opts.onProgress?.(label)
         const res = await fetch(url, {
           method,
           headers: {
@@ -239,6 +242,7 @@ export function createClient(opts: ClientOptions): Client {
             const wait = retryWait(res, err.backoffMs, opts.retryMs ?? 2000)
             // An hourly quota can ask for a long wait: fail with it rather than hang the run.
             if (wait <= MAX_RETRY_WAIT_MS) {
+              opts.onProgress?.(`${label}: HTTP ${res.status}, retrying in ${Math.ceil(wait / 1000)} s`)
               await sleep(wait)
               continue
             }

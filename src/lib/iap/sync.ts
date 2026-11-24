@@ -1,9 +1,11 @@
 import type { KitContext } from '../../cli/command'
 import { requireProject } from '../../cli/command'
+import pc from 'picocolors'
 import { ExitCode, KitError } from '../errors'
 import { emitJson } from '../log'
 import { confirm } from '../prompt'
 import { redact } from '../secrets'
+import { runSteps, type Step, type StepFlags } from '../steps'
 import { appleAdapter } from './apple'
 import { appleSubscriptionsAdapter } from './apple-subscriptions'
 import { iapCreds } from './creds'
@@ -48,6 +50,8 @@ type AnyAdapter = StoreAdapter<unknown, unknown>
 
 /** One adapter of a store (one-time products, subscriptions, offerings) and what it should hold. */
 interface Part {
+  /** What the part holds, for progress lines. */
+  name: 'products' | 'subscriptions' | 'offerings'
   adapter: AnyAdapter
   desired: unknown[]
   observed?: unknown
@@ -59,6 +63,8 @@ interface Unit {
   parts: Part[]
   /** Which part applies each planned action. */
   owner: Map<Action, Part>
+  /** Where the store's client reports each request; the running step points it at its tree line. */
+  progress: (line: string) => void
 }
 
 function select(targets: StoreTargets, wanted: string[]): Store[] {
@@ -123,32 +129,40 @@ function build(store: Store, input: BuildInput): Unit {
     play: `${STORE_NAME.play} (${targets.play?.packageName})`,
     revenuecat: `${STORE_NAME.revenuecat} (${targets.revenuecat?.projectId})`,
   }[store]
-  const unit: Unit = { report: { store, label, rows: [], actions: [] }, parts: [], owner: new Map() }
+  const unit: Unit = {
+    report: { store, label, rows: [], actions: [] },
+    parts: [],
+    owner: new Map(),
+    progress: () => {},
+  }
+  const onProgress = (line: string) => unit.progress(line)
   const creds = iapCreds(store, targets)
   if (!creds.ok) {
     unit.report.skipped = creds.reason
     return unit
   }
   // A part that the file has nothing for is left out: no requests, no extra scopes.
-  const part = (adapter: unknown, desired: unknown[], wanted: boolean) => {
-    if (wanted) unit.parts.push({ adapter: adapter as AnyAdapter, desired })
+  const part = (name: Part['name'], adapter: unknown, desired: unknown[], wanted: boolean) => {
+    if (wanted) unit.parts.push({ name, adapter: adapter as AnyAdapter, desired })
   }
   const hasProducts = full.products.length > 0
   const hasSubscriptions = full.subscriptions.length > 0
   if (store === 'apple') {
-    const client = createClient({ store, token: creds.token })
+    const client = createClient({ store, token: creds.token, onProgress })
     const bundleId = targets.apple!.bundleId
-    part(appleAdapter(client, { bundleId, today }), appleDesired(catalog, today), hasProducts)
+    part('products', appleAdapter(client, { bundleId, today }), appleDesired(catalog, today), hasProducts)
     part(
+      'subscriptions',
       appleSubscriptionsAdapter(client, { bundleId, today, allowPriceChange }),
       appleSubscriptionsDesired(catalog),
       hasSubscriptions,
     )
   } else if (store === 'play') {
-    const client = createClient({ store, token: creds.token })
+    const client = createClient({ store, token: creds.token, onProgress })
     const packageName = targets.play!.packageName
-    part(playAdapter(client, { packageName }), playDesired(catalog, today), hasProducts)
+    part('products', playAdapter(client, { packageName }), playDesired(catalog, today), hasProducts)
     part(
+      'subscriptions',
       playSubscriptionsAdapter(client, { packageName, allowPriceChange }),
       playSubscriptionsDesired(catalog),
       hasSubscriptions,
@@ -156,7 +170,7 @@ function build(store: Store, input: BuildInput): Unit {
   } else {
     // RevenueCat allows 60 project-configuration calls a minute, shared by every endpoint.
     const pace = Number(process.env.KIT_RC_PACE_MS ?? 1000)
-    const client = createClient({ store, token: creds.token, pace: createPacer(pace) })
+    const client = createClient({ store, token: creds.token, pace: createPacer(pace), onProgress })
     const apps = { apple: !!targets.apple, play: !!targets.play }
     const ids = {
       projectId: targets.revenuecat!.projectId,
@@ -164,8 +178,14 @@ function build(store: Store, input: BuildInput): Unit {
       packageName: targets.play?.packageName,
     }
     // Products first: offering packages attach the RevenueCat products this part creates.
-    part(revenuecatAdapter(client, ids), rcDesired(catalog, apps), hasProducts || hasSubscriptions)
     part(
+      'products',
+      revenuecatAdapter(client, ids),
+      rcDesired(catalog, apps),
+      hasProducts || hasSubscriptions,
+    )
+    part(
+      'offerings',
       revenuecatOfferingsAdapter(client, { ...ids, products: rcDesired(full, apps) }),
       rcOfferingsDesired(catalog),
       full.offerings.length > 0,
@@ -182,10 +202,11 @@ const message = (e: unknown): string => redact(e instanceof Error ? e.message : 
  * fails to read is reported on its own; the store's other parts still plan and apply. Under a
  * `--product` filter a part with nothing asked of it is not read at all.
  */
-async function observe(unit: Unit, extras: boolean): Promise<void> {
+async function observe(unit: Unit, extras: boolean, say: Say = () => {}): Promise<void> {
   const errors: string[] = []
   for (const part of unit.parts) {
     if (!extras && !part.desired.length) continue
+    say(`Reading ${part.name}`)
     try {
       part.observed = await part.adapter.observe(part.desired)
       const { rows, actions } = part.adapter.diff(part.desired, part.observed, { extras })
@@ -202,10 +223,12 @@ async function observe(unit: Unit, extras: boolean): Promise<void> {
   if (errors.length) unit.report.error = errors.join('; ')
 }
 
-async function apply(unit: Unit): Promise<void> {
+async function apply(unit: Unit, say: Say = () => {}): Promise<void> {
   const results: ActionResult[] = []
   const failed = new Set<string>()
-  for (const action of unit.report.actions) {
+  const total = unit.report.actions.length
+  for (const [i, action] of unit.report.actions.entries()) {
+    say(`${i + 1}/${total} ${action.id}: ${action.summary}`)
     if (failed.has(action.id)) {
       results.push({ id: action.id, kind: action.kind, ok: false, skipped: true })
       continue
@@ -219,6 +242,39 @@ async function apply(unit: Unit): Promise<void> {
     }
   }
   unit.report.results = results
+}
+
+/** Sets a store's progress line: the running step's line, plus the request in flight when `detail`. */
+type Say = (line: string) => void
+
+/**
+ * One tree line per store while `run` works on it. The store's client reports each request under
+ * the current line when `detail` is on (a terminal, or --verbose); in CI one line per request is noise.
+ * A store left with `report.error` (or `failed`) shows as failed; the report still carries it.
+ */
+function storeStep(
+  unit: Unit,
+  detail: boolean,
+  run: (say: Say) => Promise<void>,
+  failed: () => string | undefined,
+): Step {
+  return {
+    title: unit.report.label,
+    task: async (update) => {
+      let current = ''
+      unit.progress = detail ? (line) => update(`${current} ${pc.dim(`· ${line}`)}`) : () => {}
+      try {
+        await run((line) => {
+          current = line
+          update(line)
+        })
+      } finally {
+        unit.progress = () => {}
+      }
+      const error = failed()
+      if (error) throw new Error(error)
+    },
+  }
 }
 
 export async function runIap(
@@ -237,8 +293,24 @@ export async function runIap(
     if (!ctx.flags.json) for (const l of lines) ctx.log.info(l)
   }
 
+  const flags: StepFlags = ctx.flags
+  const detail = flags.verbose || (!!process.stderr.isTTY && !flags.ci)
   for (const u of units) if (u.report.skipped) ctx.log.warn(`${u.report.label}: skipped, ${u.report.skipped}`)
-  await Promise.all(units.map((u) => observe(u, !opts.products.length)))
+  const live = units.filter((u) => !u.report.skipped)
+  if (!flags.json && live.length)
+    ctx.log.step(`Reading ${live.length === 1 ? 'the store' : `${live.length} stores`}`)
+  await runSteps(
+    live.map((u) =>
+      storeStep(
+        u,
+        detail,
+        (say) => observe(u, !opts.products.length, say),
+        () => u.report.error,
+      ),
+    ),
+    flags,
+    { concurrent: true },
+  )
   const reports = units.map((u) => u.report)
   const storeFailed = reports.some((r) => r.error)
 
@@ -271,8 +343,22 @@ export async function runIap(
   }
 
   const byStore = (s: Store) => units.filter((u) => u.report.store === s && u.report.actions.length)
-  await Promise.all([...byStore('apple'), ...byStore('play')].map(apply))
-  await Promise.all(byStore('revenuecat').map(apply))
+  const applySteps = (us: Unit[]) =>
+    us.map((u) =>
+      storeStep(
+        u,
+        detail,
+        (say) => apply(u, say),
+        () => {
+          const bad = (u.report.results ?? []).filter((x) => !x.ok && !x.skipped).length
+          return bad ? `${bad} failed` : undefined
+        },
+      ),
+    )
+  if (!flags.json) ctx.log.step(`Applying ${total} change${total === 1 ? '' : 's'}`)
+  // Apple and Play together; RevenueCat after, since its products point at theirs.
+  await runSteps(applySteps([...byStore('apple'), ...byStore('play')]), flags, { concurrent: true })
+  await runSteps(applySteps(byStore('revenuecat')), flags)
 
   let failures = 0
   for (const r of reports) {
