@@ -54,8 +54,8 @@ export interface StoreAdapter<Desired, Observed, A extends Action = Action> {
   label: string
   /** Reads only. Throws for store-level failures (bad creds, app not found). */
   observe(desired: Desired[]): Promise<Observed>
-  /** Pure. */
-  diff(desired: Desired[], observed: Observed): Diff<A>
+  /** Pure. `extras: false` (a `--product` filter) leaves out store products the run did not ask about. */
+  diff(desired: Desired[], observed: Observed, opts?: { extras: boolean }): Diff<A>
   /** Optional read-only pass over the plan (Apple: resolve price points); may turn actions into errors. */
   prepare?(actions: A[], observed: Observed): Promise<A[]>
   apply(action: A): Promise<void>

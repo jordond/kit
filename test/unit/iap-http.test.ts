@@ -165,7 +165,9 @@ describe('http client', () => {
     const { c } = client('apple')
     await c.request('GET', `http://localhost:${server.port}/v1/next?cursor=a`, { schema: ok })
     expect(seen[0]!.path).toBe('/v1/next?cursor=a')
-    expect(c.request('GET', 'https://example.com/v1/x', { schema: ok })).rejects.toThrow('refusing to follow')
+    await expect(c.request('GET', 'https://example.com/v1/x', { schema: ok })).rejects.toThrow(
+      'refusing to follow',
+    )
   })
 
   test('KIT_IAP_RECORD writes redacted request/response pairs, no auth header', async () => {

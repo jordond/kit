@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "type": "inAppPurchases",
+      "id": "6446452615",
+      "attributes": {
+        "name": "Membership Card",
+        "productId": "membership_card",
+        "inAppPurchaseType": "NON_CONSUMABLE",
+        "state": "MISSING_METADATA",
+        "reviewNote": null,
+        "familySharable": true,
+        "contentHosting": false
+      },
+      "relationships": {
+        "versions": {
+          "meta": { "paging": { "total": 1, "limit": 50 } },
+          "data": [{ "type": "inAppPurchaseVersions", "id": "7000000001" }],
+          "links": {
+            "self": "https://api.appstoreconnect.apple.com/v2/inAppPurchases/6446452615/relationships/versions"
+          }
+        },
+        "inAppPurchaseAvailability": {
+          "data": null,
+          "links": {
+            "self": "https://api.appstoreconnect.apple.com/v2/inAppPurchases/6446452615/relationships/inAppPurchaseAvailability"
+          }
+        },
+        "appStoreReviewScreenshot": {
+          "data": null
+        },
+        "iapPriceSchedule": {
+          "data": { "type": "inAppPurchasePriceSchedules", "id": "6446452615" }
+        }
+      },
+      "links": { "self": "https://api.appstoreconnect.apple.com/v2/inAppPurchases/6446452615" }
+    }
+  ],
+  "included": [
+    {
+      "type": "inAppPurchaseVersions",
+      "id": "7000000001",
+      "attributes": { "state": "PREPARE_FOR_SUBMISSION" }
+    },
+    {
+      "type": "inAppPurchasePriceSchedules",
+      "id": "6446452615"
+    }
+  ],
+  "links": { "self": "https://api.appstoreconnect.apple.com/v1/apps/6446148572/inAppPurchasesV2?limit=200" },
+  "meta": { "paging": { "total": 1, "limit": 200 } }
+}
