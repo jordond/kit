@@ -192,7 +192,9 @@ export default defineCommand({
     if (pinChanged) {
       writeFileSync(join(root, manifest), pin.text)
       const cwd = join(root, dir)
-      const cmd = [detectPackageManager(cwd, root), 'install']
+      const pm = detectPackageManager(cwd, root)
+      // bun reuses a stale package manifest for a while, so a release just tagged fails to resolve.
+      const cmd = pm === 'bun' ? [pm, 'install', '--no-cache'] : [pm, 'install']
       if (say) ctx.log.step(`${cmd.join(' ')}${dir === '.' ? '' : ` (${dir})`}`)
       const code = ctx.flags.json ? (await runQuiet(cmd, { cwd })).code : await run(cmd, { cwd })
       if (code !== 0) {

@@ -362,7 +362,7 @@ describe('kit upgrade', () => {
       ],
     })
     expect(JSON.parse(read('.kit/package.json')).devDependencies['@jordond/kit']).toBe(`^${NEXT}`)
-    expect(lines('.bun.log')).toEqual(['.kit install'])
+    expect(lines('.bun.log')).toEqual(['.kit install --no-cache'])
     const ci = read('.github/workflows/ci.yml')
     expect(ci).toContain(`jordond/kit/.github/actions/setup@${shas[NEXT]} # v${NEXT}`)
     expect(ci).not.toContain(shas[pkg.version]!)
@@ -377,7 +377,7 @@ describe('kit upgrade', () => {
     const again = await run(['upgrade', NEXT])
     expect(again.code).toBe(0)
     expect(again.stderr).toContain(`already on kit ${NEXT}`)
-    expect(lines('.bun.log')).toEqual(['.kit install'])
+    expect(lines('.bun.log')).toEqual(['.kit install --no-cache'])
   })
 
   test('no version: the latest on npm', async () => {
