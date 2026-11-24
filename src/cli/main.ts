@@ -173,7 +173,9 @@ async function main(argv: string[]): Promise<number> {
   let config: KitConfig | undefined
   if (root) {
     await loadDotEnv(root)
-    config = await loadConfig(root)
+    // Tab completion must stay quiet: a warning there lands in the middle of the prompt.
+    const quiet = ['complete', 'completion'].includes(commandTokens(argv)[0] ?? '')
+    config = await loadConfig(root, quiet ? { warn: () => {} } : undefined)
   }
   const rt: Runtime = { root, config }
   const leaves = await collectLeaves(root, config)

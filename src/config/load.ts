@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dotenvValue } from '../lib/dotenv'
 import { ExitCode, KitError } from '../lib/errors'
+import { log } from '../lib/log'
 import { configSchema, type KitConfig } from './schema'
 
 export const CONFIG_FILE = 'kit.config.ts'
@@ -71,16 +72,40 @@ export async function loadDotEnv(root: string): Promise<void> {
   }
 }
 
-export async function loadConfig(root: string): Promise<KitConfig> {
+export async function loadConfig(root: string, options?: LoadConfigOptions): Promise<KitConfig> {
   const file = configFile(root) ?? CONFIG_FILE
-  return loadConfigFile(join(root, file), file)
+  return loadConfigFile(join(root, file), file, options)
 }
 
-/** Load and validate one config file; `label` names it in errors. */
-export async function loadConfigFile(path: string, label = CONFIG_FILE): Promise<KitConfig> {
+export interface LoadConfigOptions {
+  /** Told about keys the schema does not know; they are dropped and loading carries on. */
+  warn?: (message: string, hint: string) => void
+}
+
+/**
+ * Load and validate one config file; `label` names it in errors. Unknown keys warn instead of
+ * failing: a config written for a newer kit (or a pulled bump without a reinstall) still runs on
+ * this one, minus the settings it does not know.
+ */
+export async function loadConfigFile(
+  path: string,
+  label = CONFIG_FILE,
+  {
+    warn = (message, hint) => {
+      log.warn(message)
+      log.dim(`  › ${hint}`)
+    },
+  }: LoadConfigOptions = {},
+): Promise<KitConfig> {
   registerSelf()
   const mod = await import(pathToFileURL(path).href)
-  const result = configSchema.safeParse(mod.default)
+  const { result, unknown } = parseConfig(mod.default)
+  if (unknown.length) {
+    warn(
+      `${label}: ignoring unknown ${unknown.length === 1 ? 'key' : 'keys'} ${unknown.join(', ')}`,
+      'A typo, or a setting from a newer kit: check the spelling or update kit',
+    )
+  }
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.join('.') || '(root)'}: ${i.message}`)
@@ -88,4 +113,42 @@ export async function loadConfigFile(path: string, label = CONFIG_FILE): Promise
     throw new KitError(`Invalid ${label}:\n${issues}`, 'Fix the fields above', ExitCode.config)
   }
   return result.data
+}
+
+type Key = PropertyKey
+
+/**
+ * Parse `input`, dropping keys the schema rejects as unrecognized and parsing again until only
+ * other problems (or none) remain. Returns the last parse and the dotted paths of every dropped key.
+ */
+export function parseConfig(input: unknown): {
+  result: ReturnType<typeof configSchema.safeParse>
+  unknown: string[]
+} {
+  const unknown: string[] = []
+  let value = input
+  // Each pass drops at least one key; the bound only guards against a schema that never settles.
+  for (let pass = 0; ; pass++) {
+    const result = configSchema.safeParse(value)
+    const extra = result.success
+      ? []
+      : result.error.issues.flatMap((i) =>
+          i.code === 'unrecognized_keys' ? i.keys.map((k) => [...i.path, k]) : [],
+        )
+    if (!extra.length || pass >= 20) return { result, unknown }
+    for (const keyPath of extra) {
+      value = omit(value, keyPath)
+      unknown.push(keyPath.map(String).join('.'))
+    }
+  }
+}
+
+/** `value` without the key at `path`, copying only the objects along the path. */
+function omit(value: unknown, path: Key[]): unknown {
+  if (typeof value !== 'object' || value === null || !path.length) return value
+  const [head, ...rest] = path as [Key, ...Key[]]
+  const copy = (Array.isArray(value) ? [...value] : { ...value }) as Record<Key, unknown>
+  if (rest.length) copy[head] = omit(copy[head], rest)
+  else delete copy[head]
+  return copy
 }
