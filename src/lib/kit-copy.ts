@@ -33,9 +33,12 @@ export function repoKit(root: string): RepoKit | undefined {
   const manifest = join(dir, 'package.json')
   const pkg = readJson(join(root, manifest))
   if (!pkg) return undefined
-  const range = (['devDependencies', 'dependencies'] as const)
-    .map((key) => (pkg[key] as Record<string, unknown> | undefined)?.[KIT_PACKAGE])
-    .find((v): v is string => typeof v === 'string')
+  const range = resolveCatalog(
+    pkg,
+    (['devDependencies', 'dependencies'] as const)
+      .map((key) => (pkg[key] as Record<string, unknown> | undefined)?.[KIT_PACKAGE])
+      .find((v): v is string => typeof v === 'string'),
+  )
   const copy = join(root, dir, 'node_modules', KIT_PACKAGE)
   const version = readJson(join(copy, 'package.json'))?.version
   const cli = join(copy, 'dist', 'cli.js')
@@ -46,14 +49,39 @@ export function repoKit(root: string): RepoKit | undefined {
   }
 }
 
+/**
+ * A `catalog:` / `catalog:<name>` reference resolved through bun's catalogs (`workspaces.catalog`,
+ * `workspaces.catalogs.<name>`, or the top-level forms). Unresolvable references stay as they are.
+ */
+function resolveCatalog(pkg: Record<string, unknown>, range: string | undefined): string | undefined {
+  const m = range?.match(/^catalog:(.*)$/)
+  if (!m) return range
+  const ws =
+    pkg.workspaces && !Array.isArray(pkg.workspaces) ? (pkg.workspaces as Record<string, unknown>) : {}
+  const name = m[1]!.trim()
+  const pick = (from: Record<string, unknown>): unknown =>
+    name && name !== 'default'
+      ? (from.catalogs as Record<string, Record<string, unknown>> | undefined)?.[name]?.[KIT_PACKAGE]
+      : (from.catalog as Record<string, unknown> | undefined)?.[KIT_PACKAGE]
+  const resolved = pick(ws) ?? pick(pkg)
+  return typeof resolved === 'string' ? resolved : range
+}
+
 /** A range kit can judge: a version with an optional `^`, `~` or comparison in front. */
 const isSemverRange = (range: string): boolean => /^(?:[\^~]|[<>]=?|=)?\s*\d+\.\d+\.\d+/.test(range)
 
+/** The repo's installed kit does not satisfy its pin: the install is behind (run it again). */
+export interface StaleInstall {
+  range: string
+  manifest: string
+  version: string
+}
+
 export type CopyVerdict =
   /** This copy is the right one to run. */
-  | { kind: 'ok' }
+  | { kind: 'ok'; stale?: StaleInstall }
   /** The repo has its own copy and this is not it: run that one. */
-  | { kind: 'handoff'; cli: string; version: string }
+  | { kind: 'handoff'; cli: string; version: string; stale?: StaleInstall }
   /** The repo pins a kit this copy does not satisfy, and the repo copy is not installed. */
   | { kind: 'mismatch'; range: string; manifest: string }
 
@@ -78,9 +106,14 @@ export function copyVerdict(
   const repo = repoKit(root)
   if (!repo) return { kind: 'ok' }
   if (repo.installed) {
+    const { version } = repo.installed
+    const stale =
+      repo.range !== undefined && isSemverRange(repo.range) && !satisfies(version, repo.range)
+        ? { stale: { range: repo.range, manifest: repo.manifest, version } }
+        : {}
     return real(repo.installed.dir) === real(own.dir)
-      ? { kind: 'ok' }
-      : { kind: 'handoff', cli: repo.installed.cli, version: repo.installed.version }
+      ? { kind: 'ok', ...stale }
+      : { kind: 'handoff', cli: repo.installed.cli, version, ...stale }
   }
   if (repo.range !== undefined && isSemverRange(repo.range) && !satisfies(own.version, repo.range)) {
     return { kind: 'mismatch', range: repo.range, manifest: repo.manifest }

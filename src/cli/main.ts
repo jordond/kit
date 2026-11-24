@@ -142,6 +142,15 @@ async function ensureRepoCopy(root: string, argv: string[]): Promise<number | un
   const own = kitCopyAt(import.meta.dir)
   if (!own) return undefined
   const verdict = copyVerdict(root, own)
+  const tokens = commandTokens(argv)
+  const quiet = tokens[0] === 'complete' || tokens[0] === 'completion'
+  if (verdict.kind !== 'mismatch' && verdict.stale && !quiet) {
+    // Typically a pulled kit bump without a reinstall: the old copy runs and rejects newer config.
+    const { range, manifest, version } = verdict.stale
+    const where = dirname(manifest) === '.' ? 'the repo root' : dirname(manifest)
+    log.warn(`The installed kit is ${version} but ${manifest} pins "${range}"`)
+    log.dim(`  › Run the package manager's install in ${where} (bun install)`)
+  }
   if (verdict.kind === 'ok') return undefined
   if (verdict.kind === 'handoff') {
     const child = Bun.spawn([process.execPath, '--no-env-file', verdict.cli, ...argv], {
@@ -150,7 +159,6 @@ async function ensureRepoCopy(root: string, argv: string[]): Promise<number | un
     })
     return child.exited
   }
-  const tokens = commandTokens(argv)
   const message = `This repo pins ${pkg.name} "${verdict.range}" (${verdict.manifest}) but it is not installed, and this kit is ${own.version}`
   const hint = `Install the repo's kit: run the package manager's install in ${dirname(verdict.manifest) === '.' ? 'the repo root' : dirname(verdict.manifest)}`
   if (
@@ -159,7 +167,7 @@ async function ensureRepoCopy(root: string, argv: string[]): Promise<number | un
     argv.includes('--version') ||
     argv.includes('-V')
   ) {
-    if (tokens[0] !== 'complete' && tokens[0] !== 'completion') {
+    if (!quiet) {
       log.warn(message)
       log.dim(`  › ${hint}`)
     }

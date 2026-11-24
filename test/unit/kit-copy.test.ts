@@ -76,6 +76,43 @@ describe('which kit runs in a repo', () => {
     expect(copyVerdict(root, { dir: global.dir, version: '0.7.4' })).toEqual({ kind: 'ok' })
   })
 
+  test('an installed copy behind the pin is flagged stale, on handoff and when it is this copy', () => {
+    const root = repo('stale', { range: '0.11.5', installed: '0.11.4' })
+    const dir = join(root, 'node_modules/@jordond/kit')
+    const stale = { range: '0.11.5', manifest: 'package.json', version: '0.11.4' }
+    expect(copyVerdict(root, { dir, version: '0.11.4' })).toEqual({ kind: 'ok', stale })
+    expect(copyVerdict(root, global)).toEqual({
+      kind: 'handoff',
+      cli: join(dir, 'dist/cli.js'),
+      version: '0.11.4',
+      stale,
+    })
+  })
+
+  test('a catalog: pin resolves through the workspace catalog', () => {
+    const root = join(tmp, 'catalog')
+    write(
+      join(root, 'package.json'),
+      JSON.stringify({
+        workspaces: {
+          packages: [],
+          catalog: { '@jordond/kit': '0.11.5' },
+          catalogs: { tools: { '@jordond/kit': '^0.9.0' } },
+        },
+        devDependencies: { '@jordond/kit': 'catalog:' },
+      }),
+    )
+    expect(repoKit(root)?.range).toBe('0.11.5')
+    write(
+      join(root, 'package.json'),
+      JSON.stringify({
+        catalogs: { tools: { '@jordond/kit': '^0.9.0' } },
+        devDependencies: { '@jordond/kit': 'catalog:tools' },
+      }),
+    )
+    expect(repoKit(root)?.range).toBe('^0.9.0')
+  })
+
   test('a range that is not a version range is not judged', () => {
     for (const range of ['workspace:*', 'link:../kit', 'latest', 'catalog:']) {
       expect(copyVerdict(repo(`odd-${range.replace(/\W/g, '')}`, { range }), global)).toEqual({ kind: 'ok' })
