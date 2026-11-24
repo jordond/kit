@@ -384,6 +384,17 @@ export const configSchema = z
             teamId: z.string().optional(),
             /** xcconfig holding MARKETING_VERSION: `kit version bump` keeps it equal to the TOML. */
             xcconfig: z.string().optional(),
+            /**
+             * SwiftPM linkage package preflight (KMP, needs `gradle.root`). On by default when
+             * `KotlinMultiplatformLinkedPackage` sits beside `project`; false turns it off; an object
+             * overrides the package `dir` (repo-relative) or Gradle `task`.
+             */
+            swiftpmLinkage: z
+              .union([
+                z.boolean(),
+                z.object({ dir: z.string().optional(), task: z.string().optional() }).strict(),
+              ])
+              .optional(),
             testflightGroups: z.object({ alpha: z.string(), beta: z.string() }).partial().optional(),
             sentry: z.object({ org: z.string(), project: z.string() }).strict().optional(),
             /** Store listing dir (deliver layout), relative to the repo root; screenshots sit in `screenshots/` next to it. */

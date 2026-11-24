@@ -508,6 +508,29 @@ export function checkIosVersion(
   }
 }
 
+/** No xcconfig key is also set in the pbxproj (where it silently wins). `problem` is the release preflight's. */
+export function checkXcconfigOwnership(problem: () => string | undefined): Check {
+  const label = 'xcconfig ownership'
+  try {
+    const p = problem()
+    if (!p) return { id: 'xcconfig-ownership', label, status: 'ok', detail: 'no key set in both' }
+    return {
+      id: 'xcconfig-ownership',
+      label,
+      status: 'fail',
+      detail: p,
+      hint: 'Delete the key from the pbxproj and edit the xcconfig instead',
+    }
+  } catch (e) {
+    return {
+      id: 'xcconfig-ownership',
+      label,
+      status: 'fail',
+      detail: e instanceof Error ? e.message : String(e),
+    }
+  }
+}
+
 export function checkAndroidVersion(
   drift: () => { toml: string; module: string; file: string } | undefined,
   fix?: (drift: { toml: string; file: string }) => Fix,

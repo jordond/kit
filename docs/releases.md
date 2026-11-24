@@ -165,6 +165,19 @@ export default definePreflight({
 })
 ```
 
+Built-in iOS preflights run first, before the modules, and each has a `--skip` value:
+
+- `xcconfig` (`--skip xcconfig`): fails when `project.pbxproj` sets a key that an `.xcconfig` beside
+  `release.ios.xcconfig` also sets, because the pbxproj silently wins. Runs when `release.ios.xcconfig`
+  is set and `release.ios.project` is an `.xcodeproj`. `kit doctor` reports the same check.
+- `swiftpm-linkage` (`--skip swiftpm-linkage`): for KMP apps using the SwiftPM linkage package. Runs
+  `./gradlew :shared:integrateLinkagePackage` in `gradle.root` with `XCODEPROJ_PATH`, prunes stale
+  subpackages, and fails (after re-resolving the Xcode package graph) when git shows the linkage
+  package changed, since the archive would abort on it mid-build. Enabled automatically when
+  `gradle.root` is set and a `KotlinMultiplatformLinkedPackage` dir sits beside `release.ios.project`.
+  Set `release.ios.swiftpmLinkage` to `false` to turn it off, or `{ dir, task }` to point at another
+  package dir (repo-relative) or Gradle task.
+
 `release.android.gates` run Gradle tasks for the listed tracks (e.g. baseline-profile verification).
 
 ## Store listing

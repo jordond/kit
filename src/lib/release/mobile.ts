@@ -24,6 +24,7 @@ import {
 } from '../toolchain'
 import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
 import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
+import { builtinPreflights } from './builtin-preflights'
 import { loadPreflights } from './preflight'
 import { androidVersionDrift, iosVersionDrift, readVersion } from './version'
 
@@ -279,7 +280,7 @@ export async function releaseMobile(
   const common: Record<string, string> = { ...secrets, ...laneConfigEnv(root, config) }
 
   // ---- preflight + resolve
-  const preflights = (await loadPreflights(root, config)).filter(
+  const preflights = [...builtinPreflights(root, config), ...(await loadPreflights(root, config))].filter(
     (p) => !p.platforms || p.platforms.includes(platform),
   )
   const pre: Step[] = []

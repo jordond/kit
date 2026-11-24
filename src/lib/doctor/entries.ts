@@ -14,6 +14,7 @@ import { runQuiet } from '../proc'
 import { globalInstaller, newerThan, readUpdateState, updateCheckOff } from '../self-update'
 import { fillEnv } from '../env/init'
 import { onGitHubActions, releaseSecrets, renameHints } from '../release/creds'
+import { checkXcconfigOwnership as xcconfigClash, xcconfigApplies } from '../release/builtin-preflights'
 import { androidVersionDrift, iosVersionDrift } from '../release/version'
 import { parseToml, readToml } from '../toml'
 import {
@@ -29,6 +30,7 @@ import {
   checkEmulator,
   checkEnvFile,
   checkIosVersion,
+  checkXcconfigOwnership,
   checkJava,
   checkKtlint,
   checkAgentGuide,
@@ -350,6 +352,13 @@ export function doctorEntries(
               () => iosVersionDrift(root, config),
               (d) => iosVersionFix(root, d),
             )
+          : undefined,
+    },
+    {
+      id: 'xcconfig-ownership',
+      run: () =>
+        config && xcconfigApplies(root, config)
+          ? checkXcconfigOwnership(() => xcconfigClash(root, config))
           : undefined,
     },
     {
