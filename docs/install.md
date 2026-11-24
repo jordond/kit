@@ -15,8 +15,12 @@ of its own release, so an older global kit can miss a newer repo's copy. kit gua
 the wrong copy:
 
 - A kit that finds the repo's own copy installed, and is not that copy, runs the repo's copy instead.
+- A repo copy that is installed but behind the pin (a pulled bump without a reinstall) draws a warning
+  naming the install to run; the command still runs. `--json` runs and `complete`/`completion` stay quiet.
 - A kit whose version the repo's pin excludes, in a repo whose copy is not installed, stops with exit 4
-  and names the install to run. `kit doctor`, `kit upgrade`, `kit init`, `--help` and `-V` still run,
+  and names the install to run. `catalog:` pins are judged too, resolved through bun's catalogs
+  (`catalog`/`catalogs` in package.json or under `workspaces`; for `.kit/package.json`, the repo root's
+  package.json is read as well). pnpm-workspace.yaml and yarn catalogs are not read, so those pins go unjudged. `kit doctor`, `kit upgrade`, `kit init`, `--help` and `-V` still run,
   with a warning.
 - `kit doctor` warns when the `kit` on `PATH` is older than the repo's, or than the latest release on npm.
 

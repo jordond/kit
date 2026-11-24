@@ -113,6 +113,25 @@ describe('which kit runs in a repo', () => {
     expect(repoKit(root)?.range).toBe('^0.9.0')
   })
 
+  test('catalog forms: top-level, default, root fallback for .kit, unresolvable', () => {
+    const root = join(tmp, 'catalog2')
+    const pin = (name: string) => JSON.stringify({ devDependencies: { '@jordond/kit': name } })
+    write(join(root, 'package.json'), JSON.stringify({ catalog: { '@jordond/kit': '^0.4.0' } }))
+    write(join(root, '.kit/package.json'), pin('catalog:default'))
+    expect(repoKit(root)?.range).toBe('^0.4.0')
+    write(join(root, '.kit/package.json'), pin('catalog:'))
+    expect(repoKit(root)?.range).toBe('^0.4.0')
+    write(join(root, '.kit/package.json'), pin('catalog:nope'))
+    expect(repoKit(root)?.range).toBe('catalog:nope')
+    expect(copyVerdict(root, global)).toEqual({ kind: 'ok' })
+    write(
+      join(root, 'package.json'),
+      JSON.stringify({ workspaces: { catalogs: { n: { '@jordond/kit': '~0.5.0' } } } }),
+    )
+    write(join(root, '.kit/package.json'), pin('catalog:n'))
+    expect(repoKit(root)?.range).toBe('~0.5.0')
+  })
+
   test('a range that is not a version range is not judged', () => {
     for (const range of ['workspace:*', 'link:../kit', 'latest', 'catalog:']) {
       expect(copyVerdict(repo(`odd-${range.replace(/\W/g, '')}`, { range }), global)).toEqual({ kind: 'ok' })
