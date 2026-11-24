@@ -25,6 +25,15 @@ export class FakePlay {
   /** Every convert call scales other regions by this (FX moves between runs). */
   fx = 1
   convertCalls = 0
+  subscriptions = new Map<string, Json>()
+  /** Offers by `subscription/basePlan/offerId`. */
+  offers = new Map<string, Json>()
+  /** Subscription ids whose PATCH answers 500. */
+  failSubPatch = new Set<string>()
+  /** A new subscription may not carry base plans: they must be PATCHed in after the first call. */
+  refuseBasePlansOnCreate = false
+  /** Writes to subscriptions answer 403 like an account without a payments profile. */
+  noBilling = false
 
   private error(status: number, code: string, message: string) {
     return json({ error: { code: status, status: code, message } }, status)
@@ -54,6 +63,199 @@ export class FakePlay {
       ],
       regionsVersion: { version: this.regionVersion },
     })
+  }
+
+  /** A subscription as if made in the console. */
+  seedSubscription(
+    productId: string,
+    opts: {
+      title: string
+      description: string
+      benefits?: string[]
+      plans: { id: string; period: string; price: string; state?: string; legacy?: boolean }[]
+    },
+  ) {
+    this.subscriptions.set(productId, {
+      packageName: this.packageName,
+      productId,
+      listings: [
+        {
+          languageCode: 'en-US',
+          title: opts.title,
+          description: opts.description,
+          benefits: opts.benefits ?? [],
+        },
+      ],
+      basePlans: opts.plans.map((pl) => ({
+        basePlanId: pl.id,
+        state: pl.state ?? 'ACTIVE',
+        autoRenewingBasePlanType: {
+          billingPeriodDuration: pl.period,
+          legacyCompatible: pl.legacy ?? false,
+          resubscribeState: 'RESUBSCRIBE_STATE_ACTIVE',
+        },
+        regionalConfigs: this.convert(pl.price).configs.map((c) => ({
+          regionCode: c.regionCode,
+          price: c.price,
+          newSubscriberAvailability: true,
+        })),
+        otherRegionsConfig: {
+          usdPrice: money(pl.price),
+          eurPrice: money(pl.price, 'EUR'),
+          newSubscriberAvailability: true,
+        },
+      })),
+    })
+  }
+
+  /** A free-trial offer as if made in the console. */
+  seedOffer(
+    sub: string,
+    plan: string,
+    opts: { offerId?: string; duration: string; state?: string; free?: boolean },
+  ) {
+    const offerId = opts.offerId ?? 'free-trial'
+    const regions = ['US', 'DE', 'JP']
+    this.offers.set(`${sub}/${plan}/${offerId}`, {
+      packageName: this.packageName,
+      productId: sub,
+      basePlanId: plan,
+      offerId,
+      state: opts.state ?? 'ACTIVE',
+      phases: [
+        {
+          duration: opts.duration,
+          recurrenceCount: 1,
+          regionalConfigs: regions.map((r) => ({
+            regionCode: r,
+            ...(opts.free === false ? { price: money('1.00') } : { free: {} }),
+          })),
+        },
+      ],
+      regionalConfigs: regions.map((r) => ({ regionCode: r, newSubscriberAvailability: true })),
+    })
+  }
+
+  private subscriptionRoute(req: Req, rest: string): Response | undefined {
+    let m: RegExpMatchArray | null
+    const route = (method: string, re: RegExp) => (req.method === method ? (m = rest.match(re)) : null)
+    if (route('GET', /^subscriptions$/)) {
+      const all = [...this.subscriptions.values()]
+      const start = Number(req.query.get('pageToken') ?? 0)
+      const next = start + this.pageSize < all.length ? String(start + this.pageSize) : undefined
+      return json({
+        subscriptions: all.slice(start, start + this.pageSize),
+        ...(next ? { nextPageToken: next } : {}),
+      })
+    }
+    if (route('GET', /^subscriptions\/([^/]+)\/basePlans\/([^/]+)\/offers$/)) {
+      const prefix = `${m![1]}/${m![2]}/`
+      const all = [...this.offers].filter(([k]) => k.startsWith(prefix)).map(([, v]) => v)
+      return json(all.length ? { subscriptionOffers: all } : {})
+    }
+    if (route('PATCH', /^subscriptions\/([^/]+)$/)) {
+      const id = m![1]!
+      if (this.noBilling)
+        return this.error(403, 'PERMISSION_DENIED', 'Please set up a payments profile (merchant account)')
+      if (this.failSubPatch.has(id)) return this.error(500, 'INTERNAL', 'Internal error encountered.')
+      if (!req.query.get('updateMask')) return this.error(400, 'INVALID_ARGUMENT', 'updateMask is required')
+      if (req.query.get('regionsVersion.version') !== this.regionVersion)
+        return this.error(400, 'INVALID_ARGUMENT', 'Invalid regions version')
+      const old = this.subscriptions.get(id)
+      if (!old && req.query.get('allowMissing') !== 'true')
+        return this.error(404, 'NOT_FOUND', 'no subscription')
+      const body = req.body as Json
+      if (body.productId !== id || body.packageName !== this.packageName)
+        return this.error(400, 'INVALID_ARGUMENT', 'productId/packageName must match the path')
+      const mask = String(req.query.get('updateMask')).split(',')
+      const plans = (mask.includes('basePlans') ? ((body.basePlans as Json[]) ?? []) : undefined) ?? []
+      if (!old && this.refuseBasePlansOnCreate && plans.length)
+        return this.error(400, 'INVALID_ARGUMENT', 'base plans cannot be created with the subscription')
+      for (const pl of plans)
+        if ('state' in pl) return this.error(400, 'INVALID_ARGUMENT', 'state is output only')
+      const typeOf = (pl: Json) => pl.autoRenewingBasePlanType as Json | undefined
+      if (plans.filter((pl) => typeOf(pl)?.legacyCompatible).length > 1)
+        return this.error(400, 'INVALID_ARGUMENT', 'Only one renewing base plan can be legacy compatible')
+      const oldPlans = (old?.basePlans as Json[]) ?? []
+      if (mask.includes('basePlans')) {
+        for (const o of oldPlans) {
+          const n = plans.find((pl) => pl.basePlanId === o.basePlanId)
+          if (!n)
+            return this.error(
+              400,
+              'INVALID_ARGUMENT',
+              `Base plan ${o.basePlanId as string} cannot be removed`,
+            )
+          if (typeOf(n)?.billingPeriodDuration !== typeOf(o)?.billingPeriodDuration)
+            return this.error(400, 'INVALID_ARGUMENT', 'billingPeriodDuration is immutable')
+        }
+      }
+      const states = new Map(oldPlans.map((o) => [o.basePlanId, o.state]))
+      const next: Json = {
+        packageName: this.packageName,
+        productId: id,
+        listings: mask.includes('listings') ? body.listings : old?.listings,
+        basePlans: mask.includes('basePlans')
+          ? plans.map((pl) => ({ ...pl, state: states.get(pl.basePlanId) ?? 'DRAFT' }))
+          : oldPlans,
+      }
+      if (!Array.isArray(next.listings) || next.listings.length === 0)
+        return this.error(400, 'INVALID_ARGUMENT', 'listings must include the default language')
+      this.subscriptions.set(id, next)
+      return json(next)
+    }
+    if (route('POST', /^subscriptions\/([^/]+)\/basePlans\/([^/]+):activate$/)) {
+      if (this.noBilling) return this.error(403, 'PERMISSION_DENIED', 'merchant account required')
+      const plan = ((this.subscriptions.get(m![1]!)?.basePlans as Json[]) ?? []).find(
+        (pl) => pl.basePlanId === m![2],
+      )
+      if (!plan) return this.error(404, 'NOT_FOUND', 'no base plan')
+      const b = req.body as Json
+      if (b?.packageName !== this.packageName || b?.productId !== m![1] || b?.basePlanId !== m![2])
+        return this.error(400, 'INVALID_ARGUMENT', 'package, product and base plan are required in the body')
+      plan.state = 'ACTIVE'
+      return json(this.subscriptions.get(m![1]!))
+    }
+    if (route('PATCH', /^subscriptions\/([^/]+)\/basePlans\/([^/]+)\/offers\/([^/]+)$/)) {
+      const [, sub, plan, offerId] = m!
+      const base = ((this.subscriptions.get(sub!)?.basePlans as Json[]) ?? []).find(
+        (pl) => pl.basePlanId === plan,
+      )
+      if (!base) return this.error(404, 'NOT_FOUND', 'no base plan')
+      if (!req.query.get('updateMask')) return this.error(400, 'INVALID_ARGUMENT', 'updateMask is required')
+      if (req.query.get('regionsVersion.version') !== this.regionVersion)
+        return this.error(400, 'INVALID_ARGUMENT', 'Invalid regions version')
+      const key = `${sub}/${plan}/${offerId}`
+      if (!this.offers.has(key) && req.query.get('allowMissing') !== 'true')
+        return this.error(404, 'NOT_FOUND', 'no offer')
+      const b = req.body as Json
+      const regions = ((b.regionalConfigs as Json[]) ?? [])
+        .map((r) => String(r.regionCode))
+        .sort((a, b) => a.localeCompare(b))
+      for (const ph of (b.phases as Json[]) ?? []) {
+        const got = ((ph.regionalConfigs as Json[]) ?? [])
+          .map((r) => String(r.regionCode))
+          .sort((a, b) => a.localeCompare(b))
+        if (JSON.stringify(got) !== JSON.stringify(regions))
+          return this.error(
+            400,
+            'INVALID_ARGUMENT',
+            'phase regional configs must match the offer regional configs',
+          )
+      }
+      if (!regions.length || !(b.phases as Json[])?.length)
+        return this.error(400, 'INVALID_ARGUMENT', 'regionalConfigs and phases are required')
+      const offer = { ...b, state: (this.offers.get(key)?.state as string | undefined) ?? 'DRAFT' }
+      this.offers.set(key, offer)
+      return json(offer)
+    }
+    if (route('POST', /^subscriptions\/([^/]+)\/basePlans\/([^/]+)\/offers\/([^/]+):activate$/)) {
+      const offer = this.offers.get(`${m![1]}/${m![2]}/${m![3]}`)
+      if (!offer) return this.error(404, 'NOT_FOUND', 'no offer')
+      offer.state = 'ACTIVE'
+      return json(offer)
+    }
+    return undefined
   }
 
   private convert(price: string) {
@@ -177,7 +379,14 @@ export class FakePlay {
       }
       return json({ oneTimeProducts: out })
     }
-    if (req.method === 'DELETE' || rest.includes(':batchDelete') || rest.includes('deactivate')) {
+    const sub = this.subscriptionRoute(req, rest)
+    if (sub) return sub
+    if (
+      req.method === 'DELETE' ||
+      rest.includes('migratePrices') ||
+      rest.includes(':batchDelete') ||
+      rest.includes('deactivate')
+    ) {
       return this.error(500, 'FAKE', 'kit must never delete or deactivate')
     }
     return this.error(404, 'NOT_FOUND', `fake Play: no route ${req.method} ${p}`)
