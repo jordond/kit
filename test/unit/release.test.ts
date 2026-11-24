@@ -118,6 +118,15 @@ describe('secret checks', () => {
     expect(releaseSecrets(config)).toEqual({ required: [], ci: [], optional: [] })
   })
 
+  test('releaseSecrets: Sentry on Android alone still wants SENTRY_AUTH_TOKEN', async () => {
+    const { releaseSecrets } = await import('../../src/lib/release/creds')
+    const android = configSchema.parse({
+      name: 'A',
+      release: { android: { packageName: 'a', module: 'app', sentry: { org: 'o', project: 'p' } } },
+    })
+    expect(releaseSecrets(android).optional).toEqual(['SENTRY_AUTH_TOKEN'])
+  })
+
   test('doctor: missing release secrets warn (locally and on Actions), hint renames', async () => {
     const { checkReleaseSecrets } = await import('../../src/commands/doctor')
     const { releaseSecrets, renameHints } = await import('../../src/lib/release/creds')

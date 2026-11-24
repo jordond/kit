@@ -28,7 +28,7 @@ export interface ReleaseSecrets {
   required: string[]
   /** Needed only on GitHub Actions (HTTPS access to the match repo). */
   ci: string[]
-  /** Used when present (Sentry dSYM upload skips without it). */
+  /** Used when present (the Sentry dSYM and R8 mapping uploads skip without it). */
   optional: string[]
 }
 
@@ -39,7 +39,7 @@ export function releaseSecrets(config: KitConfig | undefined): ReleaseSecrets {
   return {
     required: [...(ios ? IOS_SECRETS : []), ...(android ? ANDROID_SECRETS : [])],
     ci: ios ? ['MATCH_GIT_BASIC_AUTHORIZATION'] : [],
-    optional: ios?.sentry ? ['SENTRY_AUTH_TOKEN'] : [],
+    optional: ios?.sentry || android?.sentry ? ['SENTRY_AUTH_TOKEN'] : [],
   }
 }
 

@@ -428,6 +428,17 @@ export const configSchema = z
               .optional(),
             /** Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`), relative to the repo root. */
             metadata: z.string().optional(),
+            /**
+             * Upload the R8 mapping to Sentry after a release. Toolchain builds only: a Gradle build
+             * uploads it with Sentry's Gradle plugin.
+             */
+            sentry: z
+              .object({
+                org: z.string(),
+                project: z.string(),
+              })
+              .strict()
+              .optional(),
           })
           .strict()
           .optional(),

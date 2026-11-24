@@ -740,13 +740,14 @@ release: {
 
 ### `release.android`
 
-| Field         | Type                          | Required | Meaning                                                                                                                                                                                 |
-| ------------- | ----------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packageName` | `string`                      | yes      | Application id                                                                                                                                                                          |
-| `module`      | `string` or `{ path, name? }` | yes      | The app [module](#modules): its directory relative to the build root (`mobile/android`), or a Gradle project path (`:android`)                                                          |
-| `prodRollout` | number, `0 < n <= 1`          |          | Staged rollout fraction for `prod`. Default `0.1`                                                                                                                                       |
-| `gates`       | `{ task, tracks }[]`          |          | Tasks run before a release to the listed tracks. `task` is a Gradle task, or `./kotlin` arguments with a toolchain (`test -m shared`); `tracks` are `internal`, `alpha`, `beta`, `prod` |
-| `metadata`    | `string`                      |          | Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`)                                                                                                             |
+| Field         | Type                          | Required | Meaning                                                                                                                                                                                                                             |
+| ------------- | ----------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packageName` | `string`                      | yes      | Application id                                                                                                                                                                                                                      |
+| `module`      | `string` or `{ path, name? }` | yes      | The app [module](#modules): its directory relative to the build root (`mobile/android`), or a Gradle project path (`:android`)                                                                                                      |
+| `prodRollout` | number, `0 < n <= 1`          |          | Staged rollout fraction for `prod`. Default `0.1`                                                                                                                                                                                   |
+| `gates`       | `{ task, tracks }[]`          |          | Tasks run before a release to the listed tracks. `task` is a Gradle task, or `./kotlin` arguments with a toolchain (`test -m shared`); `tracks` are `internal`, `alpha`, `beta`, `prod`                                             |
+| `metadata`    | `string`                      |          | Store listing dir (supply layout: `<locale>/title.txt`, `<locale>/images/`)                                                                                                                                                         |
+| `sentry`      | `{ org, project }`            |          | Kotlin toolchain builds: put a ProGuard UUID in the bundle's `assets/sentry-debug-meta.properties` and upload the R8 mapping under it after a release; uses `SENTRY_AUTH_TOKEN`. A Gradle build uses Sentry's Gradle plugin instead |
 
 ### `release.services`
 

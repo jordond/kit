@@ -251,6 +251,32 @@ export function findAab(toolchainDir: string, module: ResolvedModule, since = 0)
 }
 
 /**
+ * The R8 mapping a release build of [module] wrote at or after [since]:
+ * `build/tasks/_<module>_bundleAndroid/gradle-project/build/<dir>/outputs/mapping/release/mapping.txt`.
+ */
+export function findMapping(toolchainDir: string, module: ResolvedModule, since = 0): string | undefined {
+  const tasks = join(toolchainDir, 'build', 'tasks')
+  if (!existsSync(tasks)) return undefined
+  const prefix = basename(toolchainTaskDir(toolchainDir, module))
+  const hits: { path: string; mtime: number }[] = []
+  for (const d of readdirSync(tasks)) {
+    if (!d.startsWith(prefix)) continue
+    const build = join(tasks, d, 'gradle-project', 'build')
+    if (!existsSync(build)) continue
+    for (const b of readdirSync(build)) {
+      const path = join(build, b, 'outputs', 'mapping', 'release', 'mapping.txt')
+      if (!existsSync(path)) continue
+      const mtime = statSync(path).mtimeMs
+      if (mtime >= since) hits.push({ path, mtime })
+    }
+  }
+  return hits.sort((a, b) => b.mtime - a.mtime)[0]?.path
+}
+
+/** Where the Sentry Android SDK reads the ProGuard UUID that matches a stack trace to its mapping. */
+export const SENTRY_DEBUG_META = join('assets', 'sentry-debug-meta.properties')
+
+/**
  * App-module files the APK is built from that the toolchain's `buildAndroid<Variant>` task does not
  * list as inputs (0.13.0). The task reruns only when the module's compiled `.aar`s change, so an edit
  * to just these reports success and leaves the old APK. `bundleAndroid` lists them: releases are fine.
