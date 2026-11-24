@@ -454,12 +454,12 @@ describe('kit upgrade --global', () => {
       'bun',
       `echo "$(basename "$PWD") $*" >> "$KIT_BUN_LOG"
 [ "$1" = add ] || exit 0
-v=\${3##*@}
+for a; do v=\${a##*@}; done
 printf '{"name":"@jordond/kit","version":"%s"}' "$v" > "${global}/package.json"`,
     )
     writeFileSync(join(f.dir, '.bun.log'), '')
   })
-  const installed = (v: string) => [`${home.split('/').pop()} add -g @jordond/kit@${v}`]
+  const installed = (v: string) => [`${home.split('/').pop()} add -g --no-cache @jordond/kit@${v}`]
 
   test('outside a repo: installs the version over the kit on PATH, from home', async () => {
     const r = await run(['upgrade', NEXT])
@@ -483,7 +483,7 @@ printf '{"name":"@jordond/kit","version":"%s"}' "$v" > "${global}/package.json"`
         global: true,
         from: '0.1.0',
         to: '0.5.0',
-        command: 'bun add -g @jordond/kit@0.5.0',
+        command: 'bun add -g --no-cache @jordond/kit@0.5.0',
       })
       writeFileSync(join(global, 'package.json'), '{"name":"@jordond/kit","version":"0.6.0-rc.1"}')
       const ahead = await run(['upgrade', '--global'], { env })
@@ -500,7 +500,7 @@ printf '{"name":"@jordond/kit","version":"%s"}' "$v" > "${global}/package.json"`
     const before = read('.kit/package.json')
     const dry = await run(['upgrade', NEXT, '--global', '--dry-run'])
     expect(dry.code).toBe(0)
-    expect(dry.stderr).toContain(`bun add -g @jordond/kit@${NEXT}`)
+    expect(dry.stderr).toContain(`bun add -g --no-cache @jordond/kit@${NEXT}`)
     expect(lines('.bun.log')).toEqual([])
     expect(read('.kit/package.json')).toBe(before)
     const repo = await run(['upgrade', NEXT, '--dry-run'])
@@ -512,7 +512,7 @@ printf '{"name":"@jordond/kit","version":"%s"}' "$v" > "${global}/package.json"`
     f.script('bun', 'exit 1')
     const r = await run(['upgrade', NEXT])
     expect(r.code).toBe(1)
-    expect(r.stderr).toContain(`bun add -g @jordond/kit@${NEXT} failed (exit 1)`)
+    expect(r.stderr).toContain(`bun add -g --no-cache @jordond/kit@${NEXT} failed (exit 1)`)
     const checkout = join(home, 'dev/kit')
     mkdirSync(join(checkout, 'bin'), { recursive: true })
     writeFileSync(join(checkout, 'package.json'), '{"name":"@jordond/kit","version":"0.1.0"}')

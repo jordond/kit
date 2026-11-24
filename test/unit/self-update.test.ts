@@ -22,8 +22,8 @@ const BUN_GLOBAL = '/Users/me/.bun/install/global/node_modules/@jordond/kit'
 describe('the global kit', () => {
   test('globalInstaller reads the package manager from the global store path', () => {
     const command = (dir: string) => globalInstaller(dir)?.command('1.2.3').join(' ')
-    expect(command(BUN_GLOBAL)).toBe('bun add -g @jordond/kit@1.2.3')
-    expect(command('/opt/bun/install/global/node_modules/@jordond/kit')).toBe('bun add -g @jordond/kit@1.2.3')
+    expect(command(BUN_GLOBAL)).toBe('bun add -g --no-cache @jordond/kit@1.2.3')
+    expect(command('/opt/bun/install/global/node_modules/@jordond/kit')).toBe('bun add -g --no-cache @jordond/kit@1.2.3')
     expect(
       command('/Users/me/Library/pnpm/global/5/.pnpm/@jordond+kit@0.8.0/node_modules/@jordond/kit'),
     ).toBe('pnpm add -g @jordond/kit@1.2.3')

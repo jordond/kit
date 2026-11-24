@@ -19,7 +19,9 @@ export interface GlobalInstaller {
 }
 
 const INSTALL: Record<GlobalPm, string[]> = {
-  bun: ['bun', 'add', '-g'],
+  // --no-cache: bun keeps a stale package manifest for a while, so a release kit just found on the
+  // registry fails to resolve ("No version matching").
+  bun: ['bun', 'add', '-g', '--no-cache'],
   pnpm: ['pnpm', 'add', '-g'],
   yarn: ['yarn', 'global', 'add'],
   npm: ['npm', 'install', '-g'],
