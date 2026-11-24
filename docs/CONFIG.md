@@ -65,6 +65,7 @@ export default defineConfig({
 | [`versions`](#versions)              | no                | Where version names live: `kit version`, `kit release`                           |
 | [`targets`](#targets)                | no (default `{}`) | What `kit lint`, `test`, `build`, `dev`, `deploy` run                            |
 | [`workspace`](#workspace)            | no                | Repo-wide commands for the same verbs                                            |
+| [`codegen`](#codegen)                | no                | Committed generated code: `kit codegen`, the drift check in `kit check`          |
 | [`env`](#env)                        | no                | `.env` schema, rendered outputs, secret destinations: `kit env`                  |
 | [`cloudflare`](#cloudflare)          | no                | Account id and D1 databases: `kit db`, worker commands                           |
 | [`app`](#app)                        | no                | The debug app `kit app`, `kit qa`, `kit shots` build and drive                   |
@@ -236,6 +237,36 @@ workspace: {
 The workspace runs when no target is named, when `workspace` is named (`kit lint workspace`), or when a
 named target is of kind `worker`, `vite`, `astro` or `custom`. With `--staged`, `lint` and `format` get
 the staged files appended. With `--affected`, it runs whenever anything changed.
+
+## `codegen`
+
+Committed generated code: kit runs the generator and fails when its output is not what is committed.
+
+```ts
+codegen: {
+  run: 'bun run scripts/codegen.ts',
+  outputs: ['src/generated', 'schema/*.sql'],
+},
+```
+
+| Field     | Type     | Meaning                                                                                     |
+| --------- | -------- | ------------------------------------------------------------------------------------------- |
+| `run`     | command  | The generator, run from the repo root by `kit codegen`                                      |
+| `outputs` | string[] | Repo-relative paths or globs (git pathspecs) of the committed generated files. At least one |
+
+- `kit codegen` runs `run`. `kit codegen --check` then exits 1 when an output differs from HEAD or is
+  untracked, listing the files, with the hint to run `kit codegen` and commit the result. An output
+  that git ignores is never reported.
+- `kit check` does the same after lint and typecheck whenever `CI` is `true` or `1`; locally add
+  `--codegen`. It is skipped with `--fix` and `--dry-run`, and when lint or typecheck already failed.
+  A repo needs no extra workflow step.
+- Without `codegen`, `kit codegen` exits 3 with a hint. `workspace.prepare` is separate: it runs
+  before the verbs and does not check anything.
+- A repo that already has `.kit/commands/codegen.ts` gets a conflict error with the built-in
+  (a repo command needs `override: true` to share a built-in's path). Delete the command, move its
+  command into `codegen.run`, list the generated files in `outputs`, and drop the workflow's
+  `git diff --exit-code` step. Keep the file only with `override: true` when it does more than run the
+  generator (it can call `ctx.builtin('codegen')`).
 
 ## `env`
 

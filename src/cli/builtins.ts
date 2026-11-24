@@ -48,6 +48,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/check'),
   },
   {
+    path: ['codegen'],
+    description: 'Run code generation; --check fails on uncommitted output',
+    group: 'Quality',
+    load: () => import('../commands/codegen'),
+  },
+  {
     path: ['test'],
     description: 'Run the test suites',
     group: 'Quality',

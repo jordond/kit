@@ -137,6 +137,15 @@ export const configSchema = z
       .strict()
       .optional(),
     workspace: workspace.optional(),
+    /** Committed generated code: `kit codegen` runs `run`; `--check` (and `kit check` in CI) fails when `outputs` drift from HEAD. */
+    codegen: z
+      .object({
+        run: command,
+        /** Repo-relative paths or globs (git pathspecs) of the generated files. */
+        outputs: z.array(z.string().min(1)).min(1),
+      })
+      .strict()
+      .optional(),
     targets: z.record(z.string(), target).default({}),
     cloudflare: z
       .object({

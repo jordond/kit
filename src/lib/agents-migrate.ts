@@ -304,6 +304,7 @@ export function migratePrompt(facts: MigrateFacts, version: string): string {
     "| lints, formats, typechecks, tests, builds, runs or deploys one target | nothing, when the kind's default already does it; else that verb's field on the target |",
     '| does the same across the whole repo | the verb in `workspace` |',
     '| generates code the other steps need | `workspace.prepare` |',
+    `| generates code that is committed, or a CI step that regenerates it and fails on \`git diff\` | \`codegen: { run, outputs }\`, then \`kit codegen\` and \`kit codegen --check\`; \`kit check\` runs the drift check in CI. Delete the repo \`codegen\` command and the workflow's diff step ([config](${DOCS}/CONFIG.md)) |`,
     "| must run before a deploy (env sync, migrations) | `deploy: { before: ['env sync'] }` on the target |",
     `| renders \`.env\` into files or pushes secrets | the \`env\` block, then \`kit env\` ([env](${DOCS}/env.md)) |`,
     `| applies, seeds or backs up D1 | \`cloudflare.d1\`, then \`kit db\` ([cloudflare](${DOCS}/cloudflare.md)) |`,

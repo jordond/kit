@@ -90,7 +90,7 @@ Every field, with defaults and full examples, is in the [config reference](docs/
 | Group   | Commands                                                                                                                                       |
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Develop | `dev`, `build`, `deploy`, `app`, `device`, `fixture`, `open`, `clean`, and the passthroughs `gradle`, `kotlin`, `wrangler`, `maestro`, `xcode` |
-| Quality | `lint`, `format`, `typecheck`, `check`, `test`, `qa`, `shots`                                                                                  |
+| Quality | `lint`, `format`, `typecheck`, `check`, `codegen`, `test`, `qa`, `shots`                                                                       |
 | Release | `release`, `version`, `fastlane`, `changelog`                                                                                                  |
 | Infra   | `env`, `db`, `logs`                                                                                                                            |
 | Setup   | `doctor`, `init`, `add`, `deps`, `upgrade`, `config`, `completion`                                                                             |
