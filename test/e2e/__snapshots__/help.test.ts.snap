@@ -33,6 +33,7 @@ Quality
 
 Release
   release     Ship to the stores …
+  iap         In-app products as code: one file for App Store Connect, Play and RevenueCat …
   version     Version names in the catalog TOML …
   fastlane    Run fastlane with kit's shared Fastfile
   changelog   List the changes since the last release tag
@@ -193,6 +194,22 @@ Usage
 Commands
   load  Replay a fixture (app state) onto a device
   dump  Capture the app's state from a device into a fixture
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+
+"
+`;
+
+exports[`help kit iap --help 1`] = `
+"In-app products as code: one file for App Store Connect, Play and RevenueCat
+
+Usage
+  kit iap <command> [options]
+
+Commands
+  check  Validate the in-app product file offline: schema, store limits, ids, screenshots
 
 Options
   -h, --help     Show help
@@ -1441,6 +1458,29 @@ Examples
   kit gradle assembleDebug
   kit gradle :shared:test --info
   kit gradle help --task assembleDebug
+
+"
+`;
+
+exports[`help kit iap check --help 1`] = `
+"Validate the in-app product file offline: schema, store limits, ids, screenshots
+
+Usage
+  kit iap check [options]
+
+Examples
+  kit iap check
+  kit iap check --json
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
 
 "
 `;

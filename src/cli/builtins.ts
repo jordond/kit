@@ -108,6 +108,12 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/release/rollout'),
   },
   {
+    path: ['iap', 'check'],
+    description: 'Validate the in-app product file offline: schema, store limits, ids, screenshots',
+    group: 'Release',
+    load: () => import('../commands/iap/check'),
+  },
+  {
     path: ['release', 'metadata', 'pull'],
     description:
       'Download the store listing text into release.<platform>.metadata; --screenshots adds images',
@@ -471,6 +477,7 @@ export const builtins: BuiltinEntry[] = [
 export const groupDescriptions: Record<string, string> = {
   release: 'Ship to the stores',
   metadata: 'Sync the store listing (text, screenshots)',
+  iap: 'In-app products as code: one file for App Store Connect, Play and RevenueCat',
   setup: 'Create and store the release secrets (.env, GitHub Actions)',
   version: 'Version names in the catalog TOML',
   env: 'Fill .env from .env.example; render, check and push env from .env',

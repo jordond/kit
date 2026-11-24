@@ -440,9 +440,58 @@ export const configSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * In-app products as code (`kit iap`): the product file is the source of truth for App Store
+     * Connect, Google Play and RevenueCat. A store takes part only when its key is present.
+     */
+    iap: z
+      .object({
+        /** The product file (JSON), repo-relative. */
+        products: z.string().min(1),
+        apple: z
+          .object({
+            /** Default `release.ios.bundleIds[0]`. */
+            bundleId: z.string().min(1).optional(),
+            /** Family Sharing for non-consumables that do not set `apple.familySharable`. */
+            familySharing: z.boolean().default(false),
+          })
+          .strict()
+          .optional(),
+        play: z
+          .object({
+            /** Default `release.android.packageName`. */
+            packageName: z.string().min(1).optional(),
+          })
+          .strict()
+          .optional(),
+        revenuecat: z
+          .object({
+            projectId: z.string().min(1),
+            /** Env var holding the project's v2 secret key. */
+            apiKeyEnv: z.string().min(1).default('REVENUECAT_API_KEY'),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((c, ctx) => {
+    if (c.iap?.apple && !c.iap.apple.bundleId && !c.release?.ios) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['iap', 'apple', 'bundleId'],
+        message: 'Set iap.apple.bundleId or release.ios (its bundleIds[0] is the default)',
+      })
+    }
+    if (c.iap?.play && !c.iap.play.packageName && !c.release?.android) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['iap', 'play', 'packageName'],
+        message: 'Set iap.play.packageName or release.android (its packageName is the default)',
+      })
+    }
     if (c.gradle && c.toolchain) {
       ctx.addIssue({
         code: 'custom',

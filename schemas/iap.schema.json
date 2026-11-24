@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "locale": {
+      "default": "en-US",
+      "description": "Default locale: Apple localization and Play listing",
+      "type": "string"
+    },
+    "products": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Product id in every console; permanent once created"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "non_consumable",
+              "consumable"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Apple display + reference name, Play title, RevenueCat display name"
+          },
+          "description": {
+            "type": "string"
+          },
+          "price": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d{2}$",
+            "description": "USD price with two decimals, like \"4.99\""
+          },
+          "priceChanges": {
+            "description": "Scheduled price changes, oldest first",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "description": "ISO date (YYYY-MM-DD) the price takes effect"
+                },
+                "price": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d{2}$",
+                  "description": "USD price with two decimals, like \"4.99\""
+                }
+              },
+              "required": [
+                "from",
+                "price"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "entitlement": {
+            "description": "RevenueCat entitlement lookup key; default: id",
+            "type": "string"
+          },
+          "localizations": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Display name in this locale"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Description in this locale"
+                }
+              },
+              "required": [
+                "name",
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Extra locales (BCP-47, like \"fr-FR\"); the default locale comes from the top-level fields"
+          },
+          "apple": {
+            "type": "object",
+            "properties": {
+              "referenceName": {
+                "description": "Default: name",
+                "type": "string"
+              },
+              "reviewNote": {
+                "type": "string"
+              },
+              "reviewScreenshot": {
+                "description": "Repo-relative PNG or JPEG for App Review",
+                "type": "string"
+              },
+              "familySharable": {
+                "description": "Default: iap.apple.familySharing",
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          },
+          "play": {
+            "type": "object",
+            "properties": {
+              "purchaseOptionId": {
+                "description": "Default: \"buy\"",
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "name",
+          "description",
+          "price"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "subscriptions": {
+      "description": "Phase 2: kit iap sync rejects them for now",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Play subscription id; Apple group reference name"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "benefits": {
+            "description": "Play only: up to 4, 40 characters each",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "entitlement": {
+            "description": "Default: id",
+            "type": "string"
+          },
+          "localizations": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Display name in this locale"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Description in this locale"
+                }
+              },
+              "required": [
+                "name",
+                "description"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Extra locales (BCP-47, like \"fr-FR\"); the default locale comes from the top-level fields"
+          },
+          "plans": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Play base plan id"
+                },
+                "appleProductId": {
+                  "description": "Default: `${subscription.id}_${plan.id}`, \"-\" → \"_\"",
+                  "type": "string"
+                },
+                "period": {
+                  "type": "string",
+                  "enum": [
+                    "P1W",
+                    "P1M",
+                    "P2M",
+                    "P3M",
+                    "P6M",
+                    "P1Y"
+                  ]
+                },
+                "price": {
+                  "type": "string",
+                  "pattern": "^\\d+\\.\\d{2}$",
+                  "description": "USD price with two decimals, like \"4.99\""
+                },
+                "trial": {
+                  "description": "Free trial length",
+                  "type": "string",
+                  "enum": [
+                    "P3D",
+                    "P1W",
+                    "P2W",
+                    "P1M",
+                    "P2M",
+                    "P3M",
+                    "P6M",
+                    "P1Y"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "period",
+                "price"
+              ],
+              "additionalProperties": false
+            },
+            "description": "First plan is the highest Apple group level"
+          },
+          "apple": {
+            "type": "object",
+            "properties": {
+              "groupName": {
+                "type": "string"
+              },
+              "reviewNote": {
+                "type": "string"
+              },
+              "reviewScreenshot": {
+                "type": "string"
+              },
+              "familySharable": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "plans"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "title": "kit in-app products"
+}

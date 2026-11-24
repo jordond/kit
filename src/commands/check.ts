@@ -24,6 +24,12 @@ export default defineCommand({
       verbs: ctx.args.fix ? ['format', 'typecheck'] : ['lint', 'typecheck'],
       hint: ctx.args.fix ? undefined : 'Run `kit check --fix` to fix what the tools can',
     })
+    // The product file is checked offline on every whole-repo check (`kit iap check`).
+    if (config.iap && !ctx.positionals.length) {
+      const { runCheck } = await import('../lib/iap/load')
+      ctx.log.step('iap check')
+      runCheck(root, config, { json: false }, ctx.log)
+    }
     if (drift && !process.exitCode) {
       const { assertNoDrift, requireCodegen, runCodegen } = await import('../lib/codegen')
       const codegen = requireCodegen(config)

@@ -22,6 +22,7 @@
     "dist",
     "fastlane",
     "gradle/maven",
+    "schemas",
     "templates"
   ],
   "workspaces": [
@@ -31,7 +32,7 @@
     "bun": ">=1.3"
   },
   "scripts": {
-    "build": "vp pack && vp -C editor build",
+    "build": "bun scripts/iap-schema.ts && vp pack && vp -C editor build",
     "dev:studio": "bun scripts/dev-studio.ts",
     "build:gradle": "gradle/gradlew -p gradle publishKit",
     "dev": "bun src/cli.ts",

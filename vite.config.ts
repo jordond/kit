@@ -4,6 +4,8 @@ import { defineConfig } from 'vite-plus'
 // `kit init` template files that are not ours to reformat, and local notes.
 const ignorePatterns = [
   'dist/**',
+  // Generated from src/lib/iap/file.ts by scripts/iap-schema.ts.
+  'schemas/**',
   'gradle/**',
   'fastlane/**',
   'templates/**',
