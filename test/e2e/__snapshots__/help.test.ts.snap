@@ -209,7 +209,9 @@ Usage
   kit iap <command> [options]
 
 Commands
-  check  Validate the in-app product file offline: schema, store limits, ids, screenshots
+  check   Validate the in-app product file offline: schema, store limits, ids, screenshots
+  status  Compare the product file with App Store Connect, Google Play and RevenueCat; writes nothing
+  sync    Create and update in-app products in every store from the product file; never deletes
 
 Options
   -h, --help     Show help
@@ -1481,6 +1483,59 @@ Options
   -v, --verbose  Stream all child output
   -q, --quiet    Errors and summary only
       --bail     Stop at the first failure
+
+"
+`;
+
+exports[`help kit iap status --help 1`] = `
+"Compare the product file with App Store Connect, Google Play and RevenueCat; writes nothing
+
+Usage
+  kit iap status [options]
+
+Examples
+  kit iap status
+  kit iap status --store apple
+  kit iap status --product membership_card --json
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+  -s, --store <string>    Only this store: apple, play or revenuecat; repeatable (default: every configured one)
+  -p, --product <string>  Only this product id from the file; repeatable
+
+"
+`;
+
+exports[`help kit iap sync --help 1`] = `
+"Create and update in-app products in every store from the product file; never deletes
+
+Usage
+  kit iap sync [options]
+
+Examples
+  kit iap sync --dry-run
+  kit iap sync
+  kit iap sync --store play --yes
+  kit iap sync --product membership_card --json --yes
+
+Options
+  -h, --help              Show help
+  -V, --version           Show kit version
+      --json              Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run           Plan and run read-only steps; skip mutations
+  -y, --yes               Accept confirmations (never skips prod)
+  -v, --verbose           Stream all child output
+  -q, --quiet             Errors and summary only
+      --bail              Stop at the first failure
+  -s, --store <string>    Only this store: apple, play or revenuecat; repeatable (default: every configured one)
+  -p, --product <string>  Only this product id from the file; repeatable
 
 "
 `;

@@ -114,6 +114,19 @@ export const builtins: BuiltinEntry[] = [
     load: () => import('../commands/iap/check'),
   },
   {
+    path: ['iap', 'status'],
+    description:
+      'Compare the product file with App Store Connect, Google Play and RevenueCat; writes nothing',
+    group: 'Release',
+    load: () => import('../commands/iap/status'),
+  },
+  {
+    path: ['iap', 'sync'],
+    description: 'Create and update in-app products in every store from the product file; never deletes',
+    group: 'Release',
+    load: () => import('../commands/iap/sync'),
+  },
+  {
     path: ['release', 'metadata', 'pull'],
     description:
       'Download the store listing text into release.<platform>.metadata; --screenshots adds images',

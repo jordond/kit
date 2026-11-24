@@ -583,7 +583,17 @@ export class FakePlay {
     }
     if (req.method === 'PATCH' && (m = rest.match(/^onetimeproducts\/([^/]+)$/))) {
       const id = m[1]!
-      if (this.failPatch.has(id)) return this.error(500, 'INTERNAL', 'Internal error encountered.')
+      if (this.failPatch.has(id)) {
+        return new Response(
+          JSON.stringify({
+            error: { code: 500, status: 'INTERNAL', message: 'Internal error encountered.' },
+          }),
+          {
+            status: 500,
+            headers: { 'content-type': 'application/json', 'retry-after': '0' },
+          },
+        )
+      }
       if (!req.query.get('updateMask')) return this.error(400, 'INVALID_ARGUMENT', 'updateMask is required')
       if (req.query.get('regionsVersion.version') !== this.regionVersion) {
         return this.error(

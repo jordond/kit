@@ -1,0 +1,253 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`kit iap the --json plan document 1`] = `
+{
+  "ok": true,
+  "stores": {
+    "apple": {
+      "actions": [
+        {
+          "id": "membership_card",
+          "kind": "create",
+          "summary": "create",
+        },
+        {
+          "id": "membership_card",
+          "kind": "localizations",
+          "summary": "localization en-US",
+        },
+        {
+          "id": "membership_card",
+          "kind": "price",
+          "summary": "price 4.99 (7.99 from <ahead>)",
+        },
+        {
+          "id": "membership_card",
+          "kind": "availability",
+          "summary": "availability",
+        },
+        {
+          "id": "membership_card",
+          "kind": "screenshot",
+          "summary": "screenshot",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "create",
+          "summary": "create",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "localizations",
+          "summary": "localization en-US",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "price",
+          "summary": "price 0.99",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "availability",
+          "summary": "availability",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "create",
+          "summary": "create",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "localizations",
+          "summary": "localization en-US, fr-FR",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "price",
+          "summary": "price 1.99",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "availability",
+          "summary": "availability",
+        },
+      ],
+      "label": "App Store Connect (app.example)",
+      "rows": [
+        {
+          "id": "membership_card",
+          "notes": [
+            "the first non-consumable ships with the app's next version: submit it from App Store Connect",
+            "scheduled 7.99 from <ahead>",
+          ],
+          "store": "apple",
+          "sync": "missing",
+        },
+        {
+          "id": "tokens_10",
+          "notes": [
+            "the first consumable ships with the app's next version: submit it from App Store Connect",
+            "no review screenshot: App Store Connect keeps it MISSING_METADATA",
+          ],
+          "store": "apple",
+          "sync": "missing",
+        },
+        {
+          "id": "poster_pack",
+          "notes": [
+            "the first non-consumable ships with the app's next version: submit it from App Store Connect",
+            "no review screenshot: App Store Connect keeps it MISSING_METADATA",
+          ],
+          "store": "apple",
+          "sync": "missing",
+        },
+      ],
+    },
+    "play": {
+      "actions": [
+        {
+          "id": "membership_card",
+          "kind": "upsert",
+          "summary": "create · price 4.99 US (+ converted regions)",
+        },
+        {
+          "id": "membership_card",
+          "kind": "activate",
+          "summary": "activate buy",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "upsert",
+          "summary": "create · price 0.99 US (+ converted regions)",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "activate",
+          "summary": "activate buy",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "upsert",
+          "summary": "create · price 1.99 US (+ converted regions)",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "activate",
+          "summary": "activate buy",
+        },
+      ],
+      "label": "Google Play (app.example)",
+      "rows": [
+        {
+          "id": "membership_card",
+          "notes": [
+            "Play moves to 7.99 on the first sync on or after <ahead>",
+          ],
+          "store": "play",
+          "sync": "missing",
+        },
+        {
+          "id": "tokens_10",
+          "notes": [],
+          "store": "play",
+          "sync": "missing",
+        },
+        {
+          "id": "poster_pack",
+          "notes": [],
+          "store": "play",
+          "sync": "missing",
+        },
+      ],
+    },
+    "revenuecat": {
+      "actions": [
+        {
+          "id": "membership_card",
+          "kind": "entitlement",
+          "summary": "entitlement membership",
+        },
+        {
+          "id": "membership_card",
+          "kind": "product",
+          "summary": "product apple",
+        },
+        {
+          "id": "membership_card",
+          "kind": "product",
+          "summary": "product play",
+        },
+        {
+          "id": "membership_card",
+          "kind": "attach",
+          "summary": "attach to membership",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "entitlement",
+          "summary": "entitlement tokens_10",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "product",
+          "summary": "product apple",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "product",
+          "summary": "product play",
+        },
+        {
+          "id": "tokens_10",
+          "kind": "attach",
+          "summary": "attach to tokens_10",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "entitlement",
+          "summary": "entitlement poster_pack",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "product",
+          "summary": "product apple",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "product",
+          "summary": "product play",
+        },
+        {
+          "id": "poster_pack",
+          "kind": "attach",
+          "summary": "attach to poster_pack",
+        },
+      ],
+      "label": "RevenueCat (projd2d1fc4a)",
+      "rows": [
+        {
+          "id": "membership_card",
+          "notes": [],
+          "store": "revenuecat",
+          "storeState": "not attached",
+          "sync": "missing",
+        },
+        {
+          "id": "tokens_10",
+          "notes": [],
+          "store": "revenuecat",
+          "storeState": "not attached",
+          "sync": "missing",
+        },
+        {
+          "id": "poster_pack",
+          "notes": [],
+          "store": "revenuecat",
+          "storeState": "not attached",
+          "sync": "missing",
+        },
+      ],
+    },
+  },
+}
+`;
