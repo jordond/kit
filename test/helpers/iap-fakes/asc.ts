@@ -1,3 +1,4 @@
+import { FakeAscSubscriptions } from './asc-subscriptions'
 import { type Json, json, type Req } from './common'
 
 // Stateful App Store Connect fake: in-memory catalog that writes change and reads report.
@@ -47,9 +48,11 @@ export class FakeAsc {
   >()
   territories = ['USA', 'CAN', 'GBR', 'DEU', 'JPN']
   private seq = 1000
+  /** Auto-renewable subscriptions: groups, plans, prices, offers (own file). */
+  readonly subs: FakeAscSubscriptions = new FakeAscSubscriptions(this)
   constructor(readonly origin: () => string) {}
 
-  private nextId(): string {
+  nextId(): string {
     return String(++this.seq)
   }
 
@@ -122,7 +125,7 @@ export class FakeAsc {
     return ready ? 'READY_TO_SUBMIT' : 'MISSING_METADATA'
   }
 
-  private page<T>(items: T[], req: Req, path: string): { items: T[]; next?: string } {
+  page<T>(items: T[], req: Req, path: string): { items: T[]; next?: string } {
     const start = Number(req.query.get('cursor') ?? 0)
     const items_ = items.slice(start, start + this.pageSize)
     if (start + this.pageSize >= items.length) return { items: items_ }
@@ -160,7 +163,7 @@ export class FakeAsc {
     }
   }
 
-  private screenshotJson(id: string) {
+  screenshotJson(id: string) {
     const s = this.screenshots.get(id)!
     return {
       type: 'inAppPurchaseAppStoreReviewScreenshots',
@@ -186,7 +189,7 @@ export class FakeAsc {
     }
   }
 
-  private error(status: number, code: string, detail: string) {
+  error(status: number, code: string, detail: string) {
     return json({ errors: [{ status: String(status), code, title: code, detail }] }, status)
   }
 
@@ -446,6 +449,8 @@ export class FakeAsc {
       if (s.state === 'UPLOAD_COMPLETE') s.state = 'COMPLETE'
       return json({ data: this.screenshotJson(m[1]!) })
     }
+    const sub = this.subs.handle(req)
+    if (sub) return sub
     if (req.method === 'DELETE') return this.error(500, 'FAKE', 'kit must never delete')
     return this.error(404, 'NOT_FOUND', `fake ASC: no route ${req.method} ${p}`)
   }
