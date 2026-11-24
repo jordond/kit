@@ -13,6 +13,8 @@ import { detectPackageManager, hasBin, installRoot, pmExec } from '../pm'
 import { runQuiet } from '../proc'
 import { globalInstaller, newerThan, readUpdateState, updateCheckOff } from '../self-update'
 import { fillEnv } from '../env/init'
+import { iapSecretNames } from '../iap/creds'
+import { storeTargets } from '../iap/model'
 import { onGitHubActions, releaseSecrets, renameHints } from '../release/creds'
 import { checkXcconfigOwnership as xcconfigClash, xcconfigApplies } from '../release/builtin-preflights'
 import { androidVersionDrift, iosVersionDrift } from '../release/version'
@@ -39,6 +41,7 @@ import {
   checkMaestroJava,
   checkMise,
   checkPathKit,
+  checkIapCredentials,
   checkReleaseSecrets,
   checkRuby,
   checkSimulator,
@@ -376,6 +379,14 @@ export function doctorEntries(
       run: () =>
         checkReleaseSecrets(releaseSecrets(config), process.env, onGitHubActions(), (m) =>
           renameHints(m, (old) => !!process.env[old]),
+        ),
+    },
+    {
+      id: 'iap-credentials',
+      run: () =>
+        checkIapCredentials(
+          config?.iap ? iapSecretNames(storeTargets(config, config.iap)) : undefined,
+          process.env,
         ),
     },
     { id: 'ci-pin', run: ciPin },

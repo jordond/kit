@@ -642,6 +642,33 @@ export function checkReleaseSecrets(
 }
 
 /**
+ * `kit iap` credentials per configured store (`iapSecretNames`): a store without them is skipped
+ * by `kit iap sync`, so a missing one warns rather than fails.
+ */
+export function checkIapCredentials(
+  stores: Partial<Record<'apple' | 'play' | 'revenuecat', string[]>> | undefined,
+  env: Record<string, string | undefined>,
+): Check {
+  const label = 'iap credentials'
+  if (!stores || !Object.keys(stores).length) {
+    return { id: 'iap-credentials', label, status: 'skip', detail: 'no iap stores configured' }
+  }
+  const missing = Object.entries(stores)
+    .map(([store, names]) => [store, names.filter((n) => !env[n]?.trim())] as const)
+    .filter(([, names]) => names.length)
+  if (!missing.length) {
+    return { id: 'iap-credentials', label, status: 'ok', detail: Object.keys(stores).join(', ') }
+  }
+  return {
+    id: 'iap-credentials',
+    label,
+    status: 'warn',
+    detail: missing.map(([store, names]) => `${store}: missing ${names.join(', ')}`).join('; '),
+    hint: 'Add them to .env; kit iap sync skips a store without its credentials (see docs/iap.md)',
+  }
+}
+
+/**
  * Workflow `uses: jordond/kit/…@<sha> # vX.Y.Z` pins vs the package.json pin. The SHA itself isn't
  * resolved (stub): the version comment Renovate keeps next to it is compared instead.
  */

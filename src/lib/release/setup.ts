@@ -1,4 +1,3 @@
-import { createPrivateKey, sign } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import type { Flags } from '../../cli/command'
@@ -9,6 +8,7 @@ import { ExitCode, KitError } from '../errors'
 import { runPiped } from '../proc'
 import { confirm } from '../prompt'
 import { redact, registerSecret } from '../secrets'
+import { ascToken } from '../stores/asc-token'
 
 /**
  * Shared by `kit release setup android|ios`: read and write release secrets in the root `.env`, set
@@ -158,20 +158,6 @@ export function ascKeyFile(file: string): string {
     )
   }
   return Buffer.from(text).toString('base64')
-}
-
-const b64url = (v: string | Buffer) => Buffer.from(v).toString('base64url')
-
-/** An App Store Connect API token (ES256, 5 minutes). */
-export function ascToken(keyId: string, issuerId: string, p8: string, now = Date.now()): string {
-  const iat = Math.floor(now / 1000)
-  const head = b64url(JSON.stringify({ alg: 'ES256', kid: keyId, typ: 'JWT' }))
-  const body = b64url(JSON.stringify({ iss: issuerId, iat, exp: iat + 300, aud: 'appstoreconnect-v1' }))
-  const signature = sign('sha256', Buffer.from(`${head}.${body}`), {
-    key: createPrivateKey(p8),
-    dsaEncoding: 'ieee-p1363',
-  })
-  return `${head}.${body}.${b64url(signature)}`
 }
 
 export type Verified = 'ok' | 'unreachable' | 'skipped'
