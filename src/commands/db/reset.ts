@@ -12,7 +12,7 @@ export default defineCommand({
   async run(ctx) {
     const { relative } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
-    const { d1Args, pinCloudflareAccount, resolveD1, seedFile, wrangler } =
+    const { d1Args, ensureWrangler, pinCloudflareAccount, resolveD1, seedFile, wrangler } =
       await import('../../lib/cloudflare')
     const { locateLocalD1, removeLocalD1, requireLocalD1 } = await import('../../lib/d1-local')
     const { ExitCode, KitError } = await import('../../lib/errors')
@@ -72,6 +72,7 @@ export default defineCommand({
     if (!(await confirm(ctx.flags, `Reset local ${db.name}? Its local data is deleted`))) {
       throw new KitError('Cancelled', undefined, ExitCode.interrupted)
     }
+    await ensureWrangler(ctx, root, config, [db.target])
     pinCloudflareAccount(root, config)
     removeLocalD1(local)
     if (!ctx.flags.json)

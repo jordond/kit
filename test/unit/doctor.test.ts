@@ -161,7 +161,7 @@ describe('.env completeness', () => {
 
   test('skip, missing file, missing keys, complete', () => {
     expect(checkEnvFile(undefined, 'A=1').status).toBe('skip')
-    expect(checkEnvFile('A=', undefined)).toMatchObject({ status: 'fail', hint: 'Run `kit init`' })
+    expect(checkEnvFile('A=', undefined)).toMatchObject({ status: 'fail', hint: 'Run `kit env`' })
     const partial = checkEnvFile('A=\nB=\nC=', 'A=secret-value\n')
     expect(partial).toMatchObject({ status: 'warn', detail: 'missing B, C' })
     expect(JSON.stringify(partial)).not.toContain('secret-value')

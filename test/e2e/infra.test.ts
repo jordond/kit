@@ -267,6 +267,31 @@ describe('env push when a remote cannot be listed', () => {
   })
 })
 
+describe('env', () => {
+  test('copies the missing keys from .env.example, names only, and is idempotent', async () => {
+    const dry = await fx.kit(['env', '--dry-run', '--json'])
+    expect(dry.code).toBe(0)
+    expect(JSON.parse(dry.stdout)).toEqual({ dryRun: true, created: false, added: ['OPTIONAL_KEY'] })
+    expect(read('.env')).not.toContain('OPTIONAL_KEY')
+
+    const r = await fx.kit(['env'])
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('add OPTIONAL_KEY to .env')
+    expect(r.stderr).not.toContain(SECRET)
+    expect(read('.env')).toBe(
+      `API_SECRET=${SECRET}\nPUBLIC_URL=https://edge.example.com\nDEPLOY_TOKEN=${TOKEN}\nOPTIONAL_KEY=\n`,
+    )
+
+    const again = await fx.kit(['env', '--json'])
+    expect(JSON.parse(again.stdout)).toEqual({ dryRun: false, created: false, added: [] })
+  })
+
+  test('no .env.example: exit 3', async () => {
+    rmSync(join(fx.dir, '.env.example'))
+    expect((await fx.kit(['env'])).code).toBe(3)
+  })
+})
+
 describe('env init', () => {
   test('--dry-run reports what it would ask for', async () => {
     rmSync(join(fx.dir, '.env'))
@@ -351,5 +376,5 @@ describe('db', () => {
 
 test('help lists the infra groups', async () => {
   const r = await fx.kit(['--help'])
-  expect(r.stdout + r.stderr).toContain('Render, check and push env from .env')
+  expect(r.stdout + r.stderr).toContain('Fill .env from .env.example; render, check and push env from .env')
 })

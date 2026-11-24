@@ -110,7 +110,7 @@ A repo adds its own commands, or wraps a built-in, with a file in `.kit/commands
 | [Maestro](docs/maestro.md)                           | `kit qa`, `kit shots`, suites, fixtures, the reusable QA workflow                                       |
 | [Store screenshots](docs/shots.md)                   | `kit shots export`, `pages`, `studio` and `migrate`                                                     |
 | [Releases](docs/releases.md)                         | Versions, `kit release`, promote, rollout, preflight checks, the store listing, the distribute workflow |
-| [Env](docs/env.md)                                   | The `.env` schema, `kit env push` and `kit env rotate`                                                  |
+| [Env](docs/env.md)                                   | The `.env` schema, `kit env`, `push` and `rotate`                                                       |
 | [Cloudflare Workers](docs/cloudflare.md)             | Preview deploys, rollback, logs, D1                                                                     |
 | [Kotlin toolchain](docs/kotlin-toolchain.md)         | Apps built with the JetBrains Kotlin Toolchain instead of Gradle                                        |
 | [Coding agents](docs/agents.md)                      | The `AGENTS.md` guide, `kit agents sync`, the Claude Code hook, `kit agents migrate`                    |

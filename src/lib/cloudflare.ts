@@ -3,7 +3,7 @@ import { join, relative, resolve } from 'node:path'
 import type { KitContext } from '../cli/command'
 import type { KitConfig } from '../config/schema'
 import { ExitCode, KitError } from './errors'
-import { detectPackageManager, pmExec } from './pm'
+import { detectPackageManager, hasBin, installRoot, pmExec } from './pm'
 import { addChildEnv } from './proc'
 import { type PipeResult, pipeSecret } from './secrets'
 
@@ -144,6 +144,53 @@ export function wrangler(
   }
   const cwd = resolve(root, t.dir)
   return { cmd: pmExec(detectPackageManager(cwd, root), 'wrangler', ...args), cwd }
+}
+
+/**
+ * Install the dependencies of each worker target in `targets` that has no wrangler in its
+ * node_modules (or an ancestor's up to the root), before kit runs `wrangler` there: without it the
+ * package manager's exec falls through to whatever `wrangler` is on PATH (a Volta shim, a global
+ * install) and fails with an error about that instead. One `<pm> install` per install root. Still no
+ * wrangler after the install means the target does not depend on it: a precondition error naming
+ * the fix.
+ */
+export async function ensureWrangler(
+  ctx: Pick<KitContext, 'flags' | 'log'>,
+  root: string,
+  config: KitConfig,
+  targets: string[],
+): Promise<void> {
+  const { run, runToStderr } = await import('./proc')
+  const missing = [...new Set(targets)].filter((t) => {
+    const target = config.targets[t]
+    return target && !hasBin(root, target.dir, 'wrangler')
+  })
+  const done = new Set<string>()
+  for (const t of missing) {
+    const dir = resolve(root, config.targets[t]!.dir)
+    const cwd = installRoot(dir, root)
+    const where = relative(root, cwd) || '.'
+    if (!done.has(cwd)) {
+      done.add(cwd)
+      const cmd = [detectPackageManager(dir, root), 'install']
+      if (!ctx.flags.quiet) ctx.log.step(`${cmd.join(' ')} (${where}): ${t} has no wrangler installed`)
+      const code = await (ctx.flags.json ? runToStderr : run)(cmd, { cwd })
+      if (code !== 0) {
+        throw new KitError(
+          `${cmd.join(' ')} failed in ${where} (exit ${code})`,
+          `kit runs wrangler from ${relative(root, dir) || '.'}; install its dependencies, then retry`,
+          ExitCode.failed,
+        )
+      }
+    }
+    if (!hasBin(root, dir, 'wrangler')) {
+      throw new KitError(
+        `No wrangler installed for target "${t}" (${relative(root, dir) || '.'})`,
+        `Add it as a dev dependency there: ${detectPackageManager(dir, root)} add -D wrangler`,
+        ExitCode.precondition,
+      )
+    }
+  }
 }
 
 /** `wrangler secret put <key>` with the value on stdin. */
@@ -317,6 +364,7 @@ export async function runD1(
     else ctx.log.step(shown)
     return 'dry-run'
   }
+  await ensureWrangler(ctx, root, config, [db.target])
   pinCloudflareAccount(root, config)
   if (
     (opts.confirm ?? opts.mutates) &&

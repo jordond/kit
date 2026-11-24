@@ -246,6 +246,12 @@ export const builtins: BuiltinEntry[] = [
   // end maestro
   // infra: env + db
   {
+    path: ['env'],
+    description: 'Fill .env from .env.example; render, check and push env from .env',
+    group: 'Infra',
+    load: () => import('../commands/env'),
+  },
+  {
     path: ['env', 'sync'],
     description: 'Render env outputs (.dev.vars) from .env',
     group: 'Infra',
@@ -461,7 +467,7 @@ export const groupDescriptions: Record<string, string> = {
   metadata: 'Sync the store listing (text, screenshots)',
   setup: 'Create and store the release secrets (.env, GitHub Actions)',
   version: 'Version names in the catalog TOML',
-  env: 'Render, check and push env from .env',
+  env: 'Fill .env from .env.example; render, check and push env from .env',
   db: 'Cloudflare D1 migrations, queries, backup, restore, seed and reset',
   add: 'Scaffold a module, a target or the Maestro flows into this repo',
   agents: 'Point coding agents at kit: the AGENTS.md guide, the Claude Code hook, a migration prompt',

@@ -17,7 +17,7 @@ export default defineCommand({
   async run(ctx) {
     const { relative } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
-    const { pinCloudflareAccount, wrangler } = await import('../../lib/cloudflare')
+    const { ensureWrangler, pinCloudflareAccount, wrangler } = await import('../../lib/cloudflare')
     const { ExitCode, KitError } = await import('../../lib/errors')
     const { describe } = await import('../../lib/git')
     const { emitJson } = await import('../../lib/log')
@@ -67,6 +67,7 @@ export default defineCommand({
       else ctx.log.step(`${cwdOf(w.cwd)} $ ${w.cmd.join(' ')}`)
       return
     }
+    await ensureWrangler(ctx, root, config, [deployed.target])
     if (config.cloudflare?.accountId) pinCloudflareAccount(root, config)
     let to = ctx.args.to
     let picked: import('../../lib/worker').RollbackTarget | undefined

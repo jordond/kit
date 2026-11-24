@@ -14,7 +14,7 @@ export default defineCommand({
   async run(ctx) {
     const { relative } = await import('node:path')
     const { requireProject } = await import('../cli/command')
-    const { pinCloudflareAccount, wrangler } = await import('../lib/cloudflare')
+    const { ensureWrangler, pinCloudflareAccount, wrangler } = await import('../lib/cloudflare')
     const { ExitCode, KitError } = await import('../lib/errors')
     const { emitJson } = await import('../lib/log')
     const { runInteractive } = await import('../lib/proc')
@@ -46,6 +46,7 @@ export default defineCommand({
         ExitCode.usage,
       )
     }
+    await ensureWrangler(ctx, root, config, [name!])
     if (config.cloudflare?.accountId) pinCloudflareAccount(root, config)
     // Attached to the terminal; the log lines are the result, so they stay on stdout. A Ctrl-C is the
     // way out of a tail: wrangler closes the session and kit exits 130.

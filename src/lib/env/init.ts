@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { dotenvLine } from '../dotenv'
+import { dotenvLine, parseEnvKeys } from '../dotenv'
 import { parseDotenv, writeAtomic } from './render'
 import type { EnvKey, EnvSchema } from './schema'
 
@@ -46,22 +46,56 @@ export interface InitPlan {
   text: string
 }
 
-export function planInit(root: string, schema: EnvSchema): InitPlan {
-  const envPath = join(root, '.env')
-  const examplePath = join(root, '.env.example')
-  const example = existsSync(examplePath) ? readFileSync(examplePath, 'utf8') : null
-  const created = !existsSync(envPath)
-  let text = created ? (example ?? '') : readFileSync(envPath, 'utf8')
-  const parsed = parseDotenv(text, 'env')
-  const backfilled: string[] = []
-  if (example !== null && !created) {
-    for (const [k, v] of Object.entries(parseDotenv(example, 'env'))) {
-      if (k in parsed) continue
-      text = setKey(text, k, v)
-      parsed[k] = v
-      backfilled.push(k)
-    }
+export interface FillPlan {
+  /** `.env` did not exist; it starts as a copy of `.env.example`. */
+  created: boolean
+  /** Keys copied from `.env.example` that `.env` lacked (none when created). */
+  added: string[]
+  /** `.env` text after the copy. */
+  text: string
+}
+
+/**
+ * `.env` with every key `.env.example` names: a copy of the example when `.env` is missing,
+ * otherwise each missing key appended with the example's value. Existing lines never change, and a
+ * commented-out `# KEY=` in `.env` does not count as set (the same rule as `kit doctor`).
+ */
+export function planFill(example: string, env: string | null): FillPlan {
+  if (env === null) return { created: true, added: [], text: example }
+  let text = env
+  const have = new Set(parseEnvKeys(env))
+  const added: string[] = []
+  for (const [k, v] of Object.entries(parseDotenv(example, 'env'))) {
+    if (have.has(k)) continue
+    text = setKey(text, k, v)
+    have.add(k)
+    added.push(k)
   }
+  return { created: false, added, text }
+}
+
+const readIf = (path: string) => (existsSync(path) ? readFileSync(path, 'utf8') : null)
+
+/** `kit env`: write `planFill` to `.env` (0600). Undefined without a `.env.example`; nothing is written when nothing changes. */
+export function fillEnv(root: string, dryRun = false): FillPlan | undefined {
+  const example = readIf(join(root, '.env.example'))
+  if (example === null) return undefined
+  const plan = planFill(example, readIf(join(root, '.env')))
+  if (!dryRun && (plan.created || plan.added.length)) {
+    let text = plan.text
+    if (text && !text.endsWith('\n')) text += '\n'
+    writeAtomic(join(root, '.env'), text)
+  }
+  return plan
+}
+
+export function planInit(root: string, schema: EnvSchema): InitPlan {
+  const example = readIf(join(root, '.env.example'))
+  const env = readIf(join(root, '.env'))
+  const fill =
+    example === null ? { created: env === null, added: [], text: env ?? '' } : planFill(example, env)
+  const { created, added: backfilled, text } = fill
+  const parsed = parseDotenv(text, 'env')
   const ask = schema.keys.filter((k) => {
     if (!k.required) return false
     const current = parsed[k.name] ?? ''

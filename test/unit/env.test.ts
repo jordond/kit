@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { configSchema, type KitConfig } from '../../src/config/schema'
-import { applyInit, planInit, setKey } from '../../src/lib/env/init'
+import { applyInit, fillEnv, planFill, planInit, setKey } from '../../src/lib/env/init'
 import { type Destination, executePush, GITHUB, type ListResult, planPush } from '../../src/lib/env/push'
 import {
   checkOutputs,
@@ -312,6 +312,31 @@ describe('init', () => {
     expect(plan.backfilled).toEqual(['OPTIONAL_KEY', 'NEW_KEY'])
     expect(plan.ask).toEqual([])
     expect(applyInit(root, plan, {}).NEW_KEY).toBe('default')
+  })
+})
+
+describe('kit env (fill)', () => {
+  test('appends only the missing keys with the example value; set lines and comments stay', () => {
+    const example = '# api\nA=replace-me\nB=default\nC=\n'
+    const plan = planFill(example, '# mine\nA=secret\n')
+    expect(plan).toEqual({ created: false, added: ['B', 'C'], text: '# mine\nA=secret\nB=default\nC=\n' })
+    expect(planFill(example, plan.text).added).toEqual([])
+  })
+
+  test('a commented-out key in .env counts as missing, like kit doctor', () => {
+    expect(planFill('A=x\n', '# A=\n').text).toBe('# A=\nA=x\n')
+  })
+
+  test('a missing .env is a copy of the example; no example: undefined', () => {
+    const root = tmp()
+    expect(fillEnv(root)).toBeUndefined()
+    writeFileSync(join(root, '.env.example'), 'A=1\nB=')
+    expect(fillEnv(root, true)?.created).toBe(true)
+    expect(existsSync(join(root, '.env'))).toBe(false)
+    expect(fillEnv(root)?.created).toBe(true)
+    expect(readFileSync(join(root, '.env'), 'utf8')).toBe('A=1\nB=\n')
+    expect(statSync(join(root, '.env')).mode & 0o777).toBe(0o600)
+    expect(fillEnv(root)).toEqual({ created: false, added: [], text: 'A=1\nB=\n' })
   })
 })
 

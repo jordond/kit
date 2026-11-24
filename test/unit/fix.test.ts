@@ -119,7 +119,14 @@ describe('which checks carry a fix', () => {
     expect(pinVersion('file:../kit')).toBeUndefined()
   })
 
-  test('tools, .env and secrets are never fixed', () => {
+  test('missing .env keys carry the kit env fix when one is given', () => {
+    const fix: Fix = { description: 'kit env', action: { edit: () => undefined } }
+    expect(checkEnvFile('A=\n', undefined, fix).fix).toBe(fix)
+    expect(checkEnvFile('A=\nB=\n', 'A=1\n', fix).fix).toBe(fix)
+    expect(fixable([checkEnvFile('A=\n', 'A=1\n', fix)])).toEqual([])
+  })
+
+  test('tools, .env values and secrets are never fixed', () => {
     const never = [
       checkJava(undefined, true),
       checkXcode(undefined, true, 'darwin'),

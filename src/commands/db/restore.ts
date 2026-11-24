@@ -13,7 +13,7 @@ export default defineCommand({
     const { accessSync, constants, existsSync } = await import('node:fs')
     const { relative, resolve } = await import('node:path')
     const { requireProject } = await import('../../cli/command')
-    const { d1Args, d1Tables, pinCloudflareAccount, resolveD1, runD1, TABLES_SQL, wrangler } =
+    const { d1Args, d1Tables, ensureWrangler, pinCloudflareAccount, resolveD1, runD1, TABLES_SQL, wrangler } =
       await import('../../lib/cloudflare')
     const { locateLocalD1, removeLocalD1, requireLocalD1 } = await import('../../lib/d1-local')
     const { ExitCode, KitError } = await import('../../lib/errors')
@@ -45,6 +45,7 @@ export default defineCommand({
     if (remote) {
       // Remote tables are never dropped: a database that already has some is the user's call.
       if (!ctx.flags.dryRun) {
+        await ensureWrangler(ctx, root, config, [db.target])
         pinCloudflareAccount(root, config)
         const w = wrangler(
           root,
@@ -89,6 +90,7 @@ export default defineCommand({
       }
       return
     }
+    await ensureWrangler(ctx, root, config, [db.target])
     pinCloudflareAccount(root, config)
     if (!(await confirm(ctx.flags, `Replace local ${db.name} with ${name}? Its local data is deleted`))) {
       throw new KitError('Cancelled', undefined, ExitCode.interrupted)

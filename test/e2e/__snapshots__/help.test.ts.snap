@@ -37,7 +37,7 @@ Release
   changelog   List the changes since the last release tag
 
 Infra
-  env         Render, check and push env from .env …
+  env         Fill .env from .env.example; render, check and push env from .env …
   db          Cloudflare D1 migrations, queries, backup, restore, seed and reset …
   logs        Tail a deployed worker's logs
 
@@ -153,10 +153,15 @@ Options
 `;
 
 exports[`help kit env --help 1`] = `
-"Render, check and push env from .env
+"Copy keys missing from .env out of .env.example (never changes a set value)
 
 Usage
   kit env <command> [options]
+
+Examples
+  kit env
+  kit env --dry-run
+  kit env --json
 
 Commands
   sync    Render env outputs (.dev.vars) from .env
@@ -168,6 +173,12 @@ Commands
 Options
   -h, --help     Show help
   -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
 
 "
 `;
@@ -1129,6 +1140,37 @@ Options
       --bail     Stop at the first failure
       --ci       Fail when CI workflow pins drift from the package.json pin
       --fix      Apply the safe, local fixes, then check again
+
+"
+`;
+
+exports[`help kit env --help 2`] = `
+"Copy keys missing from .env out of .env.example (never changes a set value)
+
+Usage
+  kit env <command> [options]
+
+Examples
+  kit env
+  kit env --dry-run
+  kit env --json
+
+Commands
+  sync    Render env outputs (.dev.vars) from .env
+  check   Validate .env and check outputs for drift
+  push    Push secrets with wrangler and gh
+  init    Create .env and ask for missing keys
+  rotate  Generate a new value for a key and sync
+
+Options
+  -h, --help     Show help
+  -V, --version  Show kit version
+      --json     Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run  Plan and run read-only steps; skip mutations
+  -y, --yes      Accept confirmations (never skips prod)
+  -v, --verbose  Stream all child output
+  -q, --quiet    Errors and summary only
+      --bail     Stop at the first failure
 
 "
 `;

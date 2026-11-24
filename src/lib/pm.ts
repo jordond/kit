@@ -93,3 +93,16 @@ export function missingInstall(dir: string, root: string): { cmd: string[]; cwd:
   if (existsSync(join(cwd, 'node_modules')) || !hasDependencies(cwd)) return undefined
   return { cmd: [detectPackageManager(dir, root), 'install'], cwd }
 }
+
+/**
+ * Whether `bin` is installed for `dir` (repo-relative or absolute): in its node_modules or in any
+ * ancestor's up to the repo root, as Node resolves it. Every place `<pm> install` for `dir` can
+ * install into is covered.
+ */
+export function hasBin(root: string, dir: string, bin: string): boolean {
+  const stop = resolve(root)
+  for (let d = resolve(root, dir); ; d = dirname(d)) {
+    if (existsSync(join(d, 'node_modules/.bin', bin))) return true
+    if (d === stop || dirname(d) === d) return false
+  }
+}

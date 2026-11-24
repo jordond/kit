@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { configSchema, type KitConfig } from '../../src/config/schema'
 import {
   accountTarget,
   d1Args,
+  ensureWrangler,
   parseSecretNames,
   pinCloudflareAccount,
   readAccountId,
@@ -209,4 +210,68 @@ describe('d1Args', () => {
 
 test('sqlString doubles embedded quotes', () => {
   expect(sqlString("O'Brien")).toBe("'O''Brien'")
+})
+
+describe('ensureWrangler', () => {
+  // A repo whose worker `w` is its own npm package; a fake npm on PATH "installs" wrangler or not.
+  async function attempt(installs: boolean, exit = 0) {
+    const repo = mkdtempSync(join(tmpdir(), 'kit-ensure-'))
+    const bin = join(repo, '.bin')
+    mkdirSync(join(repo, 'w'), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(join(repo, 'w/package.json'), '{"devDependencies":{"wrangler":"*"}}')
+    writeFileSync(join(repo, 'w/package-lock.json'), '{}')
+    const body = installs ? 'mkdir -p node_modules/.bin && touch node_modules/.bin/wrangler' : ''
+    writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho "$PWD $*" >> "${repo}/calls"\n${body}\nexit ${exit}\n`)
+    chmodSync(join(bin, 'npm'), 0o755)
+    const cfg = { ...config, targets: { w: { kind: 'worker', dir: 'w' } } } as unknown as KitConfig
+    const steps: string[] = []
+    const ctx = {
+      flags: { json: true, quiet: false },
+      log: { step: (m: string) => steps.push(m) },
+    } as unknown as Parameters<typeof ensureWrangler>[0]
+    const path = process.env.PATH
+    process.env.PATH = `${bin}:${path}`
+    try {
+      const error = await ensureWrangler(ctx, repo, cfg, ['w', 'w']).then(
+        () => undefined,
+        (e: unknown) => e as { message: string; exitCode: number },
+      )
+      const calls = await Bun.file(join(repo, 'calls'))
+        .text()
+        .catch(() => '')
+      return { error, steps, calls: calls.trim().split('\n').filter(Boolean), repo }
+    } finally {
+      process.env.PATH = path
+      rmSync(repo, { recursive: true, force: true })
+    }
+  }
+
+  test('installs once in the target install root when wrangler is missing', async () => {
+    const r = await attempt(true)
+    expect(r.error).toBeUndefined()
+    expect(r.calls).toHaveLength(1)
+    expect(r.calls[0]!.endsWith('/w install')).toBe(true)
+    expect(r.steps).toEqual(['npm install (w): w has no wrangler installed'])
+  })
+
+  test('a failed install and a target without wrangler are errors that say so', async () => {
+    const failed = await attempt(false, 1)
+    expect(failed.error).toMatchObject({ message: 'npm install failed in w (exit 1)', exitCode: 1 })
+    const absent = await attempt(false)
+    expect(absent.error).toMatchObject({ message: 'No wrangler installed for target "w" (w)', exitCode: 4 })
+  })
+
+  test('an installed wrangler runs nothing', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'kit-ensure-ok-'))
+    mkdirSync(join(repo, 'node_modules/.bin'), { recursive: true })
+    writeFileSync(join(repo, 'node_modules/.bin/wrangler'), '')
+    const cfg = { ...config, targets: { w: { kind: 'worker', dir: '.' } } } as unknown as KitConfig
+    const ctx = { flags: {}, log: { step: () => {} } } as unknown as Parameters<typeof ensureWrangler>[0]
+    try {
+      expect(await ensureWrangler(ctx, repo, cfg, ['w'])).toBeUndefined()
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
 })

@@ -4,12 +4,13 @@ One `.env` per repo; `env.schema` (a zod object, usually `.kit/env.ts`) declares
 `env.workerSecrets` / `env.githubSecrets` say which remotes hold it. Keys are secret unless marked
 `.meta({ secret: false })`. Values never reach output: only names and statuses are printed.
 
-| Command                                  | Does                                                                                                                                                                 |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kit env push`                           | Every worker in `env.workerSecrets` (`wrangler secret put`) and `env.githubSecrets` (`gh secret set`); lists names, confirms (`--yes` skips), `--dry-run` only lists |
-| `kit env push --workers`                 | Every worker, GitHub skipped. Exclusive with `--all`, `--target` and `--github`                                                                                      |
-| `kit env push --target <t>` / `--github` | One worker / GitHub only; both flags together push that worker and GitHub                                                                                            |
-| `kit env rotate <KEY...> [--push]`       | New generated value in `.env`, outputs re-rendered as `kit env sync` does, then prints where the key lives and the `kit env push …` to run; `--push` runs it         |
+| Command                                  | Does                                                                                                                                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kit env`                                | Copies every key `.env.example` names and `.env` lacks into `.env` with the example's value (a missing `.env` starts as a copy); set lines never change, no config needed. `kit doctor --fix` runs it |
+| `kit env push`                           | Every worker in `env.workerSecrets` (`wrangler secret put`) and `env.githubSecrets` (`gh secret set`); lists names, confirms (`--yes` skips), `--dry-run` only lists                                  |
+| `kit env push --workers`                 | Every worker, GitHub skipped. Exclusive with `--all`, `--target` and `--github`                                                                                                                       |
+| `kit env push --target <t>` / `--github` | One worker / GitHub only; both flags together push that worker and GitHub                                                                                                                             |
+| `kit env rotate <KEY...> [--push]`       | New generated value in `.env`, outputs re-rendered as `kit env sync` does, then prints where the key lives and the `kit env push …` to run; `--push` runs it                                          |
 
 `kit env rotate` only takes keys whose schema says how to make them:
 
@@ -45,4 +46,8 @@ INSTALL_ID: z.uuid().meta({ generate: 'uuid' }),
 - `--json` reports `{ rotated: [{ key, destinations }], pushed }`, never a value. When `.env` holds
   a new value that is not on its remotes yet, `pending` is the command that finishes the job; the
   same note goes to stderr.
+- Before kit runs `wrangler` from a worker target (`env push`, `logs`, `db`, `release rollback`,
+  previews) it installs that target's dependencies when wrangler is not in its `node_modules`, so a
+  fresh clone does not fall through to a global `wrangler` or a Volta shim. A target that still has
+  no wrangler afterwards is an error naming the fix (`<pm> add -D wrangler`).
 - A key without `generate` belongs to a provider: rotate it there, update `.env`, then `kit env push`.

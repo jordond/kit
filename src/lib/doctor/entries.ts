@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { join, relative, resolve } from 'node:path'
 import { installDir } from '../../config/load'
 import type { KitConfig } from '../../config/schema'
 import { AGENTS_FILE, agentGuide, agentPlan, applyAgents, currentBlock, guideFacts } from '../agents'
@@ -9,9 +9,10 @@ import { latestVersion } from '../kitref'
 import { androidSdkDir, findSdkTool, hostAbi, installedSystemImages, SDK_TOOLS } from '../devices'
 import { preferredSystemImage, systemImagePackage } from '../devices/pick'
 import { findMaestro } from '../maestro/bin'
-import { detectPackageManager, installRoot, pmExec } from '../pm'
+import { detectPackageManager, hasBin, installRoot, pmExec } from '../pm'
 import { runQuiet } from '../proc'
 import { globalInstaller, newerThan, readUpdateState, updateCheckOff } from '../self-update'
+import { fillEnv } from '../env/init'
 import { onGitHubActions, releaseSecrets, renameHints } from '../release/creds'
 import { androidVersionDrift, iosVersionDrift } from '../release/version'
 import { parseToml, readToml } from '../toml'
@@ -74,17 +75,7 @@ export function workerInstall(root: string, workerDir: string): { cmd: string[];
   }
 }
 
-/**
- * Whether `bin` is installed for `dir` (repo-relative): in its node_modules or in any ancestor's up
- * to the repo root, as Node resolves it. Every place `workerInstall` can install into is covered.
- */
-export function hasBin(root: string, dir: string, bin: string): boolean {
-  const stop = resolve(root)
-  for (let d = resolve(root, dir); ; d = dirname(d)) {
-    if (existsSync(join(d, 'node_modules/.bin', bin))) return true
-    if (d === stop || dirname(d) === d) return false
-  }
-}
+export { hasBin }
 
 /**
  * The checks for `root`. Probes run once per pass and are shared between checks; `refresh` drops
@@ -322,7 +313,20 @@ export function doctorEntries(
     { id: 'ktlint', run: async () => (ktlintUsed ? checkKtlint(await ktlint(), true) : undefined) },
     { id: 'mise', run: mise },
     { id: 'lefthook', run: lefthook },
-    { id: 'env', run: () => checkEnvFile(read('.env.example'), read('.env')) },
+    {
+      id: 'env',
+      run: () =>
+        checkEnvFile(read('.env.example'), read('.env'), {
+          description: 'copy the missing keys from .env.example into .env (kit env)',
+          action: {
+            edit: () => {
+              fillEnv(root)
+              return undefined
+            },
+          },
+          after: 'Set the values of the copied keys in .env',
+        }),
+    },
     {
       id: 'agents',
       run: () =>

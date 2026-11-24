@@ -1,6 +1,6 @@
 import type { Flags } from '../../cli/command'
 import type { KitConfig } from '../../config/schema'
-import { pinCloudflareAccount } from '../cloudflare'
+import { ensureWrangler, pinCloudflareAccount } from '../cloudflare'
 import { ExitCode, KitError } from '../errors'
 import type { Logger } from '../log'
 import { confirm } from '../prompt'
@@ -118,6 +118,8 @@ export async function preflightPush(
       ExitCode.usage,
     )
   }
+  // Listing runs wrangler even on --dry-run, so a fresh clone installs first.
+  await ensureWrangler(ctx, root, config, workerNames)
   if (workerNames.length) pinCloudflareAccount(root, config)
 
   const proceedOnListFailure = !opts.strict && ctx.flags.yes

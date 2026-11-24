@@ -152,3 +152,13 @@ export function dotenvAmbiguities(text: string): DotenvAmbiguity[] {
   })
   return out
 }
+
+/** Key names set in a dotenv file, in order. A commented-out `# KEY=` line does not count. */
+export function parseEnvKeys(text: string): string[] {
+  const keys: string[] = []
+  for (const line of text.split('\n')) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/)
+    if (m) keys.push(m[1]!)
+  }
+  return keys
+}

@@ -7,8 +7,8 @@ import { readXcconfig, setModuleVersion, setXcconfigVersion } from '../release/v
 /**
  * `kit doctor --fix`: what a check can repair by itself (./repair.ts runs them). Only safe, local repairs: a command in
  * the repo (`lefthook install`, `mise install`, the package manager's install, `chmod +x`) or a
- * small in-process edit (the version files, the workflow pins). Tools, logins, `.env` values and
- * secrets are never fixed; their checks keep a hint.
+ * small in-process edit (the version files, the workflow pins, `.env` keys copied from
+ * `.env.example`). Tools, logins, `.env` values and secrets are never fixed; their checks keep a hint.
  */
 
 /** A command (`cwd` repo-relative; default the root), or an edit that returns why it changed nothing. */

@@ -1,6 +1,6 @@
 import type { KitConfig } from '../../config/schema'
 import { CHROME_HINT, CHROME_MIN_MAJOR } from '../chrome'
-import { dotenvAmbiguities } from '../dotenv'
+import { dotenvAmbiguities, parseEnvKeys } from '../dotenv'
 import { maestroInstallHint } from '../maestro/bin'
 import { wrapperVersion } from '../toolchain'
 import type { Fix } from './fixes'
@@ -443,22 +443,18 @@ export function checkUnreadable(id: string, label: string, file: string, error: 
   return { id, label, status: 'fail', detail: `${file} does not parse: ${why}`, hint: `Fix ${file}` }
 }
 
-/** Key names in a dotenv file. */
-export function parseEnvKeys(text: string): string[] {
-  const keys: string[] = []
-  for (const line of text.split('\n')) {
-    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/)
-    if (m) keys.push(m[1]!)
-  }
-  return keys
-}
+export { parseEnvKeys }
 
-/** `.env` has every key `.env.example` names (names only; values are never read into the result). */
-export function checkEnvFile(example: string | undefined, env: string | undefined): Check {
+/**
+ * `.env` has every key `.env.example` names (names only; values are never read into the result).
+ * `fix` copies the example's missing lines into `.env` (what `kit env` does).
+ */
+export function checkEnvFile(example: string | undefined, env: string | undefined, fix?: Fix): Check {
   const label = '.env'
   if (example === undefined) return { id: 'env', label, status: 'skip', detail: 'no .env.example' }
+  const withFix = fix ? { fix } : {}
   if (env === undefined)
-    return { id: 'env', label, status: 'fail', detail: 'missing', hint: 'Run `kit init`' }
+    return { id: 'env', label, status: 'fail', detail: 'missing', hint: 'Run `kit env`', ...withFix }
   const have = new Set(parseEnvKeys(env))
   const absent = parseEnvKeys(example).filter((k) => !have.has(k))
   if (absent.length) {
@@ -467,7 +463,8 @@ export function checkEnvFile(example: string | undefined, env: string | undefine
       label,
       status: 'warn',
       detail: `missing ${absent.join(', ')}`,
-      hint: 'Add them to .env',
+      hint: 'Run `kit env` to copy them from .env.example, then set their values',
+      ...withFix,
     }
   }
   const ambiguous = dotenvAmbiguities(env)

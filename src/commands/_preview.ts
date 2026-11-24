@@ -1,6 +1,6 @@
 import { relative, resolve } from 'node:path'
 import { type KitContext, requireProject } from '../cli/command'
-import { wrangler } from '../lib/cloudflare'
+import { ensureWrangler, wrangler } from '../lib/cloudflare'
 import { ExitCode, KitError } from '../lib/errors'
 import { currentBranch } from '../lib/git'
 
@@ -135,6 +135,7 @@ export async function runPreview(
     return
   }
 
+  await ensureWrangler(ctx, root, config, [name])
   for (const b of before) {
     ctx.log.step(b.title)
     const code = await runToStderr(b.cmd, { cwd: root, env: { KIT_ROOT: root } })
