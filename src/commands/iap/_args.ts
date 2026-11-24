@@ -12,6 +12,6 @@ export const iapArgs = {
     type: 'string',
     short: 'p',
     multiple: true,
-    description: 'Only this product id from the file; repeatable',
+    description: 'Only this product, subscription or offering id from the file; repeatable',
   },
 } as const satisfies Args

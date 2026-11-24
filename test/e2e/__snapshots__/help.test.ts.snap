@@ -1508,13 +1508,13 @@ Options
   -q, --quiet             Errors and summary only
       --bail              Stop at the first failure
   -s, --store <string>    Only this store: apple, play or revenuecat; repeatable (default: every configured one)
-  -p, --product <string>  Only this product id from the file; repeatable
+  -p, --product <string>  Only this product, subscription or offering id from the file; repeatable
 
 "
 `;
 
 exports[`help kit iap sync --help 1`] = `
-"Create and update in-app products in every store from the product file; never deletes
+"Create and update in-app products and subscriptions in every store from the product file; never deletes
 
 Usage
   kit iap sync [options]
@@ -1526,16 +1526,17 @@ Examples
   kit iap sync --product membership_card --json --yes
 
 Options
-  -h, --help              Show help
-  -V, --version           Show kit version
-      --json              Write one JSON document to stdout; no prompts or animation
-  -n, --dry-run           Plan and run read-only steps; skip mutations
-  -y, --yes               Accept confirmations (never skips prod)
-  -v, --verbose           Stream all child output
-  -q, --quiet             Errors and summary only
-      --bail              Stop at the first failure
-  -s, --store <string>    Only this store: apple, play or revenuecat; repeatable (default: every configured one)
-  -p, --product <string>  Only this product id from the file; repeatable
+  -h, --help                Show help
+  -V, --version             Show kit version
+      --json                Write one JSON document to stdout; no prompts or animation
+  -n, --dry-run             Plan and run read-only steps; skip mutations
+  -y, --yes                 Accept confirmations (never skips prod)
+  -v, --verbose             Stream all child output
+  -q, --quiet               Errors and summary only
+      --bail                Stop at the first failure
+  -s, --store <string>      Only this store: apple, play or revenuecat; repeatable (default: every configured one)
+  -p, --product <string>    Only this product, subscription or offering id from the file; repeatable
+      --allow-price-change  Apply a changed subscription price to new subscribers (existing subscribers keep theirs)
 
 "
 `;

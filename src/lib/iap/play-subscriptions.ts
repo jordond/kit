@@ -7,7 +7,7 @@ import { type Action, type Diff, ERROR_KIND, errorAction, type StatusRow, type S
 
 /**
  * Google Play subscriptions (Android Publisher v3 `monetization.subscriptions`, plan-4 §5 Play,
- * "Subscriptions (phase 2)"). One PATCH (`allowMissing`) per subscription carries the listings and
+ * "Subscriptions"). One PATCH (`allowMissing`) per subscription carries the listings and
  * every base plan; base plans start DRAFT and are activated after. Compared: listings, the base plan
  * set, billing period, the legacy flag, the US price and the `free-trial` offer. Converted regional
  * prices move with exchange rates and are never diffed. Nothing is ever deleted or deactivated, a

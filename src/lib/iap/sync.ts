@@ -5,27 +5,34 @@ import { emitJson } from '../log'
 import { confirm } from '../prompt'
 import { redact } from '../secrets'
 import { appleAdapter } from './apple'
+import { appleSubscriptionsAdapter } from './apple-subscriptions'
 import { iapCreds } from './creds'
 import { createClient, createPacer } from './http'
 import { requireCatalog } from './load'
 import {
   appleDesired,
+  appleSubscriptionsDesired,
   type Catalog,
   pacificToday,
   playDesired,
+  playSubscriptionsDesired,
   rcDesired,
+  rcOfferingsDesired,
   type StoreTargets,
   storeTargets,
 } from './model'
 import { jsonDocument, planLines, type StoreReport, statusLines } from './plan-print'
 import { playAdapter } from './play'
+import { playSubscriptionsAdapter } from './play-subscriptions'
 import { revenuecatAdapter } from './revenuecat'
+import { revenuecatOfferingsAdapter } from './revenuecat-offerings'
 import { type Action, type ActionResult, STORE_NAME, STORES, type Store, type StoreAdapter } from './types'
 
 /**
- * `kit iap status` and `kit iap sync` (plan-4 §2, §4): observe every selected store (reads only),
- * diff against the product file, print; `sync` then confirms and applies. Apple and Play apply
- * concurrently, RevenueCat after them. A store without credentials is skipped; a failed action
+ * `kit iap status` and `kit iap sync` (plan-4 §2, §4, §14): observe every selected store (reads
+ * only), diff against the product file, print; `sync` then confirms and applies. A store is one or
+ * more adapters (one-time products, subscriptions, offerings) printed as one block and applied in
+ * that order. Apple and Play apply concurrently, RevenueCat after them. A store without credentials is skipped; a failed action
  * skips the rest of that product on that store; the summary names every failure.
  */
 
@@ -33,13 +40,25 @@ export interface IapRunOptions {
   mode: 'status' | 'sync'
   stores: string[]
   products: string[]
+  /** Subscriptions: apply a changed price to new subscribers (never migrates existing ones). */
+  allowPriceChange?: boolean
 }
 
-interface Unit {
-  report: StoreReport
-  adapter?: StoreAdapter<unknown, unknown>
+type AnyAdapter = StoreAdapter<unknown, unknown>
+
+/** One adapter of a store (one-time products, subscriptions, offerings) and what it should hold. */
+interface Part {
+  adapter: AnyAdapter
   desired: unknown[]
   observed?: unknown
+}
+
+/** One store: its parts run in order and print as one block. */
+interface Unit {
+  report: StoreReport
+  parts: Part[]
+  /** Which part applies each planned action. */
+  owner: Map<Action, Part>
 }
 
 function select(targets: StoreTargets, wanted: string[]): Store[] {
@@ -67,83 +86,126 @@ function select(targets: StoreTargets, wanted: string[]): Store[] {
   return configured.filter((s) => wanted.includes(s))
 }
 
-function filterProducts(catalog: Catalog, ids: string[]): Catalog {
+/** `--product` takes product, subscription and offering ids. */
+function filterCatalog(catalog: Catalog, ids: string[]): Catalog {
   if (!ids.length) return catalog
-  const known = new Set(catalog.products.map((p) => p.id))
+  const known = new Set([
+    ...catalog.products.map((p) => p.id),
+    ...catalog.subscriptions.map((s) => s.id),
+    ...catalog.offerings.map((o) => o.id),
+  ])
   const unknown = ids.filter((id) => !known.has(id))
   if (unknown.length) {
     throw new KitError(`Not in the product file: ${unknown.join(', ')}`, undefined, ExitCode.usage)
   }
-  return { ...catalog, products: catalog.products.filter((p) => ids.includes(p.id)) }
+  return {
+    ...catalog,
+    products: catalog.products.filter((p) => ids.includes(p.id)),
+    subscriptions: catalog.subscriptions.filter((s) => ids.includes(s.id)),
+    offerings: catalog.offerings.filter((o) => ids.includes(o.id)),
+  }
 }
 
-function build(store: Store, targets: StoreTargets, catalog: Catalog, today: string): Unit {
+interface BuildInput {
+  targets: StoreTargets
+  /** The whole file: decides which parts a store has, and what offering packages point at. */
+  full: Catalog
+  /** What this run asked for (`--product`). */
+  catalog: Catalog
+  today: string
+  allowPriceChange: boolean
+}
+
+function build(store: Store, input: BuildInput): Unit {
+  const { targets, full, catalog, today, allowPriceChange } = input
   const label = {
     apple: `${STORE_NAME.apple} (${targets.apple?.bundleId})`,
     play: `${STORE_NAME.play} (${targets.play?.packageName})`,
     revenuecat: `${STORE_NAME.revenuecat} (${targets.revenuecat?.projectId})`,
   }[store]
-  const report: StoreReport = { store, label, rows: [], actions: [] }
+  const unit: Unit = { report: { store, label, rows: [], actions: [] }, parts: [], owner: new Map() }
   const creds = iapCreds(store, targets)
-  const desired =
-    store === 'apple'
-      ? appleDesired(catalog, today)
-      : store === 'play'
-        ? playDesired(catalog, today)
-        : rcDesired(catalog, { apple: !!targets.apple, play: !!targets.play })
   if (!creds.ok) {
-    report.skipped = creds.reason
-    return { report, desired }
+    unit.report.skipped = creds.reason
+    return unit
   }
-  let adapter: StoreAdapter<unknown, unknown>
+  // A part that the file has nothing for is left out: no requests, no extra scopes.
+  const part = (adapter: unknown, desired: unknown[], wanted: boolean) => {
+    if (wanted) unit.parts.push({ adapter: adapter as AnyAdapter, desired })
+  }
+  const hasProducts = full.products.length > 0
+  const hasSubscriptions = full.subscriptions.length > 0
   if (store === 'apple') {
-    adapter = appleAdapter(createClient({ store, token: creds.token }), {
-      bundleId: targets.apple!.bundleId,
-      today,
-    }) as StoreAdapter<unknown, unknown>
+    const client = createClient({ store, token: creds.token })
+    const bundleId = targets.apple!.bundleId
+    part(appleAdapter(client, { bundleId, today }), appleDesired(catalog, today), hasProducts)
+    part(
+      appleSubscriptionsAdapter(client, { bundleId, today, allowPriceChange }),
+      appleSubscriptionsDesired(catalog),
+      hasSubscriptions,
+    )
   } else if (store === 'play') {
-    adapter = playAdapter(createClient({ store, token: creds.token }), {
-      packageName: targets.play!.packageName,
-    }) as StoreAdapter<unknown, unknown>
+    const client = createClient({ store, token: creds.token })
+    const packageName = targets.play!.packageName
+    part(playAdapter(client, { packageName }), playDesired(catalog, today), hasProducts)
+    part(
+      playSubscriptionsAdapter(client, { packageName, allowPriceChange }),
+      playSubscriptionsDesired(catalog),
+      hasSubscriptions,
+    )
   } else {
     // RevenueCat allows 60 project-configuration calls a minute, shared by every endpoint.
     const pace = Number(process.env.KIT_RC_PACE_MS ?? 1000)
-    adapter = revenuecatAdapter(createClient({ store, token: creds.token, pace: createPacer(pace) }), {
+    const client = createClient({ store, token: creds.token, pace: createPacer(pace) })
+    const apps = { apple: !!targets.apple, play: !!targets.play }
+    const ids = {
       projectId: targets.revenuecat!.projectId,
       bundleId: targets.apple?.bundleId,
       packageName: targets.play?.packageName,
-    }) as StoreAdapter<unknown, unknown>
+    }
+    // Products first: offering packages attach the RevenueCat products this part creates.
+    part(revenuecatAdapter(client, ids), rcDesired(catalog, apps), hasProducts || hasSubscriptions)
+    part(
+      revenuecatOfferingsAdapter(client, { ...ids, products: rcDesired(full, apps) }),
+      rcOfferingsDesired(catalog),
+      full.offerings.length > 0,
+    )
   }
-  report.label = adapter.label
-  return { report, adapter, desired }
+  if (unit.parts[0]) unit.report.label = unit.parts[0].adapter.label
+  return unit
 }
 
 const message = (e: unknown): string => redact(e instanceof Error ? e.message : String(e))
 
+/** Parts observe one after another (they share the store's client and its pacing). */
 async function observe(unit: Unit, extras: boolean): Promise<void> {
-  if (!unit.adapter) return
   try {
-    unit.observed = await unit.adapter.observe(unit.desired)
-    const { rows, actions } = unit.adapter.diff(unit.desired, unit.observed, { extras })
-    unit.report.rows = rows
-    unit.report.actions = unit.adapter.prepare ? await unit.adapter.prepare(actions, unit.observed) : actions
+    for (const part of unit.parts) {
+      part.observed = await part.adapter.observe(part.desired)
+      const { rows, actions } = part.adapter.diff(part.desired, part.observed, { extras })
+      const planned = part.adapter.prepare ? await part.adapter.prepare(actions, part.observed) : actions
+      unit.report.rows.push(...rows)
+      unit.report.actions.push(...planned)
+      for (const a of planned) unit.owner.set(a, part)
+    }
   } catch (e) {
     unit.report.error = message(e)
     const hint = e instanceof KitError ? e.hint : undefined
     if (hint) unit.report.error += ` (${hint})`
+    unit.report.actions = []
   }
 }
 
 async function apply(unit: Unit): Promise<void> {
   const results: ActionResult[] = []
   const failed = new Set<string>()
-  for (const action of unit.report.actions as Action[]) {
+  for (const action of unit.report.actions) {
     if (failed.has(action.id)) {
       results.push({ id: action.id, kind: action.kind, ok: false, skipped: true })
       continue
     }
     try {
-      await unit.adapter!.apply(action)
+      await unit.owner.get(action)!.adapter.apply(action)
       results.push({ id: action.id, kind: action.kind, ok: true })
     } catch (e) {
       failed.add(action.id)
@@ -161,9 +223,10 @@ export async function runIap(
   const { iap, catalog: full } = requireCatalog(root, config, ctx.log)
   const targets = storeTargets(config, iap)
   const stores = select(targets, opts.stores)
-  const catalog = filterProducts(full, opts.products)
+  const catalog = filterCatalog(full, opts.products)
   const today = pacificToday()
-  const units = stores.map((s) => build(s, targets, catalog, today))
+  const allowPriceChange = !!opts.allowPriceChange
+  const units = stores.map((s) => build(s, { targets, full, catalog, today, allowPriceChange }))
   const say = (lines: string[]) => {
     if (!ctx.flags.json) for (const l of lines) ctx.log.info(l)
   }
@@ -201,8 +264,7 @@ export async function runIap(
     return
   }
 
-  const byStore = (s: Store) =>
-    units.filter((u) => u.report.store === s && u.adapter && u.report.actions.length)
+  const byStore = (s: Store) => units.filter((u) => u.report.store === s && u.report.actions.length)
   await Promise.all([...byStore('apple'), ...byStore('play')].map(apply))
   await Promise.all(byStore('revenuecat').map(apply))
 

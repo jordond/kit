@@ -66,24 +66,12 @@ export function runCheck(root: string, config: KitConfig, flags: Pick<Flags, 'js
   return errors === 0
 }
 
-/** The catalog for `status` and `sync`: exit 1 when the file has errors, refuse subscriptions (phase 2). */
+/** The catalog for `status` and `sync`: exit 1 when the file has errors. */
 export function requireCatalog(root: string, config: KitConfig, log: Logger): { iap: Iap; catalog: Catalog } {
   const { iap, label, issues, catalog } = loadIap(root, config)
   if (!catalog) {
     printIssues(log, label, issues)
     throw new KitError(`${label} has errors`, 'Fix them; `kit iap check` lists them')
-  }
-  // Until the subscription and offering adapters are wired in (plan-4 §14, slice 2e).
-  const pending = [
-    catalog.subscriptions.length ? 'subscriptions' : '',
-    catalog.offerings.length ? 'offerings' : '',
-  ].filter(Boolean)
-  if (pending.length) {
-    throw new KitError(
-      `${label} has ${pending.join(' and ')}; kit iap syncs one-time products only (subscriptions are phase 2)`,
-      'Move them out of the file for now, or sync them by hand in each console',
-      ExitCode.usage,
-    )
   }
   return { iap, catalog }
 }

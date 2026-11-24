@@ -25,8 +25,14 @@ function counts(r: StoreReport, plan: boolean): string {
   const n = (s: StatusRow['sync']) => r.rows.filter((x) => x.sync === s).length
   const parts = [`${n('missing')} create`, `${n('differs')} update`, `${n('in-sync')} in sync`]
   if (plan && r.store === 'revenuecat') {
-    const k = (kind: string) => r.actions.filter((a) => a.kind === kind).length
+    // Offering actions carry `offering/<key>` ids; their `attach` fills packages, not entitlements.
+    const offering = (a: Action) => a.id.startsWith('offering/')
+    const k = (kind: string, ofOffering = false) =>
+      r.actions.filter((a) => a.kind === kind && offering(a) === ofOffering).length
     parts.push(`${k('product')} products, ${k('entitlement')} entitlements, ${k('attach')} attaches`)
+    if (r.actions.some(offering)) {
+      parts.push(`${k('offering', true)} offerings, ${k('package', true)} packages`)
+    }
   }
   return parts.join(', ')
 }

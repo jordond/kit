@@ -240,26 +240,100 @@ describe('kit iap', () => {
     expect(fakes.writes()).toEqual([])
   })
 
-  test('subscriptions are refused until phase 2', async () => {
-    writeFileSync(
-      join(fx.dir, 'contract/products.json'),
-      JSON.stringify({
-        ...PRODUCTS,
-        subscriptions: [
-          {
-            id: 'pro',
-            name: 'Pro',
-            description: 'All of it.',
-            plans: [{ id: 'monthly', period: 'P1M', price: '4.99' }],
-          },
+  const WITH_SUBS = () => ({
+    ...PRODUCTS,
+    subscriptions: [
+      {
+        id: 'pro',
+        name: 'Pro',
+        description: 'All of it.',
+        benefits: ['No ads'],
+        plans: [
+          { id: 'yearly', period: 'P1Y', price: '29.99', trial: 'P1W' },
+          { id: 'monthly', period: 'P1M', price: '3.99' },
         ],
-      }),
+        apple: { groupName: 'Shop Pro' },
+      },
+    ],
+    offerings: [
+      {
+        id: 'default',
+        current: true,
+        packages: [
+          { id: '$rc_annual', product: 'pro:yearly' },
+          { id: '$rc_monthly', product: 'pro:monthly' },
+          { id: 'lifetime', product: 'membership_card' },
+        ],
+      },
+    ],
+  })
+  const writeFile = (body: unknown) =>
+    writeFileSync(join(fx.dir, 'contract/products.json'), JSON.stringify(body, null, 2))
+
+  test('subscriptions and offerings: sync, all in sync, second sync plans nothing', async () => {
+    writeFile(WITH_SUBS())
+    expect((await iap(['check'])).stderr).toContain('3 products, 1 subscription, 1 offering')
+
+    const dry = await iap(['sync', '--dry-run'])
+    expect(dry.code).toBe(0)
+    expect(dry.stderr).toMatch(/App Store Connect \(app\.example\)\s+4 create/)
+    expect(dry.stderr).toMatch(
+      /RevenueCat \(projd2d1fc4a\)\s+6 create, .*10 products.*1 offerings, 3 packages/,
     )
-    expect((await iap(['check'])).code).toBe(0)
-    const r = await iap(['status'])
-    expect(r.code).toBe(2)
-    expect(r.stderr).toContain('subscriptions are phase 2')
-    expect(fakes.log).toEqual([])
+    expect(fakes.writes()).toEqual([])
+
+    const first = await iap(['sync', '--yes', '--json'])
+    expect(first.stderr).not.toContain('✖')
+    expect(first.code).toBe(0)
+    expect(fakes.asc.subs.byProductId('pro_yearly')).toMatchObject({ subscriptionPeriod: 'ONE_YEAR' })
+    expect(fakes.asc.subs.byProductId('pro_monthly')).toMatchObject({ groupLevel: 2 })
+    expect(fakes.play.subscriptions.has('pro')).toBe(true)
+    expect([...fakes.rc.products.values()].map((p) => p.store_identifier)).toContain('pro:yearly')
+    expect(fakes.rc.offerings.size).toBe(1)
+    expect(fakes.rc.packages.size).toBe(3)
+
+    const status = doc((await iap(['status', '--json'])).stdout)
+    for (const store of Object.values(status.stores)) {
+      expect(store.rows.filter((r) => r.sync !== 'in-sync')).toEqual([])
+    }
+
+    const before = fakes.writes().length
+    const second = await iap(['sync', '--yes'])
+    expect(second.stderr).toContain('Nothing to do: every store matches the file')
+    expect(fakes.writes().length).toBe(before)
+    expect(
+      fakes
+        .writes()
+        .some(
+          (w) => w.method === 'DELETE' || /detach|archive|deactivate|migratePrices|Submission/.test(w.path),
+        ),
+    ).toBe(false)
+  })
+
+  test('a subscription price change needs --allow-price-change', async () => {
+    writeFile(WITH_SUBS())
+    expect((await iap(['sync', '--yes'])).code).toBe(0)
+    const changed = WITH_SUBS()
+    changed.subscriptions[0]!.plans[1]!.price = '4.99'
+    writeFile(changed)
+
+    const status = await iap(['status'])
+    expect(status.stderr).toContain('monthly: price')
+    expect(status.stderr).toContain('--allow-price-change')
+    const before = fakes.writes().length
+    const plain = await iap(['sync', '--yes'])
+    expect(plain.code).toBe(0)
+    expect(fakes.writes().length).toBe(before)
+
+    const allowed = await iap(['sync', '--yes', '--allow-price-change', '--json'])
+    expect(allowed.code).toBe(0)
+    const d = doc(allowed.stdout)
+    expect(d.stores.apple!.results!.some((r) => r.kind === 'price' && r.ok)).toBe(true)
+    expect(d.stores.play!.results!.every((r) => r.ok)).toBe(true)
+    expect(fakes.writes().some((w) => /migratePrices/.test(w.path))).toBe(false)
+
+    const again = await iap(['sync', '--dry-run', '--allow-price-change'])
+    expect(again.stderr).toContain('Nothing to do: every store matches the file')
   })
 
   test('a file with errors stops status and sync before any request', async () => {
