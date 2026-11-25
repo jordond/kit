@@ -334,19 +334,14 @@ platform :ios do
     UI.success("Submitted to the App Store for review.")
   end
 
-  # Without a token, upload nothing rather than fail the release (same as the
-  # Sentry Gradle plugin).
+  # kit requires SENTRY_AUTH_TOKEN before the build when release.ios.sentry is set.
   desc "Upload dSYMs to Sentry."
   desc "In: KIT_IOS_DSYM (zip or folder), KIT_SENTRY_ORG, KIT_SENTRY_PROJECT, SENTRY_AUTH_TOKEN, KIT_SKIP_UPLOAD."
   lane :upload_symbols do
     dsym = kit_require_file("KIT_IOS_DSYM")
     next if kit_skip_upload?("the Sentry dSYM upload", dsym)
 
-    token = ENV["SENTRY_AUTH_TOKEN"].to_s
-    if token.empty?
-      UI.important("SENTRY_AUTH_TOKEN unset: skipped the dSYM upload. Crashes from this build arrive unsymbolicated.")
-      next
-    end
+    token = kit_env("SENTRY_AUTH_TOKEN")
     sentry_debug_files_upload(
       auth_token: token,
       org_slug: kit_env("KIT_SENTRY_ORG"),
@@ -589,7 +584,7 @@ platform :android do
     kit_emit(kind == "aab" ? "ARTIFACT_AAB" : "ARTIFACT_APK", artifact)
   end
 
-  # Without a token, upload nothing rather than fail the release, as the dSYM upload does.
+  # kit requires SENTRY_AUTH_TOKEN before the build when release.android.sentry is set.
   desc "Upload the R8 mapping to Sentry under the ProGuard UUID the bundle carries."
   desc "In: KIT_ANDROID_MAPPING, KIT_SENTRY_PROGUARD_UUID, KIT_SENTRY_ORG, KIT_SENTRY_PROJECT, SENTRY_AUTH_TOKEN, " \
        "KIT_SKIP_UPLOAD."
@@ -597,11 +592,7 @@ platform :android do
     mapping = kit_require_file("KIT_ANDROID_MAPPING")
     next if kit_skip_upload?("the Sentry R8 mapping upload", mapping)
 
-    token = ENV["SENTRY_AUTH_TOKEN"].to_s
-    if token.empty?
-      UI.important("SENTRY_AUTH_TOKEN unset: skipped the R8 mapping upload. Crashes from this build arrive obfuscated.")
-      next
-    end
+    token = kit_env("SENTRY_AUTH_TOKEN")
     sentry_upload_proguard(
       auth_token: token,
       org_slug: kit_env("KIT_SENTRY_ORG"),

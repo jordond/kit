@@ -23,12 +23,20 @@ export const ANDROID_SECRETS = [
   'PLAY_SERVICE_ACCOUNT_BASE64',
 ]
 
+/** Uploads the dSYMs or the R8 mapping when the platform's `sentry` is set; required then. */
+export const SENTRY_SECRET = 'SENTRY_AUTH_TOKEN'
+
+/** The Sentry token, when [sentry] is set: a missing one stops the release before it builds. */
+export function sentryCreds(sentry: unknown): Record<string, string> {
+  return sentry ? need([SENTRY_SECRET]) : {}
+}
+
 export interface ReleaseSecrets {
   /** Needed for every release of a configured platform. */
   required: string[]
   /** Needed only on GitHub Actions (HTTPS access to the match repo). */
   ci: string[]
-  /** Used when present (the Sentry dSYM and R8 mapping uploads skip without it). */
+  /** Used when present. */
   optional: string[]
 }
 
@@ -37,9 +45,14 @@ export function releaseSecrets(config: KitConfig | undefined): ReleaseSecrets {
   const ios = config?.release?.ios
   const android = config?.release?.android
   return {
-    required: [...(ios ? IOS_SECRETS : []), ...(android ? ANDROID_SECRETS : [])],
+    required: [
+      ...(ios ? IOS_SECRETS : []),
+      ...(android ? ANDROID_SECRETS : []),
+      // A release that is meant to upload symbols must not ship without them.
+      ...(ios?.sentry || android?.sentry ? [SENTRY_SECRET] : []),
+    ],
     ci: ios ? ['MATCH_GIT_BASIC_AUTHORIZATION'] : [],
-    optional: ios?.sentry || android?.sentry ? ['SENTRY_AUTH_TOKEN'] : [],
+    optional: [],
   }
 }
 

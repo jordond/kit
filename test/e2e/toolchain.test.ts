@@ -121,8 +121,20 @@ describe('kit release android (Kotlin toolchain)', () => {
     sh(['git', 'commit', '-qam', 'sentry'])
     sh(['git', 'push', '-q', 'origin', 'main'])
 
-    const r = await run(['release', 'android', '--track', 'internal', '--json'])
+    // Required: without the token the release stops before it builds.
+    const missing = await run(['release', 'android', '--track', 'internal', '--code', '5'], {
+      SENTRY_AUTH_TOKEN: '',
+    })
+    expect(missing.code).toBe(3)
+    expect(missing.stderr).toContain('Missing release secrets: SENTRY_AUTH_TOKEN')
+    expect(kotlin()).toEqual([])
+    expect(lanes()).toEqual([])
+
+    const r = await run(['release', 'android', '--track', 'internal', '--json'], {
+      SENTRY_AUTH_TOKEN: 'sentry-token-value',
+    })
     expect(r.code).toBe(0)
+    expect(r.stderr).not.toContain('sentry-token-value')
     const doc = JSON.parse(r.stdout)
     expect(lanes().map((c) => c.argv.slice(2).join(' '))).toEqual([
       'android next_code',

@@ -33,7 +33,7 @@ import {
   SENTRY_DEBUG_META,
   WRAPPER,
 } from '../toolchain'
-import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
+import { appleCreds, keystoreCreds, onGitHubActions, playCreds, sentryCreds } from './creds'
 import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
 import { builtinPreflights } from './builtin-preflights'
 import { loadPreflights } from './preflight'
@@ -290,10 +290,12 @@ export async function releaseMobile(
   const appRoot = appFastlaneDir(root, config)
 
   // ---- secrets (before any lane: next_build needs the ASC key)
-  const secrets: Record<string, string> =
-    platform === 'ios'
+  const secrets: Record<string, string> = {
+    ...(platform === 'ios'
       ? appleCreds({ match: true, ci: onGitHubActions() }).env
-      : { ...playCreds(), ...keystoreCreds() }
+      : { ...playCreds(), ...keystoreCreds() }),
+    ...sentryCreds(platform === 'ios' ? ios?.sentry : android?.sentry),
+  }
 
   const common: Record<string, string> = { ...secrets, ...laneConfigEnv(root, config) }
 
