@@ -20,6 +20,7 @@ interface Logged {
   env?: Record<string, string>
   yaml?: string
   props?: string | null
+  meta?: string | null
 }
 
 let f: Fixture
@@ -106,6 +107,57 @@ describe('kit release android (Kotlin toolchain)', () => {
     expect(sh(['git', 'status', '--porcelain'])).toBe('')
     // passwords never reach the output
     expect(r.stderr).not.toContain('ks-password-value')
+  })
+
+  test('sentry: the bundle carries a ProGuard UUID and the mapping is uploaded under it', async () => {
+    const config = join(f.dir, 'kit.config.ts')
+    writeFileSync(
+      config,
+      readFileSync(config, 'utf8').replace(
+        "      module: 'androidApp',\n",
+        "      module: 'androidApp',\n      sentry: { org: 'o', project: 'p' },\n",
+      ),
+    )
+    sh(['git', 'commit', '-qam', 'sentry'])
+    sh(['git', 'push', '-q', 'origin', 'main'])
+
+    // Required: without the token the release stops before it builds.
+    const missing = await run(['release', 'android', '--track', 'internal', '--code', '5'], {
+      SENTRY_AUTH_TOKEN: '',
+    })
+    expect(missing.code).toBe(3)
+    expect(missing.stderr).toContain('Missing release secrets: SENTRY_AUTH_TOKEN')
+    expect(kotlin()).toEqual([])
+    expect(lanes()).toEqual([])
+
+    const r = await run(['release', 'android', '--track', 'internal', '--json'], {
+      SENTRY_AUTH_TOKEN: 'sentry-token-value',
+    })
+    expect(r.code).toBe(0)
+    expect(r.stderr).not.toContain('sentry-token-value')
+    const doc = JSON.parse(r.stdout)
+    expect(lanes().map((c) => c.argv.slice(2).join(' '))).toEqual([
+      'android next_code',
+      'android upload_play',
+      'android upload_mapping',
+    ])
+    const upload = lanes()[2]!.env!
+    const uuid = upload.KIT_SENTRY_PROGUARD_UUID!
+    expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(upload).toMatchObject({ KIT_SENTRY_ORG: 'o', KIT_SENTRY_PROJECT: 'p' })
+    expect(upload.KIT_ANDROID_MAPPING).toBe(doc.artifacts.mapping)
+    expect(doc.artifacts.mapping).toEndWith('outputs/mapping/release/mapping.txt')
+    // the build saw the UUID, and the asset is gone again
+    expect(kotlin()[0]!.meta).toBe(`io.sentry.ProguardUuids=${uuid}\n`)
+    expect(existsSync(join(f.dir, 'androidApp/assets/sentry-debug-meta.properties'))).toBe(false)
+    expect(sh(['git', 'status', '--porcelain'])).toBe('')
+  })
+
+  test('without sentry, nothing is written into the bundle and no mapping is uploaded', async () => {
+    const r = await run(['release', 'android', '--track', 'internal', '--code', '5'])
+    expect(r.code).toBe(0)
+    expect(kotlin()[0]!.meta).toBeNull()
+    expect(lanes().map((c) => c.argv.slice(2).join(' '))).toEqual(['android upload_play'])
   })
 
   test('a failed build restores module.yaml and uploads nothing', async () => {

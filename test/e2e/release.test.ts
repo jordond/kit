@@ -16,6 +16,7 @@ const SECRETS = {
   ANDROID_KEYSTORE_BASE64: b64('keystore-bytes'),
   ANDROID_KEYSTORE_ALIAS: 'upload',
   ANDROID_KEYSTORE_PASSWORD: 'ks-password-value',
+  SENTRY_AUTH_TOKEN: 'sentry-token-value',
 }
 
 interface LaneCall {
@@ -252,6 +253,13 @@ describe.if(process.platform === 'darwin')('kit release ios', () => {
     expect(symbols!.env).toMatchObject({ KIT_IOS_DSYM: '/tmp/App.dSYM.zip', KIT_SENTRY_ORG: 'org' })
     expect(r.stderr).not.toContain('match-pass-value')
     expect(JSON.parse(r.stdout).tag).toBe('ios/v1.4.0+7')
+  })
+
+  test('sentry set and no SENTRY_AUTH_TOKEN → exit 3 before any lane', async () => {
+    const r = await run(['release', 'ios', '--track', 'beta', '--yes'], { SENTRY_AUTH_TOKEN: '' })
+    expect(r.code).toBe(3)
+    expect(r.stderr).toContain('Missing release secrets: SENTRY_AUTH_TOKEN')
+    expect(lanes()).toEqual([])
   })
 
   test('prod needs --notes', async () => {

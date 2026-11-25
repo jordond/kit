@@ -637,7 +637,7 @@ export function checkReleaseSecrets(
     label,
     status: optional.length ? 'warn' : 'ok',
     detail: optional.length ? `all set; optional ${optional.join(', ')} unset` : `${wanted.length} set`,
-    ...(optional.length ? { hint: 'Without SENTRY_AUTH_TOKEN the dSYM upload is skipped' } : {}),
+    ...(optional.length ? { hint: 'Releases run without them' } : {}),
   }
 }
 

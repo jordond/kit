@@ -82,7 +82,8 @@ No Appfile, Matchfile, Pluginfile or app Gemfile: inputs reach the lanes as `KIT
 
 Secrets (canonical names, from `.env` or the CI job): `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64`,
 `MATCH_PASSWORD`, `MATCH_GIT_URL`, `MATCH_GIT_BASIC_AUTHORIZATION` (CI), `ANDROID_KEYSTORE_BASE64`,
-`ANDROID_KEYSTORE_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, `PLAY_SERVICE_ACCOUNT_BASE64`, `SENTRY_AUTH_TOKEN`.
+`ANDROID_KEYSTORE_ALIAS`, `ANDROID_KEYSTORE_PASSWORD`, `PLAY_SERVICE_ACCOUNT_BASE64`, and `SENTRY_AUTH_TOKEN` for a platform that sets `sentry`: a release without
+it stops before the build.
 Files are decoded into a 0600 temp dir removed on exit; values are redacted from output.
 
 ## Release secrets setup

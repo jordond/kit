@@ -1,6 +1,15 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import pc from 'picocolors'
 import type { Flags, KitContext } from '../../cli/command'
 import type { KitConfig, Track } from '../../config/schema'
@@ -17,12 +26,14 @@ import { commandStep, runSteps, type Step, type StepResult, stepTimings, summari
 import {
   aabFromOutput,
   findAab,
+  findMapping,
   keystoreProperties,
   releaseModuleYaml,
   requireWrapper,
+  SENTRY_DEBUG_META,
   WRAPPER,
 } from '../toolchain'
-import { appleCreds, keystoreCreds, onGitHubActions, playCreds } from './creds'
+import { appleCreds, keystoreCreds, onGitHubActions, playCreds, sentryCreds } from './creds'
 import { clampNotes, mobileTag, PLAY_NOTES_MAX, releaseNotes } from './notes'
 import { builtinPreflights } from './builtin-preflights'
 import { loadPreflights } from './preflight'
@@ -219,6 +230,13 @@ export async function releaseMobile(
     )
   }
   const toolchain = !!config.toolchain
+  if (platform === 'android' && android?.sentry && !toolchain) {
+    throw new KitError(
+      'release.android.sentry needs toolchain.root',
+      "A Gradle build uploads its R8 mapping with Sentry's Gradle plugin",
+      ExitCode.config,
+    )
+  }
   if (platform === 'ios' && process.platform !== 'darwin') {
     throw new KitError('iOS releases need macOS (xcodebuild)', undefined, ExitCode.precondition)
   }
@@ -272,10 +290,12 @@ export async function releaseMobile(
   const appRoot = appFastlaneDir(root, config)
 
   // ---- secrets (before any lane: next_build needs the ASC key)
-  const secrets: Record<string, string> =
-    platform === 'ios'
+  const secrets: Record<string, string> = {
+    ...(platform === 'ios'
       ? appleCreds({ match: true, ci: onGitHubActions() }).env
-      : { ...playCreds(), ...keystoreCreds() }
+      : { ...playCreds(), ...keystoreCreds() }),
+    ...sentryCreds(platform === 'ios' ? ios?.sentry : android?.sentry),
+  }
 
   const common: Record<string, string> = { ...secrets, ...laneConfigEnv(root, config) }
 
@@ -430,6 +450,9 @@ export async function releaseMobile(
       copyFileSync(p, dest)
       return dest
     }
+    const sentry = android!.sentry
+    // Written into the bundle before it is built, then named in the mapping upload.
+    const proguardUuid = sentry ? randomUUID() : undefined
     if (toolchain) {
       steps.push(
         toolchainBuildStep(root, config, {
@@ -437,9 +460,15 @@ export async function releaseMobile(
           code: build,
           keystore: common.KIT_ANDROID_KEYSTORE_FILE!,
           env: internalFlag,
+          proguardUuid,
           onArtifact: (aab) => {
             artifacts.aab = keep(aab)
           },
+          onMapping: proguardUuid
+            ? (mapping) => {
+                artifacts.mapping = keep(mapping)
+              }
+            : undefined,
         }),
       )
     } else {
@@ -475,6 +504,17 @@ export async function releaseMobile(
           KIT_RELEASE_NOTES: notes!,
         })),
       )
+      if (sentry && proguardUuid) {
+        post.push(
+          laneStep('upload R8 mapping', appRoot, 'android', 'upload_mapping', () => ({
+            ...common,
+            KIT_ANDROID_MAPPING: required(artifacts.mapping, 'R8 mapping'),
+            KIT_SENTRY_PROGUARD_UUID: proguardUuid,
+            KIT_SENTRY_ORG: sentry.org,
+            KIT_SENTRY_PROJECT: sentry.project,
+          })),
+        )
+      }
     }
   }
   const results = await runSteps([{ title: `${platform} ${track}`, steps }], flags, { bail: true })
@@ -559,7 +599,10 @@ export function toolchainBuildStep(
     /** Decoded upload keystore (KIT_ANDROID_KEYSTORE_FILE). */
     keystore: string
     env?: Record<string, string>
+    /** Set: the bundle carries it in `assets/sentry-debug-meta.properties`, and [onMapping] gets the R8 mapping. */
+    proguardUuid?: string
     onArtifact: (aab: string) => void
+    onMapping?: (mapping: string) => void
   },
 ): Step {
   const module = releaseAndroidModule(root, config, 'toolchain')!
@@ -583,9 +626,21 @@ export function toolchainBuildStep(
         { version: opts.version, code: opts.code, signingProperties: props },
         rel,
       )
-      const restore = () => writeFileSync(path, before)
+      const meta = opts.proguardUuid ? join(root, module.dir, SENTRY_DEBUG_META) : undefined
+      const metaBefore = meta && existsSync(meta) ? readFileSync(meta, 'utf8') : undefined
+      const restore = () => {
+        writeFileSync(path, before)
+        if (!meta) return
+        if (metaBefore === undefined) rmSync(meta, { force: true })
+        else writeFileSync(meta, metaBefore)
+      }
       const off = onCleanup(restore)
       writeFileSync(path, after)
+      if (meta) {
+        mkdirSync(dirname(meta), { recursive: true })
+        writeFileSync(meta, `io.sentry.ProguardUuids=${opts.proguardUuid}\n`)
+      }
+      const since = Date.now()
       try {
         const cmd = [WRAPPER, 'package', '-m', module.name]
         const { code, output } = await runLines(cmd, { cwd: dir, env: opts.env, onLine: update })
@@ -598,6 +653,16 @@ export function toolchainBuildStep(
           )
         }
         opts.onArtifact(aab)
+        if (opts.onMapping) {
+          const mapping = findMapping(dir, module, since)
+          if (!mapping) {
+            throw new KitError(
+              `kotlin package -m ${module.name} wrote no R8 mapping`,
+              'Is minification off? Without a mapping, Sentry cannot read the release stack traces',
+            )
+          }
+          opts.onMapping(mapping)
+        }
       } finally {
         restore()
         off()

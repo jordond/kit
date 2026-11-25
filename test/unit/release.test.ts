@@ -111,11 +111,22 @@ describe('secret checks', () => {
         'ANDROID_KEYSTORE_ALIAS',
         'ANDROID_KEYSTORE_PASSWORD',
         'PLAY_SERVICE_ACCOUNT_BASE64',
+        'SENTRY_AUTH_TOKEN',
       ],
       ci: ['MATCH_GIT_BASIC_AUTHORIZATION'],
-      optional: ['SENTRY_AUTH_TOKEN'],
+      optional: [],
     })
     expect(releaseSecrets(config)).toEqual({ required: [], ci: [], optional: [] })
+  })
+
+  test('releaseSecrets: Sentry on Android alone requires SENTRY_AUTH_TOKEN', async () => {
+    const { releaseSecrets } = await import('../../src/lib/release/creds')
+    const android = configSchema.parse({
+      name: 'A',
+      release: { android: { packageName: 'a', module: 'app', sentry: { org: 'o', project: 'p' } } },
+    })
+    expect(releaseSecrets(android).required).toContain('SENTRY_AUTH_TOKEN')
+    expect(releaseSecrets(android).optional).toEqual([])
   })
 
   test('doctor: missing release secrets warn (locally and on Actions), hint renames', async () => {
@@ -132,10 +143,17 @@ describe('secret checks', () => {
     expect(ci.status).toBe('warn')
     expect(ci.detail).toContain('MATCH_GIT_BASIC_AUTHORIZATION')
     const all = Object.fromEntries(releaseSecrets(full).required.map((n) => [n, 'v']))
-    expect(checkReleaseSecrets(releaseSecrets(full), all, false)).toMatchObject({
+    expect(checkReleaseSecrets(releaseSecrets(full), all, false)).toMatchObject({ status: 'ok' })
+    expect(
+      checkReleaseSecrets({ required: ['A'], ci: [], optional: ['B'] }, { A: 'v' }, false),
+    ).toMatchObject({
       status: 'warn',
-      detail: 'all set; optional SENTRY_AUTH_TOKEN unset',
+      detail: 'all set; optional B unset',
     })
+    const { SENTRY_AUTH_TOKEN: _, ...noSentry } = all
+    expect(checkReleaseSecrets(releaseSecrets(full), noSentry, false).detail).toBe(
+      'missing SENTRY_AUTH_TOKEN',
+    )
     expect(checkReleaseSecrets(releaseSecrets(config), {}, true).status).toBe('skip')
   })
 
@@ -145,7 +163,8 @@ describe('secret checks', () => {
     expect(expected.required[0]).toBe('CLOUDFLARE_API_TOKEN')
     expect(expected.required).toContain('MATCH_GIT_BASIC_AUTHORIZATION')
     expect(expected.required.filter((n) => n === 'ASC_KEY_ID')).toHaveLength(1)
-    expect(expected.optional).toEqual(['SENTRY_AUTH_TOKEN'])
+    expect(expected.required).toContain('SENTRY_AUTH_TOKEN')
+    expect(expected.optional).toEqual([])
     const r = compareGithubSecrets(expected, [
       'CLOUDFLARE_API_TOKEN',
       'APPLE_ASC_KEY_ID',
@@ -153,7 +172,8 @@ describe('secret checks', () => {
     ])
     expect(r.status).toBe('missing')
     expect(r.missing).toContain('ASC_KEY_ID')
-    expect(r.optionalMissing).toEqual(['SENTRY_AUTH_TOKEN'])
+    expect(r.missing).toContain('SENTRY_AUTH_TOKEN')
+    expect(r.optionalMissing).toEqual([])
     expect(r.stale).toEqual(['APPLE_ASC_KEY_ID', 'FIREBASE_TESTER_GROUP'])
     expect(compareGithubSecrets(expected, ['toString', 'constructor']).stale).toEqual([])
   })
