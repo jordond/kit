@@ -28,7 +28,7 @@ iap: {
   products: 'contract/products.json',        // repo-relative
   apple: { familySharing: true },             // bundleId defaults to release.ios.bundleIds[0]
   play: {},                                   // packageName defaults to release.android.packageName
-  revenuecat: { projectId: 'projd2d1fc4a' },  // key from REVENUECAT_API_KEY
+  revenuecat: { projectId: 'projd2d1fc4a' },  // key from REVENUECAT_API_KEY; testStore: true adds the Test Store
 },
 ```
 
@@ -201,6 +201,21 @@ products to it. A changed name is updated; a changed type or an archived product
 that product with what to do in RevenueCat. Then the offerings: creates or renames them, creates
 packages, sets their position and name, attaches each package's products, and sets the current
 offering. RevenueCat runs after the two stores, so the products it points at exist.
+
+**RevenueCat Test Store** (opt-in: `iap.revenuecat.testStore: true`, default false; off makes no Test
+Store rows or requests). RevenueCat makes one Test Store app per project; the API cannot create it, so
+without one kit reports an error for the Test Store ("add one under Apps & providers in RevenueCat")
+and the rest of the sync still runs. With it, every one-time product and every subscription plan gets
+a Test Store product, matched, renamed and type-checked like the App Store and Play Store ones, and
+attached to the same entitlements and offering packages. One-time products use the product id, the
+file's type and the product name as the `title` (default locale). Plans use the plan's Apple product id,
+type `subscription` and `subscription.duration` from the plan period: `P1W`, `P1M`, `P2M`, `P3M`,
+`P6M` or `P1Y` (a period the Test Store lacks fails that plan only). Trials cannot be set.
+
+**Test Store prices are not set by kit.** The RevenueCat API takes no price for a Test Store product
+and cannot edit one later, so the plan line says `price: set it in RevenueCat; the API takes none`.
+If RevenueCat refuses a create without a price, that product fails with RevenueCat's message and the
+others carry on; the product's Test Store attach is skipped.
 
 `status` prints, per product per store: `missing`, `in sync`, `differs (fields)` or `extra` (in the
 store, not in the file), the store's state (Apple's IAP and version state, Play's purchase option state,

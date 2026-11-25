@@ -38,11 +38,13 @@ const anyJson = z.unknown()
 
 type RcProduct = z.output<typeof product>
 type RcEntitlement = z.output<typeof entitlement>
-type AppStore = 'apple' | 'play'
+type AppStore = 'apple' | 'play' | 'test'
 
 export interface RcObserved {
   projectId: string
   apps: Partial<Record<AppStore, string>>
+  /** `testStore` is on but the project has no Test Store app. */
+  testMissing?: boolean
   products: RcProduct[]
   entitlements: RcEntitlement[]
   /** Entitlement id → attached product ids (only entitlements the file uses). */
@@ -53,10 +55,16 @@ export interface RcTargets {
   projectId: string
   bundleId?: string
   packageName?: string
+  /** Also manage the Test Store products (`iap.revenuecat.testStore`). */
+  testStore?: boolean
 }
 
-const APP_STORES: AppStore[] = ['apple', 'play']
-const STORE_WORD: Record<AppStore, string> = { apple: 'App Store', play: 'Play Store' }
+const APP_STORES: AppStore[] = ['apple', 'play', 'test']
+const STORE_WORD: Record<AppStore, string> = { apple: 'App Store', play: 'Play Store', test: 'Test Store' }
+const STORE_LABEL: Record<AppStore, string> = { apple: 'apple', play: 'play', test: 'test store' }
+const NO_TEST_STORE =
+  'the project has no Test Store app: add one under Apps & providers in RevenueCat (the API cannot create it)'
+const TEST_PRICE_NOTE = ' (price: set it in RevenueCat; the API takes none)'
 const ARCHIVED = 'inactive'
 
 export type RcAction = Action
@@ -83,7 +91,7 @@ export function diffRevenuecat(
   const rows: StatusRow[] = []
   const actions: RcAction[] = []
   const plannedEntitlements = new Set<string>()
-  const fileIds = new Set(desired.flatMap((d) => [d.apple, d.play].filter((x) => x !== undefined)))
+  const fileIds = new Set(desired.flatMap((d) => [d.apple, d.play, d.test].filter((x) => x !== undefined)))
   const findProduct = (store: AppStore, storeId: string) =>
     observed.products.find((p) => p.app_id === observed.apps[store] && p.store_identifier === storeId)
 
@@ -93,6 +101,7 @@ export function diffRevenuecat(
     const mine: RcAction[] = []
     let existing = 0
     const toAttach: string[] = []
+    if (d.testError && observed.apps.test) errors.push(`Test Store: ${d.testError}`)
     const ent = observed.entitlements.find((e) => e.lookup_key === d.entitlement)
     const attached = new Set(ent ? (observed.attached[ent.id] ?? []) : [])
 
@@ -101,18 +110,26 @@ export function diffRevenuecat(
       if (storeId === undefined || !observed.apps[store]) continue
       const p = findProduct(store, storeId)
       if (!p) {
-        fields.push(`product ${store}`)
+        fields.push(`product ${STORE_LABEL[store]}`)
         mine.push({
           store: 'revenuecat',
           id: d.id,
           kind: 'product',
-          summary: `product ${store}`,
+          summary: `product ${STORE_LABEL[store]}${store === 'test' ? TEST_PRICE_NOTE : ''}`,
           payload: {
             store,
             app_id: observed.apps[store],
             store_identifier: storeId,
             type: d.type,
             display_name: d.displayName,
+            ...(store === 'test'
+              ? {
+                  title: d.testTitle ?? d.displayName,
+                  ...(d.type === 'subscription' && d.testDuration
+                    ? { subscription: { duration: d.testDuration } }
+                    : {}),
+                }
+              : {}),
           },
         })
         toAttach.push(`${store}:${storeId}`)
@@ -122,18 +139,18 @@ export function diffRevenuecat(
       if (p.state === ARCHIVED)
         errors.push(`the ${STORE_WORD[store]} product ${storeId} is archived: unarchive it in RevenueCat`)
       if (!sameType(p, d.type)) {
-        fields.push(`type ${store}`)
+        fields.push(`type ${STORE_LABEL[store]}`)
         errors.push(
           `the ${STORE_WORD[store]} product ${storeId} is type ${p.type}, the file says ${d.type}; change it in RevenueCat`,
         )
       }
       if ((p.display_name ?? '') !== d.displayName) {
-        fields.push(`display name ${store}`)
+        fields.push(`display name ${STORE_LABEL[store]}`)
         mine.push({
           store: 'revenuecat',
           id: d.id,
           kind: 'rename',
-          summary: `rename ${store}`,
+          summary: `rename ${STORE_LABEL[store]}`,
           payload: { productId: p.id, display_name: d.displayName },
         })
       }
@@ -156,16 +173,26 @@ export function diffRevenuecat(
     } else if (ent.state === ARCHIVED) {
       errors.push(`entitlement ${d.entitlement} is archived: unarchive it in RevenueCat`)
     }
-    if (toAttach.length) {
-      if (ent) fields.push('attach')
-      mine.push({
+    if (toAttach.length && ent) fields.push('attach')
+    // The Test Store create and attach run last: a refused create skips only the Test Store attach.
+    const isTest = (a: RcAction) => a.kind === 'product' && (a.payload as { store: string }).store === 'test'
+    const testCreate = mine.filter(isTest)
+    const ordered = mine.filter((a) => !isTest(a))
+    for (const test of [false, true]) {
+      const products = toAttach.filter((k) => k.startsWith('test:') === test)
+      if (!products.length) continue
+      const attach: RcAction = {
         store: 'revenuecat',
         id: d.id,
         kind: 'attach',
-        summary: `attach to ${d.entitlement}`,
-        payload: { lookup_key: d.entitlement, products: toAttach },
-      })
+        summary: `attach to ${d.entitlement}${test ? ' (test store)' : ''}`,
+        payload: { lookup_key: d.entitlement, products },
+      }
+      if (test) ordered.push(...testCreate)
+      ordered.push(attach)
     }
+    if (!toAttach.some((k) => k.startsWith('test:'))) ordered.push(...testCreate)
+    mine.splice(0, mine.length, ...ordered)
     if (errors.length) actions.push(errorAction('revenuecat', d.id, errors.join('; ')))
     actions.push(...mine)
 
@@ -186,6 +213,17 @@ export function diffRevenuecat(
     })
   }
 
+  if (observed.testMissing) {
+    actions.unshift(errorAction('revenuecat', 'test-store', NO_TEST_STORE))
+    rows.push({
+      store: 'revenuecat',
+      id: 'test-store',
+      sync: 'missing',
+      storeState: 'no Test Store app',
+      notes: [NO_TEST_STORE],
+    })
+  }
+
   if (opts.extras) {
     const wanted = new Set(desired.flatMap((d) => APP_STORES.map((s) => `${observed.apps[s]}:${d[s]}`)))
     for (const p of observed.products) {
@@ -195,7 +233,7 @@ export function diffRevenuecat(
           store: 'revenuecat',
           id: p.store_identifier,
           sync: 'extra',
-          storeState: `${store} ${p.type}${p.state === ARCHIVED ? ' (archived)' : ''}`,
+          storeState: `${STORE_LABEL[store]} ${p.type}${p.state === ARCHIVED ? ' (archived)' : ''}`,
           notes: ['not in the file (left alone)'],
         })
       }
@@ -254,6 +292,10 @@ export function revenuecatAdapter(
         if (a) found.play = a.id
         else missing.push(`the Play Store app ${t.packageName}`)
       }
+      if (t.testStore) {
+        const a = apps.find((x) => x.type === 'test_store')
+        if (a) found.test = a.id
+      }
       if (missing.length) {
         throw new KitError(
           `RevenueCat project ${t.projectId} is missing ${missing.join(' and ')}`,
@@ -273,7 +315,15 @@ export function revenuecatAdapter(
         if (store) productIds.set(`${store}:${p.store_identifier}`, p.id)
       }
       for (const e of entitlements) entitlementIds.set(e.lookup_key, e.id)
-      return { projectId: t.projectId, apps: found, products, entitlements, attached }
+      const testMissing = t.testStore && !found.test
+      return {
+        projectId: t.projectId,
+        apps: found,
+        ...(testMissing ? { testMissing } : {}),
+        products,
+        entitlements,
+        attached,
+      }
     },
 
     diff: (desired, o, diffOpts) => diffRevenuecat(desired, o, diffOpts),

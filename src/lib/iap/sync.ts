@@ -171,11 +171,12 @@ function build(store: Store, input: BuildInput): Unit {
     // RevenueCat allows 60 project-configuration calls a minute, shared by every endpoint.
     const pace = Number(process.env.KIT_RC_PACE_MS ?? 1000)
     const client = createClient({ store, token: creds.token, pace: createPacer(pace), onProgress })
-    const apps = { apple: !!targets.apple, play: !!targets.play }
+    const apps = { apple: !!targets.apple, play: !!targets.play, test: !!targets.revenuecat!.testStore }
     const ids = {
       projectId: targets.revenuecat!.projectId,
       bundleId: targets.apple?.bundleId,
       packageName: targets.play?.packageName,
+      testStore: apps.test,
     }
     // Products first: offering packages attach the RevenueCat products this part creates.
     part(

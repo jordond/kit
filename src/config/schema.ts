@@ -480,6 +480,8 @@ export const configSchema = z
             projectId: z.string().min(1),
             /** Env var holding the project's v2 secret key. */
             apiKeyEnv: z.string().min(1).default('REVENUECAT_API_KEY'),
+            /** Also manage the project's RevenueCat Test Store products (opt-in; the API sets no price). */
+            testStore: z.boolean().default(false),
           })
           .strict()
           .optional(),

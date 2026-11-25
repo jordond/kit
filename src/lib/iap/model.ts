@@ -222,6 +222,13 @@ export interface RcDesired {
   /** Store identifiers per app; a store missing here has no app in RevenueCat to attach. */
   apple?: string
   play?: string
+  /** Test Store identifier (opt-in); `testTitle` and `testDuration` are what its create needs. */
+  test?: string
+  testTitle?: string
+  /** Subscriptions only: the Test Store `subscription.duration`. */
+  testDuration?: string
+  /** Set instead of `test` when the plan cannot exist in the Test Store. */
+  testError?: string
 }
 
 function screenshot(path: string | undefined): AppleScreenshot | undefined {
@@ -271,7 +278,10 @@ export function playDesired(catalog: Catalog, today: string): PlayDesired[] {
  * One RevenueCat product pair per one-time product and per subscription plan. Plans are
  * `subscription:plan` (Play's RC store identifier), named after the subscription and the period.
  */
-export function rcDesired(catalog: Catalog, stores: { apple: boolean; play: boolean }): RcDesired[] {
+export function rcDesired(
+  catalog: Catalog,
+  stores: { apple: boolean; play: boolean; test?: boolean },
+): RcDesired[] {
   const names = new Map<string, string>()
   for (const p of catalog.products) if (!names.has(p.entitlement)) names.set(p.entitlement, p.name)
   for (const s of catalog.subscriptions) if (!names.has(s.entitlement)) names.set(s.entitlement, s.name)
@@ -283,6 +293,7 @@ export function rcDesired(catalog: Catalog, stores: { apple: boolean; play: bool
     entitlementName: names.get(p.entitlement)!,
     apple: stores.apple ? p.id : undefined,
     play: stores.play ? p.id : undefined,
+    ...(stores.test ? { test: p.id, testTitle: p.localizations[catalog.locale]?.name ?? p.name } : {}),
   }))
   const plans: RcDesired[] = catalog.subscriptions.flatMap((s) =>
     s.plans.map((plan) => ({
@@ -293,9 +304,30 @@ export function rcDesired(catalog: Catalog, stores: { apple: boolean; play: bool
       entitlementName: names.get(s.entitlement)!,
       apple: stores.apple ? plan.appleProductId : undefined,
       play: stores.play ? planRef(s.id, plan.id) : undefined,
+      ...(stores.test ? testStorePlan(`${s.name} (${PERIOD_LABEL[plan.period]})`, plan) : {}),
     })),
   )
   return [...products, ...plans]
+}
+
+/** RevenueCat Test Store `subscription.duration` values; a period missing here has no Test Store product. */
+export const TEST_STORE_DURATION: Partial<Record<Period, string>> = {
+  P1W: 'P1W',
+  P1M: 'P1M',
+  P2M: 'P2M',
+  P3M: 'P3M',
+  P6M: 'P6M',
+  P1Y: 'P1Y',
+}
+
+function testStorePlan(title: string, plan: CatalogPlan): Partial<RcDesired> {
+  const duration = TEST_STORE_DURATION[plan.period]
+  if (!duration) {
+    return {
+      testError: `the Test Store has no subscription duration for ${plan.period} (it takes ${Object.keys(TEST_STORE_DURATION).join(', ')})`,
+    }
+  }
+  return { test: plan.appleProductId, testTitle: title, testDuration: duration }
 }
 
 const PERIOD_LABEL: Record<Period, string> = {
@@ -441,7 +473,7 @@ export function playSubscriptionsDesired(catalog: Catalog): PlaySubscriptionDesi
 export interface StoreTargets {
   apple?: { bundleId: string; familySharing: boolean }
   play?: { packageName: string }
-  revenuecat?: { projectId: string; apiKeyEnv: string }
+  revenuecat?: { projectId: string; apiKeyEnv: string; testStore?: boolean }
 }
 
 export function storeTargets(config: KitConfig, iap: Iap): StoreTargets {

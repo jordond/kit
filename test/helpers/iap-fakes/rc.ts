@@ -23,6 +23,16 @@ export class FakeRc {
       project_id: 'projd2d1fc4a',
       play_store: { package_name: 'app.example' },
     },
+    {
+      object: 'app',
+      id: 'app_test',
+      name: 'Test Store',
+      type: 'test_store',
+      project_id: 'projd2d1fc4a',
+      app_store: null,
+      play_store: null,
+      test_store: null,
+    },
   ]
   products = new Map<string, Json>()
   entitlements = new Map<string, Json>()
@@ -32,6 +42,8 @@ export class FakeRc {
   packages = new Map<string, Json>()
   /** Package id → attached product ids. */
   packageProducts = new Map<string, Set<string>>()
+  /** Set to make every Test Store product create fail with this message. */
+  rejectTestCreate?: string
   private seq = 0
 
   private error(status: number, type: string, message: string) {
@@ -242,6 +254,17 @@ export class FakeRc {
         body.type as string,
         (body.display_name as string) ?? '',
       )
+      if (body.app_id === 'app_test') {
+        if (!body.title)
+          return this.error(400, 'parameter_error', 'title is required for Test Store products')
+        const created = this.products.get(id)!
+        created.title = body.title
+        if (body.subscription) created.subscription = body.subscription
+        if (this.rejectTestCreate) {
+          this.products.delete(id)
+          return this.error(422, 'invalid_request', this.rejectTestCreate)
+        }
+      }
       return json(this.products.get(id), 201)
     }
     if (req.method === 'POST' && (m = p.match(/^products\/(\w+)$/))) {

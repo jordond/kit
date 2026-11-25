@@ -42,7 +42,7 @@ const pkg = z.object({
 })
 const anyJson = z.unknown()
 
-type AppStore = 'apple' | 'play'
+type AppStore = 'apple' | 'play' | 'test'
 type RcProduct = z.output<typeof product>
 type RcOffering = z.output<typeof offering>
 type RcPackage = z.output<typeof pkg>
@@ -63,14 +63,15 @@ export interface RcOfferingsTargets {
   projectId: string
   bundleId?: string
   packageName?: string
+  testStore?: boolean
   /** The RevenueCat products of the file (`rcDesired`): what a package's `product` points at. */
   products: RcDesired[]
 }
 
 export type RcOfferingAction = Action
 
-const APP_STORES: AppStore[] = ['apple', 'play']
-const STORE_WORD: Record<AppStore, string> = { apple: 'App Store', play: 'Play Store' }
+const APP_STORES: AppStore[] = ['apple', 'play', 'test']
+const STORE_WORD: Record<AppStore, string> = { apple: 'App Store', play: 'Play Store', test: 'Test Store' }
 const ARCHIVED = new Set(['inactive', 'archived'])
 const SCOPES =
   'Offerings also need project_configuration:offerings:read_write and project_configuration:packages:read_write on the RevenueCat secret key'
@@ -307,6 +308,11 @@ export function revenuecatOfferingsAdapter(
         const a = list.find((x) => x.type === 'play_store' && x.play_store?.package_name === t.packageName)
         if (a) found.play = a.id
         else missing.push(`the Play Store app ${t.packageName}`)
+      }
+      if (t.testStore) {
+        // A missing Test Store app is reported by the products part; packages just skip it.
+        const a = list.find((x) => x.type === 'test_store')
+        if (a) found.test = a.id
       }
       if (missing.length) {
         throw new KitError(
