@@ -126,7 +126,9 @@ describe('revenuecat Test Store', () => {
     const r = await sync([desired()])
     expect(r.failures).toHaveLength(1)
     expect(r.failures[0]).toContain('Apps & providers')
-    expect([...fakes.rc.products.values()].map((p) => p.app_id).sort()).toEqual(['app_ios', 'app_play'])
+    expect(
+      [...fakes.rc.products.values()].map((p) => String(p.app_id)).sort((a, b) => a.localeCompare(b)),
+    ).toEqual(['app_ios', 'app_play'])
   })
 
   test('a refused create is an error for that product only', async () => {
