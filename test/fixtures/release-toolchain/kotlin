@@ -1,7 +1,8 @@
 #!/bin/sh
 # Fake Kotlin toolchain wrapper: records argv, the app module.yaml and the keystore.properties it
 # builds with, the Sentry debug-meta asset when there is one, and writes an AAB and an R8 mapping
-# where `kotlin package` does.
+# where `kotlin package` does. KIT_TEST_R8=uptodate leaves the mapping with an old mtime (R8 skipped,
+# the bundle repackaged); KIT_TEST_R8=off writes none (minification off).
 kotlin_cli_version=0.13.0
 bun -e 'const fs = require("fs")
 const yaml = fs.readFileSync("androidApp/module.yaml", "utf8")
@@ -14,8 +15,12 @@ if [ -f .kotlin-fail ]; then echo "e: compilation failed"; exit 1; fi
 if [ "$1" = package ]; then
   mkdir -p build/tasks/_androidApp_bundleAndroid
   echo aab > build/tasks/_androidApp_bundleAndroid/gradle-project-release.aab
-  mkdir -p build/tasks/_androidApp_bundleAndroid/gradle-project/build/_androidApp/outputs/mapping/release
-  echo "a.b -> c:" > build/tasks/_androidApp_bundleAndroid/gradle-project/build/_androidApp/outputs/mapping/release/mapping.txt
+  if [ "$KIT_TEST_R8" != off ]; then
+    mapping=build/tasks/_androidApp_bundleAndroid/gradle-project/build/_androidApp/outputs/mapping/release
+    mkdir -p "$mapping"
+    echo "a.b -> c:" > "$mapping/mapping.txt"
+    if [ "$KIT_TEST_R8" = uptodate ]; then touch -t 202001010000 "$mapping/mapping.txt"; fi
+  fi
   echo "Build successful"
 fi
 exit 0

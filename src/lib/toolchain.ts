@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, rmSync, type Stats, statSync } from 'node:fs'
-import { basename, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type { KitConfig } from '../config/schema'
 import { ExitCode, KitError } from './errors'
 import { appAndroidModule, moduleYaml, requireModule, type ResolvedModule, toolchainTaskDir } from './module'
@@ -250,27 +250,47 @@ export function findAab(toolchainDir: string, module: ResolvedModule, since = 0)
   return hits.sort((a, b) => b.mtime - a.mtime)[0]?.path
 }
 
-/**
- * The R8 mapping a release build of [module] wrote at or after [since]:
- * `build/tasks/_<module>_bundleAndroid/gradle-project/build/<dir>/outputs/mapping/release/mapping.txt`.
- */
-export function findMapping(toolchainDir: string, module: ResolvedModule, since = 0): string | undefined {
-  const tasks = join(toolchainDir, 'build', 'tasks')
-  if (!existsSync(tasks)) return undefined
-  const prefix = basename(toolchainTaskDir(toolchainDir, module))
+const MAPPING = join('outputs', 'mapping', 'release', 'mapping.txt')
+
+/** Newest `<build>/<dir>/outputs/mapping/release/mapping.txt` under a `gradle-project/build` dir. */
+function newestMapping(builds: string[]): string | undefined {
   const hits: { path: string; mtime: number }[] = []
-  for (const d of readdirSync(tasks)) {
-    if (!d.startsWith(prefix)) continue
-    const build = join(tasks, d, 'gradle-project', 'build')
+  for (const build of builds) {
     if (!existsSync(build)) continue
     for (const b of readdirSync(build)) {
-      const path = join(build, b, 'outputs', 'mapping', 'release', 'mapping.txt')
-      if (!existsSync(path)) continue
-      const mtime = statSync(path).mtimeMs
-      if (mtime >= since) hits.push({ path, mtime })
+      const path = join(build, b, MAPPING)
+      if (existsSync(path)) hits.push({ path, mtime: statSync(path).mtimeMs })
     }
   }
   return hits.sort((a, b) => b.mtime - a.mtime)[0]?.path
+}
+
+/**
+ * The R8 mapping of the build that produced [aab]: under the same `build/tasks/<task>/` dir, at
+ * `gradle-project/build/<dir>/outputs/mapping/release/mapping.txt`. Not filtered by mtime: when
+ * only an asset changed (the Sentry ProGuard UUID) the bundle is repackaged but R8 is up to date,
+ * so the mapping keeps its old mtime and still maps the bundle's bytecode. Falls back to the
+ * newest mapping under any of the module's task dirs when the AAB is somewhere else.
+ */
+export function findMapping(toolchainDir: string, module: ResolvedModule, aab?: string): string | undefined {
+  const tasks = join(toolchainDir, 'build', 'tasks')
+  if (aab) {
+    // The AAB is in the task dir itself, or below its gradle-project/build/<dir>/.
+    for (let dir = dirname(aab), i = 0; i < 6 && dir !== dirname(dir); dir = dirname(dir), i++) {
+      const own = join(dir, MAPPING)
+      if (existsSync(own)) return own
+      const hit = newestMapping([join(dir, 'gradle-project', 'build')])
+      if (hit) return hit
+      if (dirname(dir) === tasks) break
+    }
+  }
+  if (!existsSync(tasks)) return undefined
+  const prefix = basename(toolchainTaskDir(toolchainDir, module))
+  return newestMapping(
+    readdirSync(tasks)
+      .filter((d) => d.startsWith(prefix))
+      .map((d) => join(tasks, d, 'gradle-project', 'build')),
+  )
 }
 
 /** Where the Sentry Android SDK reads the ProGuard UUID that matches a stack trace to its mapping. */

@@ -640,7 +640,6 @@ export function toolchainBuildStep(
         mkdirSync(dirname(meta), { recursive: true })
         writeFileSync(meta, `io.sentry.ProguardUuids=${opts.proguardUuid}\n`)
       }
-      const since = Date.now()
       try {
         const cmd = [WRAPPER, 'package', '-m', module.name]
         const { code, output } = await runLines(cmd, { cwd: dir, env: opts.env, onLine: update })
@@ -654,7 +653,7 @@ export function toolchainBuildStep(
         }
         opts.onArtifact(aab)
         if (opts.onMapping) {
-          const mapping = findMapping(dir, module, since)
+          const mapping = findMapping(dir, module, aab)
           if (!mapping) {
             throw new KitError(
               `kotlin package -m ${module.name} wrote no R8 mapping`,

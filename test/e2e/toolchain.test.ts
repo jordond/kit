@@ -153,6 +153,49 @@ describe('kit release android (Kotlin toolchain)', () => {
     expect(sh(['git', 'status', '--porcelain'])).toBe('')
   })
 
+  describe('sentry mapping lookup', () => {
+    beforeEach(() => {
+      const config = join(f.dir, 'kit.config.ts')
+      writeFileSync(
+        config,
+        readFileSync(config, 'utf8').replace(
+          "      module: 'androidApp',\n",
+          "      module: 'androidApp',\n      sentry: { org: 'o', project: 'p' },\n",
+        ),
+      )
+      sh(['git', 'commit', '-qam', 'sentry'])
+      sh(['git', 'push', '-q', 'origin', 'main'])
+    })
+
+    test('R8 up to date: the mapping older than the build is uploaded under the new UUID', async () => {
+      const r = await run(['release', 'android', '--track', 'internal', '--code', '5', '--json'], {
+        SENTRY_AUTH_TOKEN: 't',
+        KIT_TEST_R8: 'uptodate',
+      })
+      expect(r.stderr).not.toContain('wrote no R8 mapping')
+      expect(r.code).toBe(0)
+      const doc = JSON.parse(r.stdout)
+      expect(doc.artifacts.mapping).toEndWith(
+        'build/tasks/_androidApp_bundleAndroid/gradle-project/build/_androidApp/outputs/mapping/release/mapping.txt',
+      )
+      const upload = lanes().find((c) => c.argv.slice(2).join(' ') === 'android upload_mapping')!
+      expect(upload.env!.KIT_ANDROID_MAPPING).toBe(doc.artifacts.mapping)
+      expect(kotlin()[0]!.meta).toBe(`io.sentry.ProguardUuids=${upload.env!.KIT_SENTRY_PROGUARD_UUID}\n`)
+    })
+
+    test('no mapping at all: the build step fails and nothing is uploaded', async () => {
+      const r = await run(['release', 'android', '--track', 'internal', '--code', '5'], {
+        SENTRY_AUTH_TOKEN: 't',
+        KIT_TEST_R8: 'off',
+      })
+      expect(r.code).not.toBe(0)
+      expect(r.stderr).toContain('kotlin package -m androidApp wrote no R8 mapping')
+      expect(lanes()).toEqual([])
+      expect(existsSync(join(f.dir, 'androidApp/assets/sentry-debug-meta.properties'))).toBe(false)
+      expect(sh(['git', 'status', '--porcelain'])).toBe('')
+    })
+  })
+
   test('without sentry, nothing is written into the bundle and no mapping is uploaded', async () => {
     const r = await run(['release', 'android', '--track', 'internal', '--code', '5'])
     expect(r.code).toBe(0)

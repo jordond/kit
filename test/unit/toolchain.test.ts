@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -19,6 +19,7 @@ import { targetCommands } from '../../src/lib/targets'
 import {
   aabFromOutput,
   findAab,
+  findMapping,
   getYamlScalar,
   invalidateStaleApk,
   keystoreProperties,
@@ -171,6 +172,65 @@ describe('artifacts', () => {
     expect(findAab(dir, module, Date.now() + 60_000)).toBeUndefined()
     expect(findAab(join(dir, 'none'), module)).toBeUndefined()
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  describe('findMapping', () => {
+    const module: ResolvedModule = {
+      kind: 'toolchain',
+      key: 'k',
+      dir: 'mobile/androidApp',
+      name: 'androidApp',
+    }
+    const old = new Date(2020, 0, 1)
+    const setup = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'kit-tc-'))
+      const task = join(dir, 'build/tasks/_androidApp_bundleAndroid')
+      mkdirSync(task, { recursive: true })
+      const aab = join(task, 'gradle-project-release.aab')
+      writeFileSync(aab, '')
+      return { dir, task, aab }
+    }
+    const mappingIn = (task: string, build = '_androidApp') => {
+      const path = join(task, 'gradle-project/build', build, 'outputs/mapping/release/mapping.txt')
+      mkdirSync(join(path, '..'), { recursive: true })
+      writeFileSync(path, 'a.b -> c:\n')
+      return path
+    }
+
+    test('returns the mapping next to the AAB when R8 was up to date (mtime before the build)', () => {
+      const { dir, task, aab } = setup()
+      const mapping = mappingIn(task)
+      utimesSync(mapping, old, old)
+      expect(statSync(mapping).mtimeMs).toBeLessThan(statSync(aab).mtimeMs)
+      expect(findMapping(dir, module, aab)).toBe(mapping)
+      rmSync(dir, { recursive: true, force: true })
+    })
+
+    test("prefers the AAB's task dir over a newer mapping in another of the module's task dirs", () => {
+      const { dir, task, aab } = setup()
+      const mapping = mappingIn(task)
+      utimesSync(mapping, old, old)
+      const other = mappingIn(join(dir, 'build/tasks/_androidApp_bundleAndroidDebug'))
+      expect(findMapping(dir, module, aab)).toBe(mapping)
+      // An AAB below gradle-project/build/<dir>/ resolves to that dir's mapping.
+      const nested = join(task, 'gradle-project/build/_androidApp/outputs/bundle/release/app.aab')
+      mkdirSync(join(nested, '..'), { recursive: true })
+      writeFileSync(nested, '')
+      expect(findMapping(dir, module, nested)).toBe(mapping)
+      // Fallback (the AAB is outside build/tasks, or unknown): the newest under the module's tasks.
+      expect(findMapping(dir, module, join(dir, 'out/app.aab'))).toBe(other)
+      expect(findMapping(dir, module)).toBe(other)
+      rmSync(dir, { recursive: true, force: true })
+    })
+
+    test('undefined when no mapping exists (minification off)', () => {
+      const { dir, task, aab } = setup()
+      mappingIn(join(dir, 'build/tasks/_other_bundleAndroid'))
+      expect(findMapping(dir, module, aab)).toBeUndefined()
+      expect(findMapping(join(dir, 'none'), module)).toBeUndefined()
+      expect(existsSync(task)).toBe(true)
+      rmSync(dir, { recursive: true, force: true })
+    })
   })
 })
 
