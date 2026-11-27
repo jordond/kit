@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- **shots:** Play's foldable screenshots. `shots.foldable.slides` lists HTML slides (`{ name, file, shot, aspect, background }`), each drawn at one of Play's foldable aspects (`1:1`, `4:3`, `3:4`, `16:10`, `10:16`, `16:9`, `9:16`) and written by `kit shots export` to `<locale>/images/foldableScreenshots/`, numbered and owned apart from the phone set, whether the phone slides come from `shots.project` or `shots.slides`. The config takes 3 to 8 and wants one each of `1:1`, `4:3` and `10:16`. The Play API has no foldable image type, so `kit release metadata push` warns that they are to be uploaded by hand.
+- **maestro:** a suite can name its `device` (an AVD or simulator, booted when not running), and on Android a `posture` (`adb emu fold|unfold` on a foldable emulator) and an `orientation` (turned by the emulator's sensor, which an unfolded foldable obeys where Maestro's `setOrientation` is ignored). The emulator is woken and its keyguard dismissed after a posture change.
+- **maestro:** `--suite a,b` runs several suites in order on one build, as `shots.suites` does.
+
 ## 0.14.0 (2026-11-27)
 
 ### Features

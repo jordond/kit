@@ -3,7 +3,16 @@ import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
 import type { ShootJob } from './pages'
 import { isLocale, repoPath, slideSlug } from './plan'
-import { resolveSets, SET_SIZES, STORE_TARGETS } from './sizes'
+import type { DeviceTarget } from '../devices'
+import {
+  type ExportSet,
+  FOLD_SIZES,
+  foldSet,
+  PLAY_FOLD_DIR,
+  resolveSets,
+  SET_SIZES,
+  STORE_TARGETS,
+} from './sizes'
 import type { SkippedSlide, StoreDestination, WriteJob } from './types'
 import { chooseScale } from './viewport'
 
@@ -44,74 +53,125 @@ export const shotFile = (shot: string): string => (extname(shot) === '' ? `${sho
 
 const nn = (index: number): string => String(index).padStart(2, '0')
 
+/** One HTML slide as the planner reads it: from `shots.slides`, or `shots.foldable.slides` with its set. */
+interface HtmlSlide {
+  name: string
+  file: string
+  shot?: string
+  background?: string
+}
+
+/** Where a slide is written and at what size: a target's set, or a foldable aspect. */
+interface SlideSet {
+  set: ExportSet
+  width: number
+  height: number
+  /** The Play screenshot type dir; unused for apple. */
+  playDir: string
+}
+
 /**
  * Plan the HTML slides of one export. Pure: the raw listing and the destinations are passed in.
  * A slide whose raw shot is absent for a target is missing there (exit 4), or skipped under
  * `allowMissing`; the slides after it move up, as project slides do.
+ *
+ * `shots.foldable` slides are planned for Play beside the phone ones: each at its own aspect,
+ * numbered in their own sequence, under `foldableScreenshots`, with the raw shots of `android`.
+ * `foldableOnly` plans those alone (an export of `shots.project` draws the phone slides itself).
  */
-export function planSlides(input: SlidePlanInput): SlidePlan {
+export function planSlides(input: SlidePlanInput & { foldableOnly?: boolean }): SlidePlan {
   const { root, config, destinations, rawDir, raw, allowMissing } = input
-  const slides: NonNullable<Shots['slides']> = config.shots?.slides ?? []
+  const slides: NonNullable<Shots['slides']> = input.foldableOnly ? [] : (config.shots?.slides ?? [])
+  const foldable = config.shots?.foldable?.slides ?? []
   const sets = resolveSets(config)
   const jobs: SlideJob[] = []
   const skipped: SkippedSlide[] = []
   const missing = new Set<string>()
 
-  for (const destination of destinations) {
+  const plan = (
+    destination: StoreDestination,
+    target: DeviceTarget,
+    locale: string,
+    entries: readonly { slide: HtmlSlide; at: SlideSet }[],
+    idPrefix: string,
+  ): void => {
     const { store } = destination
-    for (const target of STORE_TARGETS[store]) {
-      const set = sets[target]
-      const { width, height } = SET_SIZES[set]
+    let index = 0
+    for (const { slide, at } of entries) {
+      const { set, width, height } = at
       const scale = chooseScale(width, height)
       if (scale === undefined) throw new KitError(`No scale fits the ${set} set (${width}x${height})`)
+      let shot: string | undefined
+      if (slide.shot !== undefined) {
+        const file = shotFile(slide.shot)
+        const localised = `${target}/${locale}/${file}`
+        const shared = `${target}/${file}`
+        const found = raw.has(localised) ? localised : raw.has(shared) ? shared : undefined
+        if (found === undefined || rawDir === undefined) {
+          const looked = rawDir === undefined ? shared : repoPath(root, join(rawDir, target, file))
+          missing.add(looked)
+          skipped.push({ store, target, set, locale, slide: slide.name, shot: looked })
+          continue
+        }
+        shot = join(rawDir, ...found.split('/'))
+      }
+      index += 1
+      const name = `${nn(index)}_${store === 'apple' ? `${set}_` : ''}${slideSlug({ id: slide.name, name: slide.name })}.png`
+      jobs.push({
+        id: `${idPrefix}-${locale}-${nn(index)}`,
+        store,
+        target,
+        set,
+        locale,
+        index,
+        width,
+        height,
+        slide: { id: slide.name, name: slide.name },
+        file:
+          store === 'apple'
+            ? join(destination.dir, locale, name)
+            : join(destination.dir, locale, 'images', at.playDir, name),
+        name: slide.name,
+        label: `slide ${slide.name} (${set}, ${locale})`,
+        source: resolve(root, slide.file),
+        scale,
+        background: slide.background ?? DEFAULT_BACKGROUND,
+        context: { set, target, store, locale, slide: slide.name, index, ...(shot ? { shot } : {}) },
+      })
+    }
+  }
+
+  for (const destination of destinations) {
+    const { store } = destination
+    for (const locale of destination.locales) {
+      if (!isLocale(locale)) {
+        throw new KitError(
+          `"${locale}" is not a locale kit can export`,
+          'A locale is a store locale code such as en-US: letters, digits, ".", "_" and "-"',
+          ExitCode.usage,
+        )
+      }
+    }
+    for (const target of STORE_TARGETS[store]) {
+      const set = sets[target]
+      const at: SlideSet = { set, ...SET_SIZES[set], playDir: 'phoneScreenshots' }
       for (const locale of destination.locales) {
-        if (!isLocale(locale)) {
-          throw new KitError(
-            `"${locale}" is not a locale kit can export`,
-            'A locale is a store locale code such as en-US: letters, digits, ".", "_" and "-"',
-            ExitCode.usage,
-          )
-        }
-        let index = 0
-        for (const slide of slides) {
-          let shot: string | undefined
-          if (slide.shot !== undefined) {
-            const file = shotFile(slide.shot)
-            const localised = `${target}/${locale}/${file}`
-            const shared = `${target}/${file}`
-            const found = raw.has(localised) ? localised : raw.has(shared) ? shared : undefined
-            if (found === undefined || rawDir === undefined) {
-              const looked = rawDir === undefined ? shared : repoPath(root, join(rawDir, target, file))
-              missing.add(looked)
-              skipped.push({ store, target, set, locale, slide: slide.name, shot: looked })
-              continue
-            }
-            shot = join(rawDir, ...found.split('/'))
-          }
-          index += 1
-          const name = `${nn(index)}_${store === 'apple' ? `${set}_` : ''}${slideSlug({ id: slide.name, name: slide.name })}.png`
-          jobs.push({
-            id: `${target}-${locale}-${nn(index)}`,
-            store,
-            target,
-            set,
-            locale,
-            index,
-            width,
-            height,
-            slide: { id: slide.name, name: slide.name },
-            file:
-              store === 'apple'
-                ? join(destination.dir, locale, name)
-                : join(destination.dir, locale, 'images', 'phoneScreenshots', name),
-            name: slide.name,
-            label: `slide ${slide.name} (${set}, ${locale})`,
-            source: resolve(root, slide.file),
-            scale,
-            background: slide.background ?? DEFAULT_BACKGROUND,
-            context: { set, target, store, locale, slide: slide.name, index, ...(shot ? { shot } : {}) },
-          })
-        }
+        plan(
+          destination,
+          target,
+          locale,
+          slides.map((slide) => ({ slide, at })),
+          target,
+        )
+      }
+    }
+    if (store === 'google' && foldable.length > 0) {
+      for (const locale of destination.locales) {
+        const entries = foldable.map((slide) => ({
+          slide,
+          at: { set: foldSet(slide.aspect), ...FOLD_SIZES[slide.aspect], playDir: PLAY_FOLD_DIR },
+        }))
+        plan(destination, 'android', locale, entries, 'fold')
       }
     }
   }

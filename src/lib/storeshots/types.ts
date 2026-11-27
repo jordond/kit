@@ -1,7 +1,7 @@
 import type { KitContext } from '../../cli/command'
 import type { KitConfig } from '../../config/schema'
 import type { DeviceTarget } from '../devices'
-import type { SetId, Store } from './sizes'
+import type { ExportSet, Store } from './sizes'
 import type { ProjectV2 } from './types-v2'
 
 /**
@@ -18,7 +18,7 @@ import type { ProjectV2 } from './types-v2'
  * captured; a **job** is one slide rendered for one set and locale.
  */
 
-export type { SetId, Size, Store } from './sizes'
+export type { ExportSet, SetId, Size, Store } from './sizes'
 export type * from './types-v2'
 
 // ---------------------------------------------------------------------------------------------
@@ -204,7 +204,7 @@ export interface Job {
   id: string
   store: Store
   target: DeviceTarget
-  set: SetId
+  set: ExportSet
   locale: string
   /** 1-based position in its (set, locale); the `NN` of the file name. */
   index: number
@@ -237,7 +237,7 @@ export interface Job {
 export interface SkippedSlide {
   store: Store
   target: DeviceTarget
-  set: SetId
+  set: ExportSet
   locale: string
   /** Slide id. */
   slide: string
@@ -376,7 +376,7 @@ export interface ExportOptions {
 export interface WrittenShot {
   store: Store
   target: DeviceTarget
-  set: SetId
+  set: ExportSet
   locale: string
   /** Slide id. */
   slide: string
@@ -461,8 +461,8 @@ export interface WritePlan {
 
 /**
  * `.kit-shots.json` in a `StoreDestination.dir`: the files the last export wrote there. An owned
- * set is one `<locale>` dir (apple, per set id) or one `<locale>/images/phoneScreenshots` dir
- * (google). Export replaces the listed files; an image in an owned set that is not listed is in
+ * set is one `<locale>` dir (apple, per set id) or one `<locale>/images/phoneScreenshots` or
+ * `<locale>/images/foldableScreenshots` dir (google). Export replaces the listed files; an image in an owned set that is not listed is in
  * the way (exit 4) unless `--force`. Nothing outside an owned set is ever touched.
  */
 export interface ShotsManifest {

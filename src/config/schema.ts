@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { styleRules } from '../lib/storeshots/project'
 import { narrowViewport } from '../lib/storeshots/viewport'
+import { FOLD_ASPECTS, PLAY_FOLD_MAX, PLAY_FOLD_MIN, PLAY_FOLD_REQUIRED } from '../lib/storeshots/fold'
 
 export const verbs = ['lint', 'format', 'typecheck', 'test', 'build', 'dev', 'deploy'] as const
 export type Verb = (typeof verbs)[number]
@@ -248,6 +249,22 @@ export const configSchema = z
                 screenshots: z.string().optional(),
                 /** Extra `-e KEY=VALUE` for the flows; PLATFORM is always set. */
                 env: z.record(z.string(), z.string()).optional(),
+                /**
+                 * The simulator or AVD this suite runs on, booted when it is not running: beats
+                 * `maestro.devices.<target>`, and `--device` beats it.
+                 */
+                device: z.string().min(1).optional(),
+                /**
+                 * Android: fold or unfold a foldable emulator before the app is installed
+                 * (`adb emu fold|unfold`). A physical device is left as it is, with a warning.
+                 */
+                posture: z.enum(['folded', 'unfolded']).optional(),
+                /**
+                 * Android: turn the display before the install, by the emulator's sensor (`adb emu
+                 * rotate`), which a large screen obeys where Maestro's `setOrientation` is ignored. A
+                 * physical device is left as it is, with a warning.
+                 */
+                orientation: z.enum(['portrait', 'landscape']).optional(),
               })
               .strict(),
           )
@@ -296,6 +313,41 @@ export const configSchema = z
               .strict(),
           )
           .min(1)
+          .optional(),
+        /**
+         * Play's foldable screenshots: HTML slides like `slides`, each drawn at one aspect ratio and
+         * written to `<locale>/images/foldableScreenshots/`. The Play API takes no foldable images, so
+         * they are uploaded by hand. 3 to 8 slides, at least one each of 1:1, 4:3 and 10:16.
+         */
+        foldable: z
+          .object({
+            slides: z
+              .array(
+                z
+                  .object({
+                    name: z
+                      .string()
+                      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use letters, digits, ".", "_" and "-"'),
+                    file: z.string().min(1),
+                    /** As `slides[].shot`, looked up under `<raw>/android/`. */
+                    shot: z
+                      .string()
+                      .regex(/^[^/\\]+$/, 'A file name in the raw dir, not a path')
+                      .refine((v) => !v.startsWith('.'), 'Cannot start with "."')
+                      .optional(),
+                    /** Width to height; Play takes these seven for foldables. */
+                    aspect: z.enum(FOLD_ASPECTS),
+                    background: z
+                      .string()
+                      .regex(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i, 'Expected #rgb or #rrggbb')
+                      .optional(),
+                  })
+                  .strict(),
+              )
+              .min(PLAY_FOLD_MIN, `Play takes ${PLAY_FOLD_MIN} to ${PLAY_FOLD_MAX} foldable screenshots`)
+              .max(PLAY_FOLD_MAX, `Play takes ${PLAY_FOLD_MIN} to ${PLAY_FOLD_MAX} foldable screenshots`),
+          })
+          .strict()
           .optional(),
         /**
          * The suites `kit shots <target>` runs, in order, when neither `--suite` nor `--full` is
@@ -614,6 +666,28 @@ export const configSchema = z
         })
       }
       slideNames.add(slide.name)
+    }
+    const foldNames = new Set<string>()
+    for (const [i, slide] of (c.shots?.foldable?.slides ?? []).entries()) {
+      if (foldNames.has(slide.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'foldable', 'slides', i, 'name'],
+          message: `Duplicate slide "${slide.name}"`,
+        })
+      }
+      foldNames.add(slide.name)
+    }
+    if (c.shots?.foldable) {
+      const aspects = new Set(c.shots.foldable.slides.map((s) => s.aspect))
+      const absent = PLAY_FOLD_REQUIRED.filter((a) => !aspects.has(a))
+      if (absent.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'foldable', 'slides'],
+          message: `Play wants at least one foldable screenshot at each of ${PLAY_FOLD_REQUIRED.join(', ')}; none is ${absent.join(', ')}`,
+        })
+      }
     }
     for (const [i, name] of (c.shots?.suites ?? []).entries()) {
       if (!c.maestro) {

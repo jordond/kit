@@ -41,7 +41,16 @@ export async function runSuiteCommand(ctx: KitContext, c: SuiteCommand): Promise
   const args = ctx.args as Record<string, string | boolean | undefined>
   const target = parseTarget(ctx.positionals[0], c.command)
   const named = args.suite as string | undefined
-  const names = named !== undefined ? [named] : c.suites?.length ? [...new Set(c.suites)] : [c.defaultSuite]
+  // `--suite a,b` runs both, in order, like `shots.suites`.
+  const listed = named
+    ?.split(',')
+    .map((n) => n.trim())
+    .filter(Boolean)
+  const names = listed?.length
+    ? [...new Set(listed)]
+    : c.suites?.length
+      ? [...new Set(c.suites)]
+      : [c.defaultSuite]
   const suites = names.map((name) => resolveSuite(config, name))
   if (c.tags !== undefined) {
     const tags = c.tags

@@ -1,6 +1,18 @@
 import type { KitConfig } from '../../config/schema'
 import type { DeviceTarget } from '../devices'
 import { ExitCode, KitError } from '../errors'
+import type { foldSet } from './fold'
+
+export {
+  FOLD_ASPECTS,
+  FOLD_SIZES,
+  type FoldAspect,
+  foldSet,
+  PLAY_FOLD_DIR,
+  PLAY_FOLD_MAX,
+  PLAY_FOLD_MIN,
+  PLAY_FOLD_REQUIRED,
+} from './fold'
 
 /**
  * Store screenshot sizes: what `kit shots export` renders each set at, and what the stores take
@@ -35,6 +47,9 @@ type SetsConfig = Required<NonNullable<NonNullable<KitConfig['shots']>['sets']>>
 
 /** A named export size (`shots.sets.<target>` in kit.config.ts). */
 export type SetId = SetsConfig[DeviceTarget]
+
+/** A set an export writes: a target's set, or a foldable aspect (`fold-4x3`). */
+export type ExportSet = SetId | ReturnType<typeof foldSet>
 
 /** Portrait pixel size of each set. Every Apple size is in `APPLE_SIZES`; `phone` is 9:16, inside Play's 2:1. */
 export const SET_SIZES: Record<SetId, Size> = {

@@ -431,15 +431,18 @@ maestro: {
 
 A suite:
 
-| Field         | Type                       | Meaning                                                                  |
-| ------------- | -------------------------- | ------------------------------------------------------------------------ |
-| `extends`     | `string`                   | Another suite (configured or built-in) whose fields this one starts from |
-| `tags`        | `string[]`, at least one   | Flow tags run in one Maestro invocation                                  |
-| `stages`      | `string[][]`, at least one | Tag sets run as separate invocations, in order; replaces `tags`          |
-| `fixture`     | `string \| false`          | Fixture loaded before the flows; `false` loads none                      |
-| `statusBar`   | `boolean`                  | Pin the status bar to 9:41 first                                         |
-| `screenshots` | `string`                   | Dir the `takeScreenshot` PNGs are copied to, under `<target>/`           |
-| `env`         | `Record<string, string>`   | Extra `-e KEY=VALUE` for the flows; `PLATFORM` is always set             |
+| Field         | Type                        | Meaning                                                                                                                                                             |
+| ------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extends`     | `string`                    | Another suite (configured or built-in) whose fields this one starts from                                                                                            |
+| `tags`        | `string[]`, at least one    | Flow tags run in one Maestro invocation                                                                                                                             |
+| `stages`      | `string[][]`, at least one  | Tag sets run as separate invocations, in order; replaces `tags`                                                                                                     |
+| `fixture`     | `string \| false`           | Fixture loaded before the flows; `false` loads none                                                                                                                 |
+| `statusBar`   | `boolean`                   | Pin the status bar to 9:41 first                                                                                                                                    |
+| `screenshots` | `string`                    | Dir the `takeScreenshot` PNGs are copied to, under `<target>/`                                                                                                      |
+| `env`         | `Record<string, string>`    | Extra `-e KEY=VALUE` for the flows; `PLATFORM` is always set                                                                                                        |
+| `device`      | `string`                    | Simulator or AVD the suite runs on, booted when not running; beats `maestro.devices.<target>`, and `--device` beats it                                              |
+| `posture`     | `'folded' \| 'unfolded'`    | Android: `adb emu fold\|unfold` on a foldable emulator before the install; a physical device is left as it is, with a warning                                       |
+| `orientation` | `'portrait' \| 'landscape'` | Android: turn an emulator by its sensor (`adb emu rotate`) before the install, after `posture`; a large screen obeys it where Maestro's `setOrientation` is ignored |
 
 Built-in suites exist without config, and a configured suite of the same name starts from them:
 
@@ -543,6 +546,28 @@ Output goes to `release.ios.metadata/../screenshots` and `release.android.metada
 slides of `project`. kit picks each set's scale (the largest that divides both sides and keeps the viewport
 at least 500 CSS px wide) and tells the page its set, target, locale and raw shot. See
 [Store screenshots](shots.md#html-slides).
+
+### Foldable screenshots
+
+`shots.foldable.slides` are HTML slides for Play's foldable screenshots, beside the phone ones. Each has
+`name`, `file`, `shot` and `background` as `slides` does, and an `aspect`: `1:1`, `4:3`, `3:4`, `16:10`,
+`10:16`, `16:9` or `9:16`. Play takes 3 to 8, at least one each of `1:1` (unfolded), `4:3` (unfolded) and
+`10:16` (the outer screen); the config refuses anything else. `kit shots export` draws them for Play only,
+whether the phone slides come from `project` or `slides`, at a fixed size per aspect, and writes
+`<locale>/images/foldableScreenshots/NN_<name>.png`. Shots are looked up under `<raw>/android/`.
+
+| Aspect  | Pixels    | Set          |
+| ------- | --------- | ------------ |
+| `1:1`   | 2048x2048 | `fold-1x1`   |
+| `4:3`   | 2560x1920 | `fold-4x3`   |
+| `3:4`   | 1920x2560 | `fold-3x4`   |
+| `16:10` | 2560x1600 | `fold-16x10` |
+| `10:16` | 1600x2560 | `fold-10x16` |
+| `16:9`  | 2560x1440 | `fold-16x9`  |
+| `9:16`  | 1440x2560 | `fold-9x16`  |
+
+The Play Developer API has no foldable image type, so supply never uploads them: upload the dir by hand
+in Play Console (Store listing, Foldable screenshots).
 
 ### Artwork pages
 

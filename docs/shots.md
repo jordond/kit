@@ -82,6 +82,25 @@ Content-Security-Policy blocks inline scripts fails; an artwork page in the same
 Each image is its own Chrome run, so an export takes a second or two per slide, set and locale; `--store`
 and `--locale` narrow it.
 
+**Foldable screenshots.** `shots.foldable.slides` adds Play's foldable set: HTML slides like `slides`,
+each with an `aspect` (`1:1`, `4:3`, `10:16`, …) instead of a set, written to
+`<locale>/images/foldableScreenshots/` with their own numbering and ownership. `data-kit-set` is
+`fold-1x1`, `fold-4x3` and so on, and `data-kit-target` is `android`. Play wants 3 to 8, with at least
+one unfolded 1:1, one unfolded 4:3 and one outer screen 10:16. Its API takes no foldable images, so upload
+them by hand in Play Console. See [CONFIG.md](CONFIG.md#foldable-screenshots).
+
+```ts
+shots: {
+  foldable: {
+    slides: [
+      { name: 'open', file: 'brand/store/fold/open.html', shot: 'fold-01-shelf', aspect: '1:1' },
+      { name: 'wide', file: 'brand/store/fold/wide.html', shot: 'fold-02-player', aspect: '4:3' },
+      { name: 'outer', file: 'brand/store/fold/outer.html', shot: 'outer-01-shelf', aspect: '10:16' },
+    ],
+  },
+},
+```
+
 **Artwork pages.** `kit shots pages [name...]` renders the HTML pages in `shots.pages` (the App Store
 product page header and search results artwork, for example) with the same headless Chrome, at the pixel
 size you declare and with the alpha channel flattened, which App Store Connect requires. It writes

@@ -115,6 +115,63 @@ describe('planSlides', () => {
   })
 })
 
+const foldable = [
+  { name: 'open', file: 'brand/store/fold/01.html', shot: 'fold-01-shelf', aspect: '1:1' },
+  { name: 'wide', file: 'brand/store/fold/02.html', shot: 'fold-02-wide', aspect: '4:3', background: '#000' },
+  { name: 'outer', file: 'brand/store/fold/03.html', shot: 'outer-01-shelf', aspect: '10:16' },
+] as const
+
+describe('planSlides with shots.foldable', () => {
+  const files = raw(['ios', 'ipad', 'android'], ['01-shelf.png', 'playing.png']).add(
+    'android/fold-01-shelf.png',
+  )
+  files.add('android/fold-02-wide.png').add('android/outer-01-shelf.png')
+  const fold = (over: Partial<SlidePlanInput> & { foldableOnly?: boolean } = {}) =>
+    planSlides(
+      input({ config: { shots: { slides, foldable: { slides: foldable } } } as never, raw: files, ...over }),
+    )
+
+  test('Play gets the foldable slides beside the phone ones, each at its aspect, numbered on their own', () => {
+    const jobs = fold().jobs.filter((j) => j.set.startsWith('fold-'))
+    expect(jobs.map((j) => j.file.slice(ROOT.length + 1))).toEqual([
+      'fastlane/metadata/android/en-US/images/foldableScreenshots/01_open.png',
+      'fastlane/metadata/android/en-US/images/foldableScreenshots/02_wide.png',
+      'fastlane/metadata/android/en-US/images/foldableScreenshots/03_outer.png',
+    ])
+    expect(jobs.map((j) => `${j.set} ${j.width}x${j.height}@${j.scale}`)).toEqual([
+      'fold-1x1 2048x2048@4',
+      'fold-4x3 2560x1920@4',
+      'fold-10x16 1600x2560@2',
+    ])
+    expect(jobs[1]).toMatchObject({
+      id: 'fold-en-US-02',
+      store: 'google',
+      target: 'android',
+      background: '#000',
+      context: {
+        set: 'fold-4x3',
+        target: 'android',
+        shot: '/repo/maestro/screenshots/android/fold-02-wide.png',
+      },
+    })
+    expect(new Set(fold().jobs.map((j) => j.id)).size).toBe(fold().jobs.length)
+  })
+
+  test('foldableOnly plans the foldable slides alone; apple gets none', () => {
+    expect(fold({ foldableOnly: true }).jobs.map((j) => j.set)).toEqual([
+      'fold-1x1',
+      'fold-4x3',
+      'fold-10x16',
+    ])
+    expect(fold({ destinations: [destinations[0]!] }).jobs.some((j) => j.set.startsWith('fold-'))).toBe(false)
+  })
+
+  test('a missing foldable shot is looked for under android', () => {
+    const without = new Set([...files].filter((f) => f !== 'android/outer-01-shelf.png'))
+    expect(() => fold({ raw: without })).toThrow('maestro/screenshots/android/outer-01-shelf.png')
+  })
+})
+
 describe('shots.slides in the config', () => {
   const parse = (shots: object, maestro: object | undefined = { dir: 'maestro' }) =>
     configSchema.safeParse({ name: 'x', targets: {}, maestro, shots })
@@ -144,6 +201,32 @@ describe('shots.slides in the config', () => {
     expect(bare.error?.issues.map((i) => i.message)).toContain(
       'shots.suites names maestro suites, and there is no maestro block',
     )
+  })
+})
+
+describe('shots.foldable in the config', () => {
+  const parse = (foldableSlides: object[]) =>
+    configSchema.safeParse({
+      name: 'x',
+      targets: {},
+      maestro: { dir: 'm' },
+      shots: { slides, foldable: { slides: foldableSlides } },
+    })
+  const messages = (foldableSlides: object[]) =>
+    parse(foldableSlides).error?.issues.map((i) => i.message) ?? []
+
+  test('the three Play asks for are enough', () => {
+    expect(parse([...foldable]).success).toBe(true)
+  })
+
+  test('fewer than 3, more than 8, a missing required aspect, an unknown aspect and duplicates are refused', () => {
+    expect(messages(foldable.slice(0, 2)).join()).toContain('3 to 8 foldable screenshots')
+    const nine = Array.from({ length: 9 }, (_, i) => ({ ...foldable[0], name: `s${i}` }))
+    expect(messages([...foldable, ...nine]).join()).toContain('3 to 8 foldable screenshots')
+    const noOuter = [foldable[0], foldable[1], { ...foldable[2], aspect: '9:16' }]
+    expect(messages(noOuter).join()).toContain('none is 10:16')
+    expect(parse([...foldable, { ...foldable[0], name: 'x', aspect: '2:1' }]).success).toBe(false)
+    expect(messages([...foldable, foldable[0]])).toContain('Duplicate slide "open"')
   })
 })
 

@@ -343,6 +343,51 @@ describe('writeExport', () => {
     ])
   })
 
+  test('foldableScreenshots is a set of its own: owned, replaced and in the way apart from the phone set', async () => {
+    const fold = (names: string[]) => ({
+      destinations: [google()],
+      jobs: names.map((name, i) => ({
+        id: `fold-en-US-${i + 1}`,
+        store: 'google' as const,
+        target: 'android' as const,
+        set: 'fold-1x1' as const,
+        locale: 'en-US',
+        index: i + 1,
+        width: 2048,
+        height: 2048,
+        file: join(googleDir, 'en-US', 'images', 'foldableScreenshots', name),
+        slide: { id: name },
+      })),
+    })
+    const images = (p: ReturnType<typeof fold>) =>
+      new Map(p.jobs.map((job) => [job.id, encodePng(1, 1, new Uint8Array([1, 2, 3]))]))
+    await write(plan([google()]))
+    const first = fold(['01_open.png', '02_wide.png'])
+    await writeExport(first, { root, images: images(first), force: false, dryRun: false })
+    // A phone export keeps the foldable files and their place in the manifest.
+    await write(plan([google()]))
+    expect(manifest(googleDir).files).toEqual([
+      'en-US/images/foldableScreenshots/01_open.png',
+      'en-US/images/foldableScreenshots/02_wide.png',
+      'en-US/images/phoneScreenshots/01_1-home.png',
+      'en-US/images/phoneScreenshots/02_2-journal.png',
+    ])
+    // A foldable export removes its own stale file, and leaves the phone set alone.
+    const second = fold(['01_open.png'])
+    const result = await writeExport(second, { root, images: images(second), force: false, dryRun: false })
+    expect(result.removed).toEqual(['fastlane/metadata/android/en-US/images/foldableScreenshots/02_wide.png'])
+    expect(tree().filter((f) => f.includes('Screenshots'))).toEqual([
+      'fastlane/metadata/android/en-US/images/foldableScreenshots/01_open.png',
+      ...GOOGLE_EN,
+    ])
+    // An image kit did not write in the foldable dir is in the way.
+    put('fastlane/metadata/android/en-US/images/foldableScreenshots/mine.png', PHONE)
+    const error = await rejected(
+      writeExport(second, { root, images: images(second), force: false, dryRun: false }),
+    )
+    expect(error.message).toContain('foldableScreenshots/mine.png')
+  })
+
   test('a manifest that cannot be read stops the export; --force starts over', async () => {
     put(`fastlane/screenshots/${MANIFEST_FILE}`, '{ "version": 2 }')
     const e = await rejected(write(plan([apple()])))

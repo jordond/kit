@@ -18,6 +18,12 @@ export interface Suite {
   /** Repo-relative dir the screenshots are copied to (kit appends `<target>/`). */
   screenshots?: string
   env: Record<string, string>
+  /** Simulator or AVD to run on, booted when not running; `--device` beats it. */
+  device?: string
+  /** Android: fold or unfold a foldable emulator first. */
+  posture?: 'folded' | 'unfolded'
+  /** Android: turn an emulator's display first, after the posture. */
+  orientation?: 'portrait' | 'landscape'
 }
 
 type SuiteConfig = NonNullable<NonNullable<KitConfig['maestro']>['suites']>[string]
@@ -72,6 +78,9 @@ export function resolveSuite(config: KitConfig, name: string): Suite {
     statusBar: merged.statusBar ?? false,
     screenshots: merged.screenshots,
     env: { ...merged.env },
+    ...(merged.device ? { device: merged.device } : {}),
+    ...(merged.posture ? { posture: merged.posture } : {}),
+    ...(merged.orientation ? { orientation: merged.orientation } : {}),
   }
 }
 

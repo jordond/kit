@@ -13,6 +13,7 @@ import {
   junitPaths,
   listRunDirs,
   newRunDirs,
+  postureCommand,
   runSuite,
 } from '../../src/lib/maestro/run'
 import { outputDir, resolveSuite } from '../../src/lib/maestro/suites'
@@ -238,6 +239,47 @@ describe('runSuite order', () => {
     expect(plan.at(-2)).toEqual(['kit', 'fixture', 'load', 'ios', 'demo', '--device', '<device>'])
     expect(plan.at(-1)?.[3]).toBe('test')
     expect(existsSync(join(tmpdir(), 'm', 'output'))).toBe(false)
+  })
+
+  test('a suite names its device and posture, and a suite that extends it inherits them', () => {
+    const config = cfg({
+      'shots-fold': { extends: 'shots', device: 'pvcr_fold', posture: 'unfolded' },
+      'shots-fold-outer': { extends: 'shots-fold', posture: 'folded' },
+    })
+    expect(resolveSuite(config, 'shots-fold')).toMatchObject({ device: 'pvcr_fold', posture: 'unfolded' })
+    expect(resolveSuite(config, 'shots-fold-outer')).toMatchObject({ device: 'pvcr_fold', posture: 'folded' })
+    expect(resolveSuite(config, 'shots')).not.toHaveProperty('posture')
+    expect(postureCommand('adb', 'emulator-5554', 'folded')).toEqual([
+      'adb',
+      '-s',
+      'emulator-5554',
+      'emu',
+      'fold',
+    ])
+    expect(postureCommand('adb', 'emulator-5554', 'unfolded').at(-1)).toBe('unfold')
+  })
+
+  test('a posture on an iOS target is a usage error before anything is built', async () => {
+    const config = {
+      name: 'x',
+      targets: {},
+      app: { ios: { bundleId: 'p', project: 'ios/App.xcodeproj', scheme: 'App' } },
+      maestro: { dir: 'm' },
+    } as unknown as KitConfig
+    const flags = {
+      dryRun: true,
+      json: false,
+      yes: true,
+      verbose: false,
+      quiet: false,
+      bail: false,
+      interactive: false,
+      ci: true,
+    }
+    const suite = { ...resolveSuite(config, 'shots'), posture: 'folded' as const }
+    await expect(
+      runSuite({ root: tmpdir(), config, flags, log }, 'ios', { suite, device: '<device>' }),
+    ).rejects.toThrow('only an Android emulator takes')
   })
 
   test('failureSummary names the failed tags and the exit code', () => {

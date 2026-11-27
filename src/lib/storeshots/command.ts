@@ -324,12 +324,15 @@ async function runSlideExport(
   shots: Shots,
   opts: ExportOptions,
   run: ExportRun,
+  foldableOnly = false,
 ): Promise<ExportResult> {
   const destinations = resolveDestinations(root, config, opts)
-  const rawDir = shots.slides?.some((slide) => slide.shot !== undefined)
+  const drawn = [...(foldableOnly ? [] : (shots.slides ?? [])), ...(shots.foldable?.slides ?? [])]
+  const rawDir = drawn.some((slide) => slide.shot !== undefined)
     ? resolveRawDir(root, config, shots)
     : undefined
   const plan = planSlides({
+    foldableOnly,
     root,
     config,
     destinations,
@@ -337,7 +340,7 @@ async function runSlideExport(
     raw: rawDir === undefined ? new Set() : listRaw(rawDir),
     allowMissing: opts.allowMissing,
   })
-  checkCounts(plan, 'shots.slides in kit.config.ts')
+  checkCounts(plan, foldableOnly ? 'shots.foldable in kit.config.ts' : 'shots.slides in kit.config.ts')
   checkSources(root, plan.jobs)
   const fonts = (shots.fonts ?? []).map((font) => resolve(root, font.file))
   checkAssets(root, { assets: fonts })
@@ -408,12 +411,21 @@ export async function runExport(
     outcome = await writeExport(plan, { root, images, force: opts.force, dryRun: false })
   }
 
-  return {
+  const result: ExportResult = {
     dryRun: run.dryRun,
     stores: plan.stores,
     written: outcome.written,
     removed: outcome.removed,
     skipped: plan.skipped,
+  }
+  if (!shots.foldable || !opts.stores.includes('google')) return result
+  // The foldable slides are HTML whatever draws the phone ones: a pass of their own into Play's dir.
+  const fold = await runSlideExport(root, config, shots, { ...opts, stores: ['google'] }, run, true)
+  return {
+    ...result,
+    written: [...result.written, ...fold.written],
+    removed: [...result.removed, ...fold.removed],
+    skipped: [...result.skipped, ...fold.skipped],
   }
 }
 

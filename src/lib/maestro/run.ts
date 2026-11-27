@@ -8,10 +8,12 @@ import {
   type DeviceTarget,
   listDevices,
   platformOf,
+  quietCapture,
   resolveDevice,
 } from '../devices'
 import { androidStatusBarCommands, iosStatusBarCommands, runStatusBarCommands } from '../devices/statusbar'
 import { loadFixture as defaultLoadFixture, type FixtureResult } from '../fixtures'
+import { ExitCode, KitError } from '../errors'
 import { runToStderr } from '../proc'
 import { findMaestro, maestroBin, maestroEnv } from './bin'
 import { outputDir, requireMaestro, type Suite } from './suites'
@@ -155,8 +157,15 @@ export interface SuiteRun {
  * The device every step lands on: `--device`, a running one, else the one `maestro.devices.<target>`
  * names (booted), else kit's pick. A dry run boots nothing and shows a placeholder.
  */
-async function suiteDevice(env: DeviceEnv, target: DeviceTarget, flag: string | undefined): Promise<string> {
+async function suiteDevice(
+  env: DeviceEnv,
+  target: DeviceTarget,
+  flag: string | undefined,
+  suite: Suite,
+): Promise<string> {
   if (flag) return flag
+  // The suite's own device is the one it needs (a foldable), running or not.
+  if (suite.device) return env.flags.dryRun ? suite.device : await bootDevice(env, target, suite.device)
   const named = env.config.maestro?.devices?.[target]
   const running = (await listDevices(env, target)).length > 0
   if (!running && env.flags.dryRun) return DEVICE_PLACEHOLDER
@@ -184,7 +193,23 @@ export async function runSuite(env: DeviceEnv, target: DeviceTarget, o: RunSuite
     const { fixtureConfig, requireFixtureDir } = await import('../fixtures/config')
     requireFixtureDir(fixtureConfig(env.root, env.config), fixture)
   }
-  let device = await suiteDevice(env, target, o.device)
+  let device = await suiteDevice(env, target, o.device, suite)
+  if ((suite.posture || suite.orientation) && target !== 'android') {
+    throw new KitError(
+      `maestro suite "${suite.name}" sets a ${suite.posture ? 'posture' : 'orientation'}, which only an Android emulator takes`,
+      `Run it with kit shots android, or remove it from the suite`,
+      ExitCode.usage,
+    )
+  }
+  if (suite.posture) {
+    const cmd = postureCommand(adb(env), device, suite.posture)
+    plan.push(cmd)
+    if (!dry) await setPosture(env, device, suite.posture, cmd)
+  }
+  if (suite.orientation) {
+    plan.push([adb(env), '-s', device, 'emu', 'rotate'])
+    if (!dry) await setOrientation(env, device, suite.orientation)
+  }
   const app = await runApp(env, target, { device, noBuild: o.noBuild, launch: false })
   plan.push(...app.plan)
 
@@ -258,6 +283,120 @@ export async function runSuite(env: DeviceEnv, target: DeviceTarget, o: RunSuite
   }
   result.ok = result.stages.every((s) => s.ok)
   return { result, plan }
+}
+
+/** `adb -s <serial> emu fold|unfold`: the emulator console's posture command. */
+export function postureCommand(adbBin: string, device: string, posture: 'folded' | 'unfolded'): string[] {
+  return [adbBin, '-s', device, 'emu', posture === 'folded' ? 'fold' : 'unfold']
+}
+
+/** The size the default display reports, `1080x2424`; undefined when adb gives none. */
+async function displaySize(env: DeviceEnv, device: string): Promise<string | undefined> {
+  const { code, stdout } = await quietCapture([adb(env), '-s', device, 'shell', 'wm', 'size'])
+  return code === 0 ? /(\d+x\d+)\s*$/.exec(stdout.trim())?.[1] : undefined
+}
+
+/**
+ * Fold or unfold an emulator, then wait for the display to take its new size, so the app is
+ * installed and launched on the screen the flows expect. A physical device is left as it is.
+ */
+async function setPosture(
+  env: DeviceEnv,
+  device: string,
+  posture: 'folded' | 'unfolded',
+  cmd: string[],
+): Promise<void> {
+  if (!device.startsWith('emulator-')) {
+    env.log.warn(`${device} is not an emulator: ${posture === 'folded' ? 'fold' : 'unfold'} it by hand`)
+    return
+  }
+  env.log.step(`posture: ${posture} on ${device}`)
+  const before = await displaySize(env, device)
+  const { code, stdout } = await quietCapture(cmd)
+  if (code !== 0 || /KO/.test(stdout)) {
+    throw new KitError(
+      `${device} refused ${cmd.slice(3).join(' ')}`,
+      'Is it a foldable AVD (a Pixel Fold device definition)?',
+      ExitCode.precondition,
+    )
+  }
+  // Already in that posture: the size does not move, and there is nothing to wait for.
+  for (let i = 0; i < 20; i++) {
+    await Bun.sleep(250)
+    const now = await displaySize(env, device)
+    if (now !== undefined && now !== before) break
+  }
+  // A posture switch can sleep and lock the emulator: wake it and dismiss the (insecure) keyguard,
+  // or the flows start on the lock screen.
+  await quietCapture([adb(env), '-s', device, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'])
+  await quietCapture([adb(env), '-s', device, 'shell', 'wm', 'dismiss-keyguard'])
+  // The launcher redraws after the switch; a flow that starts on it mid-redraw taps the old layout.
+  await Bun.sleep(1500)
+}
+
+/** The size the default display is drawn at now, turned: `2152x2076` on its side. */
+async function currentSize(env: DeviceEnv, device: string): Promise<{ w: number; h: number } | undefined> {
+  const { code, stdout } = await quietCapture([
+    adb(env),
+    '-s',
+    device,
+    'shell',
+    'dumpsys',
+    'window',
+    'displays',
+  ])
+  const m = code === 0 ? /cur=(\d+)x(\d+)/.exec(stdout) : null
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : undefined
+}
+
+/**
+ * Turn an emulator until its display is the orientation asked for: `adb emu rotate` turns the
+ * virtual device a quarter at a time, and the display follows its sensor. A physical device, or
+ * a display that does not follow, is left as it is, with a warning.
+ */
+async function setOrientation(
+  env: DeviceEnv,
+  device: string,
+  orientation: 'portrait' | 'landscape',
+): Promise<void> {
+  if (!device.startsWith('emulator-')) {
+    env.log.warn(`${device} is not an emulator: turn it to ${orientation} by hand`)
+    return
+  }
+  const matches = (size: { w: number; h: number } | undefined) =>
+    size !== undefined && (orientation === 'landscape' ? size.w > size.h : size.h > size.w)
+  if (matches(await currentSize(env, device))) return
+  env.log.step(`orientation: ${orientation} on ${device}`)
+  const settled = async (): Promise<boolean> => {
+    for (let i = 0; i < 12; i++) {
+      await Bun.sleep(250)
+      if (matches(await currentSize(env, device))) {
+        await Bun.sleep(1500)
+        return true
+      }
+    }
+    return false
+  }
+  for (let turn = 0; turn < 3; turn++) {
+    await quietCapture([adb(env), '-s', device, 'emu', 'rotate'])
+    if (await settled()) return
+  }
+  // A posture whose rotation is locked (a foldable's folded state) ignores the sensor and keeps
+  // the user rotation: set that instead, as a quarter turn from the natural one.
+  const rotation = orientation === 'landscape' ? '1' : '0'
+  await quietCapture([
+    adb(env),
+    '-s',
+    device,
+    'shell',
+    'settings',
+    'put',
+    'system',
+    'user_rotation',
+    rotation,
+  ])
+  if (await settled()) return
+  env.log.warn(`${device} did not turn to ${orientation}; is auto-rotate off?`)
 }
 
 /** Why a run failed, one line: the failed stage's tags and exit code, or the missing screenshots. */

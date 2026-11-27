@@ -14,7 +14,7 @@ import type { DeviceTarget } from '../devices'
 import { ExitCode, KitError } from '../errors'
 import { imageInfo } from '../image/png'
 import { repoPath } from './plan'
-import { APPLE_SET_CLASS, type AppleClass, appleClass, type SetId } from './sizes'
+import { APPLE_SET_CLASS, type AppleClass, appleClass, PLAY_FOLD_DIR, type SetId } from './sizes'
 import {
   MANIFEST_FILE,
   type ShotsManifest,
@@ -26,18 +26,20 @@ import {
 
 /**
  * Writing an export into the store dirs. Export owns one set at a time: on the App Store the
- * images of one display type in a `<locale>` dir, on Play a `<locale>/images/phoneScreenshots` dir.
+ * images of one display type in a `<locale>` dir, on Play a `<locale>/images/<type>` dir
+ * (`phoneScreenshots`, `foldableScreenshots`).
  * Only sets that have a job in the plan are touched, and inside them only images: the manifest
  * says which are kit's to replace, and any other image there is in the way. Play's `icon`,
  * `featureGraphic` and its other screenshot types are never read, removed or written.
  */
 
 const IMAGE = /\.(png|jpe?g)$/i
-const PLAY_SET_DIR = ['images', 'phoneScreenshots'] as const
+/** The Play screenshot type dirs export writes, under `<locale>/images/`. */
+const PLAY_TYPES = ['phoneScreenshots', PLAY_FOLD_DIR] as const
 
 /** The target a set id is the export size of. */
 const targetOfSet = (set: string): DeviceTarget | undefined =>
-  set === 'phone'
+  set === 'phone' || set.startsWith('fold-')
     ? 'android'
     : set.startsWith('iphone-')
       ? 'ios'
@@ -137,11 +139,13 @@ function appleEntry(entry: string): { locale: string; target?: DeviceTarget } | 
   return { locale: parts[0]!, target: set === undefined ? undefined : targetOfSet(set) }
 }
 
-/** `<locale>/images/phoneScreenshots/<file>`: the locale of a Play phone screenshot. */
-function playEntry(entry: string): { locale: string } | undefined {
+/** `<locale>/images/<type>/<file>`: the set (`<locale>/<type>`) of a Play screenshot export writes. */
+function playEntry(entry: string): { set: string } | undefined {
   const parts = entry.split('/')
-  if (parts.length !== 4 || parts[1] !== PLAY_SET_DIR[0] || parts[2] !== PLAY_SET_DIR[1]) return undefined
-  return { locale: parts[0]! }
+  if (parts.length !== 4 || parts[1] !== 'images' || !(PLAY_TYPES as readonly string[]).includes(parts[2]!)) {
+    return undefined
+  }
+  return { set: `${parts[0]!}/${parts[2]!}` }
 }
 
 /** Work out, without touching disk, what the export does to one store's dir. */
@@ -166,12 +170,16 @@ function changeFor(destination: StoreDestination, jobs: WriteJob[], force: boole
   // The sets this export owns: `<locale>` with the targets written there (apple), or `<locale>` (google).
   const sets = new Map<string, Set<DeviceTarget>>()
   for (const job of jobs) sets.set(job.locale, (sets.get(job.locale) ?? new Set()).add(job.target))
+  // Play's: `<locale>/<type>`, each screenshot type dir on its own.
+  const playSets = new Set(
+    jobs.map((job) => playEntry(rel(job.file))?.set).filter((set) => set !== undefined),
+  )
 
   const stale = listed.filter((entry) => {
     if (writing.has(entry) || !IMAGE.test(entry)) return false
     if (store === 'google') {
       const at = playEntry(entry)
-      return at !== undefined && sets.has(at.locale)
+      return at !== undefined && playSets.has(at.set)
     }
     const at = appleEntry(entry)
     return at?.target !== undefined && (sets.get(at.locale)?.has(at.target) ?? false)
@@ -180,15 +188,18 @@ function changeFor(destination: StoreDestination, jobs: WriteJob[], force: boole
   const unowned: string[] = []
   // Never a file kit wrote, listed or not: kit writes regular files only.
   const irregular: string[] = []
-  for (const [locale, targets] of sets) {
-    if (store === 'google') {
-      for (const { name, regular } of imagesIn(join(dir, locale, ...PLAY_SET_DIR))) {
-        const entry = [locale, ...PLAY_SET_DIR, name].join('/')
+  if (store === 'google') {
+    for (const set of playSets) {
+      const [locale, type] = set.split('/') as [string, string]
+      for (const { name, regular } of imagesIn(join(dir, locale, 'images', type))) {
+        const entry = [locale, 'images', type, name].join('/')
         if (!regular) irregular.push(entry)
         if (!regular || !owned.has(entry)) unowned.push(entry)
       }
-      continue
     }
+  }
+  for (const [locale, targets] of sets) {
+    if (store === 'google') continue
     const classes = new Set<AppleClass>(
       jobs
         .filter((job) => job.locale === locale && targets.has(job.target))

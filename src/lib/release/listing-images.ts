@@ -5,6 +5,7 @@ import {
   APPLE_MAX_PER_CLASS,
   appleClass,
   PLAY_FEATURE_GRAPHIC,
+  PLAY_FOLD_DIR,
   PLAY_ICON,
   PLAY_ICON_MAX_BYTES,
   PLAY_MAX_PER_TYPE,
@@ -318,6 +319,19 @@ export function checkListingImages(platform: 'ios' | 'android', root: string, ba
   for (const [locale, n] of phones) {
     if (n < PLAY_MIN_PHONE) {
       warnings.push(`${locale}: ${n} phone screenshot; Google Play asks for at least ${PLAY_MIN_PHONE}`)
+    }
+  }
+  // `kit shots export` writes these, and the Play API has no image type to send them as.
+  if (platform === 'android') {
+    for (const locale of entries(base)) {
+      if (!isDir(join(base, locale))) continue
+      const fold = join(base, locale, 'images', PLAY_FOLD_DIR)
+      const n = isDir(fold) ? entries(fold).filter((name) => GLOB_IMAGE.test(name)).length : 0
+      if (n > 0) {
+        warnings.push(
+          `${locale}: ${n} foldable screenshot${n === 1 ? '' : 's'} not pushed (the Play API takes none); upload ${relative(root, fold)} by hand in Play Console`,
+        )
+      }
     }
   }
   return { files, images, problems, warnings }

@@ -370,6 +370,17 @@ describe('checkListingImages: Play', () => {
     expect(r.images.map((i) => i.class)).toEqual(['icon', 'phoneScreenshots', 'phoneScreenshots'])
   })
 
+  test('foldable screenshots are not uploaded and are named in a warning', () => {
+    shot('1.png', 1440, 2560)
+    shot('2.png', 1440, 2560)
+    put(`${PLAY}/en-US/images/foldableScreenshots/01_open.png`, png(2048, 2048))
+    const r = android()
+    expect(r.files.some((f) => f.includes('foldableScreenshots'))).toBe(false)
+    expect(r.warnings).toEqual([
+      expect.stringContaining('en-US: 1 foldable screenshot not pushed (the Play API takes none)'),
+    ])
+  })
+
   test('supply’s order: featureGraphic, icon, tvBanner, then the screenshot types; one file per image type', () => {
     const wear = shot('1.png', 400, 400, 'wearScreenshots')
     const phone = shot('1.png', 1440, 2560)

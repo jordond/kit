@@ -54,6 +54,23 @@ maestro: { dir: 'maestro', suites: { 'shots-shelf': { extends: 'shots', tags: ['
 shots: { suites: ['shots', 'shots-shelf'] },
 ```
 
+`--suite a,b` runs those suites in order, the same way. A suite may name its own `device` (an AVD or
+simulator, booted when it is not running) and, on Android, a `posture`: kit runs `adb emu fold` or
+`adb emu unfold` on a foldable emulator and waits for the display to change before installing, so one
+foldable AVD takes both the unfolded shots and the outer screen ones. `orientation: 'landscape'` turns an emulator by its sensor (`adb emu rotate`) after that: an unfolded
+foldable ignores Maestro's `setOrientation`. A physical device is left as it is,
+with a warning. Give such suites a `screenshots` dir or shot names of their own, so their PNGs do not
+replace the phone ones.
+
+```ts
+maestro: {
+  suites: {
+    'shots-fold': { extends: 'shots', tags: ['fold'], device: 'pixel_fold', posture: 'unfolded' },
+    'shots-fold-outer': { extends: 'shots', device: 'pixel_fold', posture: 'folded', env: { PREFIX: 'outer-' } },
+  },
+},
+```
+
 **The run.** One device is resolved first (see [Devices](devices.md)), then everything lands on it: the debug
 build and install (`--no-build` drives what is installed), the 9:41 status bar when the suite asks, the
 fixture (`--fixture <name>`, `--no-fixture`), then each stage. A failing stage stops the run and exits 1. The status bar stays pinned afterwards
