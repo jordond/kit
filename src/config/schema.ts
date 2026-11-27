@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { styleRules } from '../lib/storeshots/project'
+import { narrowViewport } from '../lib/storeshots/viewport'
 
 export const verbs = ['lint', 'format', 'typecheck', 'test', 'build', 'dev', 'deploy'] as const
 export type Verb = (typeof verbs)[number]
@@ -257,8 +258,50 @@ export const configSchema = z
     /** Store screenshots: `kit shots export` renders the raw shots into the store listing dirs. */
     shots: z
       .object({
-        /** The saved project JSON (slides, text, frames), relative to the repo root. Optional with `pages`. */
+        /**
+         * The saved project JSON (slides, text, frames), relative to the repo root. Optional with
+         * `pages` or `slides`; not allowed beside `slides`.
+         */
         project: z.string().optional(),
+        /**
+         * HTML slides: `kit shots export` renders each one for every exported set and locale, in this
+         * order, instead of the slides of `project`. See docs/shots.md for what kit tells the page.
+         */
+        slides: z
+          .array(
+            z
+              .object({
+                /** Names the slide in messages and in the exported file (`NN_<set>_<name>.png`). */
+                name: z
+                  .string()
+                  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Use letters, digits, ".", "_" and "-"'),
+                /** The HTML file, relative to the repo root, not under a dot dir; served like a `pages` file. */
+                file: z.string().min(1),
+                /**
+                 * The raw shot the slide shows: `<raw>/<target>/<locale>/<shot>` when that exists, else
+                 * `<raw>/<target>/<shot>`; `.png` is added to a name without an extension. A slide
+                 * without one shows no screenshot.
+                 */
+                shot: z
+                  .string()
+                  .regex(/^[^/\\]+$/, 'A file name in the raw dir, not a path')
+                  .refine((v) => !v.startsWith('.'), 'Cannot start with "."')
+                  .optional(),
+                /** Colour the PNG is flattened onto where the page is transparent; default `#ffffff`. */
+                background: z
+                  .string()
+                  .regex(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i, 'Expected #rgb or #rrggbb')
+                  .optional(),
+              })
+              .strict(),
+          )
+          .min(1)
+          .optional(),
+        /**
+         * The suites `kit shots <target>` runs, in order, when neither `--suite` nor `--full` is
+         * given; default `['shots']`. The app is built once, for the first.
+         */
+        suites: z.array(z.string().min(1)).min(1).optional(),
         /** Dir holding the raw shots, `<raw>/<target>/…`; default the `shots` suite's screenshots dir. */
         raw: z.string().optional(),
         /** Font files the slides name, loaded before the first draw. */
@@ -319,7 +362,10 @@ export const configSchema = z
                 /** The PNG's size in pixels; the page is laid out at width/scale by height/scale. */
                 width: z.number().int().positive(),
                 height: z.number().int().positive(),
-                /** Device scale factor; default 2. Width and height must be multiples of it. */
+                /**
+                 * Device scale factor; default 2. Width and height must be multiples of it, and
+                 * width / scale at least 500: headless Chrome makes no narrower window.
+                 */
                 scale: z.number().int().min(1).max(4).optional(),
                 /** Colour the PNG is flattened onto where the page is transparent; default `#ffffff`. */
                 background: z
@@ -542,12 +588,49 @@ export const configSchema = z
         })
       }
     }
-    if (c.shots && c.shots.project === undefined && !c.shots.pages?.length) {
+    if (c.shots && c.shots.project === undefined && !c.shots.pages?.length && !c.shots.slides?.length) {
       ctx.addIssue({
         code: 'custom',
         path: ['shots'],
-        message: 'Set shots.project (for export and studio) or shots.pages (for kit shots pages)',
+        message:
+          'Set shots.project (for export and studio), shots.slides (HTML slides for export) or shots.pages (for kit shots pages)',
       })
+    }
+    if (c.shots?.project !== undefined && c.shots.slides !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['shots', 'slides'],
+        message:
+          'shots.project and shots.slides are both set: kit shots export renders one or the other, so remove one',
+      })
+    }
+    const slideNames = new Set<string>()
+    for (const [i, slide] of (c.shots?.slides ?? []).entries()) {
+      if (slideNames.has(slide.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'slides', i, 'name'],
+          message: `Duplicate slide "${slide.name}"`,
+        })
+      }
+      slideNames.add(slide.name)
+    }
+    for (const [i, name] of (c.shots?.suites ?? []).entries()) {
+      if (!c.maestro) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'suites'],
+          message: 'shots.suites names maestro suites, and there is no maestro block',
+        })
+        break
+      }
+      if (!c.maestro.suites?.[name] && !(name in DEFAULT_SUITES)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['shots', 'suites', i],
+          message: `Unknown suite "${name}"`,
+        })
+      }
     }
     const seen = new Set<string>()
     for (const [i, page] of (c.shots?.pages ?? []).entries()) {
@@ -560,6 +643,10 @@ export const configSchema = z
       }
       seen.add(page.name)
       const scale = page.scale ?? 2
+      const narrow = narrowViewport(`page ${page.name}`, page.width, page.height, scale)
+      if (narrow !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['shots', 'pages', i, 'scale'], message: narrow })
+      }
       for (const key of ['width', 'height'] as const) {
         if (page[key] % scale !== 0) {
           ctx.addIssue({
@@ -570,7 +657,8 @@ export const configSchema = z
         }
       }
     }
-    if (c.shots?.project !== undefined && c.shots.raw === undefined && !c.maestro) {
+    const needsRaw = c.shots?.project !== undefined || c.shots?.slides?.some((s) => s.shot !== undefined)
+    if (needsRaw && c.shots?.raw === undefined && !c.maestro) {
       ctx.addIssue({
         code: 'custom',
         path: ['shots', 'raw'],

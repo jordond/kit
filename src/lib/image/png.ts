@@ -234,6 +234,30 @@ function unfilter(raw: Uint8Array, height: number, stride: number, bpp: number):
   return out
 }
 
+/** Ancillary chunks that change from run to run or carry nothing of the picture: dates, text, EXIF. */
+const METADATA_CHUNKS = new Set(['tIME', 'tEXt', 'iTXt', 'zTXt', 'eXIf'])
+
+/**
+ * A PNG without its date, text and EXIF chunks, so the same picture is the same bytes on every
+ * run. A PNG that has none comes back unchanged.
+ */
+export function stripPngMetadata(bytes: Uint8Array): Uint8Array {
+  if (bytes.length < PNG_MAGIC.length || !isPng(bytes)) throw bad('Not a PNG image')
+  const chunks = pngChunks(bytes)
+  if (!chunks.some((c) => METADATA_CHUNKS.has(c.type))) return bytes
+  const parts = [
+    Uint8Array.from(PNG_MAGIC),
+    ...chunks.filter((c) => !METADATA_CHUNKS.has(c.type)).map((c) => chunk(c.type, c.data)),
+  ]
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+  let at = 0
+  for (const p of parts) {
+    out.set(p, at)
+    at += p.length
+  }
+  return out
+}
+
 /**
  * Composite a PNG onto an opaque `background` (`#rgb`, `#rrggbb`, or channels) and return an RGB
  * PNG (colour type 2, no `tRNS`) of the same size. An RGB PNG without alpha comes back unchanged.

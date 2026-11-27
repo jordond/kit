@@ -78,7 +78,9 @@ export async function renderUsage(ctx: Readonly<CommandContext>): Promise<string
   if (args.length && (hasRun || !children.size) && !self?.passthrough) {
     lines.push(pc.bold('Options'))
     const rows = args.map(([name, a]) => {
-      const flag = a.type === 'positional' ? `<${name}>` : `${a.short ? `-${a.short}, ` : '    '}--${name}`
+      // A flag that is on by default is only ever typed as its negation, so help shows that it has one.
+      const long = a.type === 'boolean' && a.negatable && a.default === true ? `--[no-]${name}` : `--${name}`
+      const flag = a.type === 'positional' ? `<${name}>` : `${a.short ? `-${a.short}, ` : '    '}${long}`
       const value = a.type === 'string' || a.type === 'number' || a.type === 'enum' ? ` <${a.type}>` : ''
       return [`${flag}${value}`, a.description ?? ''] as const
     })

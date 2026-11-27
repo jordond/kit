@@ -17,6 +17,8 @@
  * | `FAKE_CHROME=rgba` | Every PNG is RGBA, half transparent |
  * | `FAKE_CHROME=missing` | The first job's PNG is never posted; `done` is still `{ ok: true }` |
  * | `FAKE_CHROME=error` | Posts no PNG, then `done` with `{ ok: false, error: 'fake page error' }` |
+ * | `FAKE_CHROME=wrong-viewport` | `kit shots pages` mode: reports a viewport 40 CSS px wider than `--window-size` |
+ * | `FAKE_CHROME=no-viewport` | `kit shots pages` mode: reports no viewport |
  * | `FAKE_CHROME=exit` | Exits 3 without a request, printing `fake chrome crashed` to stderr |
  * | `FAKE_CHROME=hang` | Makes no request and never exits |
  * | `FAKE_CHROME=slow` | Waits `FAKE_CHROME_DELAY_MS` (default 300) before each PNG and before `done` |
@@ -42,6 +44,8 @@ export type FakeChromeMode =
   | 'slow'
   | 'locked-profile'
   | 'job-error'
+  | 'wrong-viewport'
+  | 'no-viewport'
 
 /** The dir `locked-profile` leaves in the profile: read-only, with a file in it. */
 export const LOCKED_DIR = 'locked'
@@ -137,6 +141,12 @@ async function screenshot(
   // Like Chrome, fetch what the page names (src and href); a refusal is the server's to record, not Chrome's to report.
   for (const [, ref] of (await res.text()).matchAll(/\b(?:src|href)="([^"#]+)"/g)) {
     await fetch(new URL(ref!, base)).then((r) => r.arrayBuffer())
+  }
+  // The injected script reports the viewport the page was laid out in.
+  if (mode !== 'no-viewport') {
+    const laidOut = mode === 'wrong-viewport' ? w + 40 : w
+    const token = new URL(base).pathname.split('/')[1]
+    await fetch(new URL(`/${token}/__kit/viewport?w=${laidOut}&h=${h}`, base))
   }
   if (mode === 'missing') return 0
   const width = w * scale + (mode === 'wrong-size' ? 1 : 0)

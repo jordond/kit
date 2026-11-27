@@ -207,6 +207,38 @@ describe('kit shots pages', () => {
   })
 })
 
+describe('kit shots pages viewport', () => {
+  test('a page laid out at another size than asked fails, naming the page and both sizes', async () => {
+    setup()
+    const r = await run(['header'], 'wrong-viewport')
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('Page header was laid out at 1000x400 CSS px, not 960x400')
+    expect(existsSync(path('build/shots-pages/header-1920x800.png'))).toBe(false)
+  })
+
+  test('an artwork page that reports no viewport is a warning, not a failure', async () => {
+    setup()
+    const r = await run(['header'], 'no-viewport')
+    expect(r.code).toBe(0)
+    expect(r.stderr).toContain('Page header did not report its viewport')
+  })
+
+  test('a scale that leaves a viewport under 500 CSS px is a config error with the fix', async () => {
+    setup()
+    const file = path('kit.config.ts')
+    writeFileSync(
+      file,
+      readFileSync(file, 'utf8').replace('width: 1200,', 'width: 1200, scale: 4,').replace('scale: 1,\n', ''),
+    )
+    const r = await run(['search'])
+    expect(r.code).toBe(3)
+    expect(r.stderr).toContain(
+      "page search: 1200 / 4 = 300 CSS px is narrower than headless Chrome's 500 minimum; use scale 2",
+    )
+    expect(chrome.calls()).toHaveLength(0)
+  })
+})
+
 /** One render with a real Chrome: `KIT_CHROME_TEST=1 bun test test/e2e/shots-pages.test.ts`. */
 describe.skipIf(process.env.KIT_CHROME_TEST !== '1')('kit shots pages with a real Chrome', () => {
   test('renders the fixture pages at the exact size, without alpha, with the font and asset loaded', async () => {

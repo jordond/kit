@@ -25,7 +25,7 @@ export function emptyValueFlags(argv: readonly string[]): string[] {
 }
 
 export default defineCommand({
-  description: 'Render the store screenshots from the raw shots and the saved project',
+  description: 'Render the store screenshots from the raw shots and the saved project or HTML slides',
   group: 'Quality',
   examples:
     'kit shots export\nkit shots export --store apple --locale en-US\nkit shots export --out build/store-shots --dry-run --json',

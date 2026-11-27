@@ -257,7 +257,7 @@ Examples
   kit shots android --dry-run --json
 
 Commands
-  export   Render the store screenshots from the raw shots and the saved project
+  export   Render the store screenshots from the raw shots and the saved project or HTML slides
   pages    Render the HTML artwork pages in shots.pages to PNGs, without alpha
   migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
   studio   Edit the shots project in a browser: slides, styles, a live preview, export
@@ -2046,7 +2046,7 @@ Examples
   kit shots android --dry-run --json
 
 Commands
-  export   Render the store screenshots from the raw shots and the saved project
+  export   Render the store screenshots from the raw shots and the saved project or HTML slides
   pages    Render the HTML artwork pages in shots.pages to PNGs, without alpha
   migrate  Rewrite the saved shots project as a version 2 project (rules once, sparse slides)
   studio   Edit the shots project in a browser: slides, styles, a live preview, export
@@ -2072,7 +2072,7 @@ Options
 `;
 
 exports[`help kit shots export --help 1`] = `
-"Render the store screenshots from the raw shots and the saved project
+"Render the store screenshots from the raw shots and the saved project or HTML slides
 
 Usage
   kit shots export [options]
@@ -2170,7 +2170,7 @@ Options
   -q, --quiet          Errors and summary only
       --bail           Stop at the first failure
       --port <string>  Listen on this port (default: one the OS picks)
-      --open           Open the browser (--no-open: do not)
+      --[no-]open      Open the browser (--no-open: do not)
 
 "
 `;

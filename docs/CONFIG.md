@@ -505,32 +505,44 @@ shots: {
 },
 ```
 
-| Field                | Type                                           | Default                                         | Meaning                                                                                                                                                          |
-| -------------------- | ---------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project`            | `string`                                       | required unless `pages` is set                  | The saved project JSON (slides, text, frames). `kit shots export`, `studio` and `migrate` exit 3 without it                                                      |
-| `raw`                | `string`                                       | the `shots` suite's screenshots dir             | Dir holding the raw shots, `<raw>/<target>/…`. Required when `project` is set and there is no `maestro` block                                                    |
-| `fonts[].family`     | `string`                                       |                                                 | Family name the slides use                                                                                                                                       |
-| `fonts[].file`       | `string`                                       |                                                 | woff2 or ttf                                                                                                                                                     |
-| `fonts[].weight`     | `string`                                       |                                                 | A CSS weight or range (`'400 800'`)                                                                                                                              |
-| `brand.mark`         | `string`                                       |                                                 | svg or png drawn on slides that show the lockup                                                                                                                  |
-| `brand.wordmark`     | `string`                                       |                                                 | The word drawn beside the mark                                                                                                                                   |
-| `brand.color`        | `string`                                       |                                                 | Lockup colour                                                                                                                                                    |
-| `brand.font`         | `string`                                       | the slide's headline family                     | Font family of the wordmark and badges                                                                                                                           |
-| `sets.ios`           | `'iphone-6.9' \| 'iphone-6.5' \| 'iphone-6.3'` | `iphone-6.9`                                    | Export size for iPhone                                                                                                                                           |
-| `sets.ipad`          | `'ipad-13'`                                    | `ipad-13`                                       | Export size for iPad                                                                                                                                             |
-| `sets.android`       | `'phone'`                                      | `phone`                                         | Export size for Android                                                                                                                                          |
-| `pages[].name`       | `string`                                       |                                                 | Names the page on the command line and in the default file name. Letters, digits, `.`, `_`, `-`; unique                                                          |
-| `pages[].file`       | `string`                                       |                                                 | The HTML file, relative to the repo root, not under a dot dir. The whole repo root is served while it renders                                                    |
-| `pages[].width`      | `number`                                       |                                                 | PNG width in pixels                                                                                                                                              |
-| `pages[].height`     | `number`                                       |                                                 | PNG height in pixels                                                                                                                                             |
-| `pages[].scale`      | `number`                                       | `2`                                             | Device scale factor (1 to 4). The page is laid out at `width / scale` by `height / scale`, so both must be multiples of it                                       |
-| `pages[].background` | `string`                                       | `#ffffff`                                       | Hex colour the PNG is flattened onto where the page is transparent                                                                                               |
-| `pages[].out`        | `string`                                       | `build/shots-pages/<name>-<width>x<height>.png` | The PNG, relative to the repo root                                                                                                                               |
-| `presets`            | `Record<string, StyleRules>`                   | none                                            | Style presets the editor offers after its own. The rules are checked with the same strict schema as the project's `style`, so a misspelt key warns with its path |
-| `palette`            | `string[] \| Record<string, string>`           | none                                            | Hex colours (`#rgb`, `#rrggbb`, `#rrggbbaa`) shown as swatches beside every colour control in the editor; a map gives each swatch a name                         |
+| Field                 | Type                                           | Default                                         | Meaning                                                                                                                                                          |
+| --------------------- | ---------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project`             | `string`                                       | required unless `pages` or `slides` is set      | The saved project JSON (slides, text, frames). `studio` and `migrate` exit 3 without it, and so does `kit shots export` without `slides`                         |
+| `raw`                 | `string`                                       | the `shots` suite's screenshots dir             | Dir holding the raw shots, `<raw>/<target>/…`. Required when `project` or a slide's `shot` is set and there is no `maestro` block                                |
+| `slides[].name`       | `string`                                       |                                                 | Names the slide in messages and in the exported file. Letters, digits, `.`, `_`, `-`; unique. `slides` and `project` cannot both be set                          |
+| `slides[].file`       | `string`                                       |                                                 | The slide's HTML file, relative to the repo root, not under a dot dir                                                                                            |
+| `slides[].shot`       | `string`                                       | none                                            | The raw shot the slide shows, a file name in `<raw>/<target>/` (`.png` added when it has no extension)                                                           |
+| `slides[].background` | `string`                                       | `#ffffff`                                       | Hex colour the PNG is flattened onto where the page is transparent                                                                                               |
+| `suites`              | `string[]`                                     | `['shots']`                                     | The `maestro.suites` entries `kit shots <target>` runs in order, on one build                                                                                    |
+| `fonts[].family`      | `string`                                       |                                                 | Family name the slides use                                                                                                                                       |
+| `fonts[].file`        | `string`                                       |                                                 | woff2 or ttf                                                                                                                                                     |
+| `fonts[].weight`      | `string`                                       |                                                 | A CSS weight or range (`'400 800'`)                                                                                                                              |
+| `brand.mark`          | `string`                                       |                                                 | svg or png drawn on slides that show the lockup                                                                                                                  |
+| `brand.wordmark`      | `string`                                       |                                                 | The word drawn beside the mark                                                                                                                                   |
+| `brand.color`         | `string`                                       |                                                 | Lockup colour                                                                                                                                                    |
+| `brand.font`          | `string`                                       | the slide's headline family                     | Font family of the wordmark and badges                                                                                                                           |
+| `sets.ios`            | `'iphone-6.9' \| 'iphone-6.5' \| 'iphone-6.3'` | `iphone-6.9`                                    | Export size for iPhone                                                                                                                                           |
+| `sets.ipad`           | `'ipad-13'`                                    | `ipad-13`                                       | Export size for iPad                                                                                                                                             |
+| `sets.android`        | `'phone'`                                      | `phone`                                         | Export size for Android                                                                                                                                          |
+| `pages[].name`        | `string`                                       |                                                 | Names the page on the command line and in the default file name. Letters, digits, `.`, `_`, `-`; unique                                                          |
+| `pages[].file`        | `string`                                       |                                                 | The HTML file, relative to the repo root, not under a dot dir. The whole repo root is served while it renders                                                    |
+| `pages[].width`       | `number`                                       |                                                 | PNG width in pixels                                                                                                                                              |
+| `pages[].height`      | `number`                                       |                                                 | PNG height in pixels                                                                                                                                             |
+| `pages[].scale`       | `number`                                       | `2`                                             | Device scale factor (1 to 4). The page is laid out at `width / scale` by `height / scale`, so both must be multiples of it, and `width / scale` at least 500     |
+| `pages[].background`  | `string`                                       | `#ffffff`                                       | Hex colour the PNG is flattened onto where the page is transparent                                                                                               |
+| `pages[].out`         | `string`                                       | `build/shots-pages/<name>-<width>x<height>.png` | The PNG, relative to the repo root                                                                                                                               |
+| `presets`             | `Record<string, StyleRules>`                   | none                                            | Style presets the editor offers after its own. The rules are checked with the same strict schema as the project's `style`, so a misspelt key warns with its path |
+| `palette`             | `string[] \| Record<string, string>`           | none                                            | Hex colours (`#rgb`, `#rrggbb`, `#rrggbbaa`) shown as swatches beside every colour control in the editor; a map gives each swatch a name                         |
 
 Every font family a slide names must be in `fonts` (CSS generics aside), or export stops with exit 3.
 Output goes to `release.ios.metadata/../screenshots` and `release.android.metadata`.
+
+### HTML slides
+
+`shots.slides` lists HTML pages that `kit shots export` renders for every set and locale in place of the
+slides of `project`. kit picks each set's scale (the largest that divides both sides and keeps the viewport
+at least 500 CSS px wide) and tells the page its set, target, locale and raw shot. See
+[Store screenshots](shots.md#html-slides).
 
 ### Artwork pages
 
@@ -547,6 +559,11 @@ shots: {
   ],
 },
 ```
+
+Headless Chrome makes no window narrower than 500 CSS px. A page whose `width / scale` is under that is a
+config error that names the scale to use (`page store-phone: 1440 / 4 = 360 CSS px is narrower than headless
+Chrome's 500 minimum; use scale 2`), and after load kit reads the page's `innerWidth` and `innerHeight` and
+fails the render when they are not `width / scale` by `height / scale`.
 
 Lay the page out at half the pixel size (1920x823 for the header at scale 2): Chrome shoots it at that
 viewport and device scale factor, so a page that scrolls or overflows still gives the declared size.

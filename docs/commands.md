@@ -3,6 +3,16 @@
 `.kit/commands/<path>.ts` adds `kit <path>`; the file path is the command path. Keep heavy imports
 inside `run` so help stays fast.
 
+## Flags
+
+`args` declares the flags (`type: 'boolean' | 'string' | 'number' | 'enum' | 'positional'`). A boolean with
+`default: true` is turned off as `--no-<flag>`, and help lists it as `--[no-]<flag>`; `negatable: false` removes the
+negation. A boolean without a default takes `--no-<flag>` only when it sets `negatable: true`.
+
+```ts
+args: { build: { type: 'boolean', default: true, description: 'Build the app first' } },   // --no-build
+```
+
 ## Wrapping a built-in
 
 Set `override: true` to replace a built-in with the same path. The override can still run the

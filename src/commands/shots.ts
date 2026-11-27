@@ -22,6 +22,7 @@ export default defineCommand({
     await runSuiteCommand(ctx, {
       command: 'shots',
       defaultSuite: full ? 'shots-full' : 'shots',
+      suites: full ? undefined : ctx.config?.shots?.suites,
       out: ctx.args.out,
     })
   },

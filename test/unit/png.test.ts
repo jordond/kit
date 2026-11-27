@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { KitError } from '../../src/lib/errors'
-import { encodePng, flattenPng, imageInfo, parseHexColor } from '../../src/lib/image/png'
+import { encodePng, flattenPng, imageInfo, parseHexColor, stripPngMetadata } from '../../src/lib/image/png'
 
 const MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 
@@ -201,4 +201,32 @@ test('parseHexColor', () => {
   expect(parseHexColor('#FAF2E4')).toEqual([250, 242, 228])
   expect(parseHexColor('abc')).toEqual([170, 187, 204])
   expect(() => parseHexColor('rgb(0,0,0)')).toThrow(KitError)
+})
+
+describe('stripPngMetadata', () => {
+  const plain = encodePng(2, 1, Uint8Array.from([1, 2, 3, 4, 5, 6]))
+
+  test('a PNG without date or text chunks comes back as the same bytes', () => {
+    expect(stripPngMetadata(plain)).toBe(plain)
+  })
+
+  test('date and text chunks go, and the rest is the same picture with valid CRCs', () => {
+    // IEND is the last 12 bytes: the extra chunks go in before it.
+    const dated = Uint8Array.from([
+      ...plain.subarray(0, plain.length - 12),
+      ...chunk('tIME', [7, 234, 11, 27, 10, 0, 0]),
+      ...chunk(
+        'tEXt',
+        Array.from('Software\0kit', (c) => c.charCodeAt(0)),
+      ),
+      ...plain.subarray(plain.length - 12),
+    ])
+    expect(dated.length).toBeGreaterThan(plain.length)
+    // Every chunk is written again with its CRC, so the result is the encoder's own bytes.
+    expect(Array.from(stripPngMetadata(dated))).toEqual(Array.from(plain))
+  })
+
+  test('data that is not a PNG throws', () => {
+    expect(() => stripPngMetadata(Uint8Array.from([1, 2, 3]))).toThrow(KitError)
+  })
 })

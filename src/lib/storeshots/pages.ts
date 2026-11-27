@@ -16,15 +16,17 @@ import type { KitConfig } from '../../config/schema'
 import { CHROME_HINT } from '../chrome'
 import { interrupted, onCleanup, trackChild } from '../cleanup'
 import { ExitCode, KitError } from '../errors'
-import { flattenPng, imageInfo } from '../image/png'
+import { flattenPng, imageInfo, stripPngMetadata } from '../image/png'
 import { spawnDetached } from '../proc'
 import { chromeArgv, duration, logTail, OPENER_FILE, openerHtml, reason } from './render'
 import { CONTENT_TYPES, NO_STORE, notFound } from './server'
+import { type Viewport, viewportOf, viewportProblem } from './viewport'
 
 /**
  * `kit shots pages`: each HTML page in `shots.pages` is served from the repo root and shot by
  * headless Chrome (`--screenshot`) at its size, then checked and flattened onto its background,
- * because App Store Connect rejects any alpha channel.
+ * because App Store Connect rejects any alpha channel. `kit shots export` shoots the HTML slides
+ * of `shots.slides` the same way (`shootPages`), telling each page which set it is drawn for.
  */
 
 type Shots = NonNullable<KitConfig['shots']>
@@ -57,18 +59,50 @@ const MIME: Record<string, string> = {
   '.woff': 'font/woff',
 }
 
-/** A page to render, with every default applied and every path resolved. */
-export interface PageJob {
+/**
+ * What kit tells the page of an HTML slide: the query string of its URL, `data-kit-*` attributes
+ * on `<html>`, and the raw shot as `--kit-shot` and as the `src` of every `<img data-kit-shot>`.
+ */
+export interface SlideContext {
+  /** The set id (`ipad-13`). */
+  set: string
+  /** `ios`, `ipad` or `android`. */
+  target: string
+  /** `apple` or `google`. */
+  store: string
+  locale: string
+  /** The slide's name. */
+  slide: string
+  /** 1-based position in its set. */
+  index: number
+  /** Absolute path of the raw shot; absent for a slide that shows none. */
+  shot?: string
+}
+
+/** One HTML file to shoot, with every default applied and every path resolved. */
+export interface ShootJob {
   name: string
   /** Absolute HTML file. */
   source: string
+  /** Pixel size of the PNG; the page is laid out at width/scale by height/scale. */
   width: number
   height: number
   scale: number
   background: string
+  /** How messages name it; default `page <name>`. */
+  label?: string
+  /** Set for an HTML slide of `kit shots export`. */
+  context?: SlideContext
+}
+
+/** A page to render, with every default applied and every path resolved. */
+export interface PageJob extends ShootJob {
   /** Absolute PNG path. */
   target: string
 }
+
+const labelOf = (job: ShootJob): string => job.label ?? `page ${job.name}`
+const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
 
 export interface RenderedPage {
   name: string
@@ -186,20 +220,20 @@ export function servedFile(root: string, rel: string): string | undefined {
 }
 
 /** Refuse (exit 3) a page whose HTML is missing, under a dot dir, or reaches outside the repo by a link. */
-export function checkSources(root: string, jobs: readonly PageJob[]): void {
+export function checkSources(root: string, jobs: readonly ShootJob[]): void {
   const real = realpathSync(root)
   for (const job of jobs) {
     const rel = relative(root, job.source)
-    const hint =
-      'shots.pages[].file is relative to the repo root, must stay inside it and not sit under a dot dir'
+    const name = capital(labelOf(job))
+    const hint = `shots.${job.context ? 'slides' : 'pages'}[].file is relative to the repo root, must stay inside it and not sit under a dot dir`
     if (!inside(root, job.source) || hasDotSegment(rel)) {
-      throw configError(`Page ${job.name}: ${job.source} is outside the repo or under a dot path`, hint)
+      throw configError(`${name}: ${job.source} is outside the repo or under a dot path`, hint)
     }
     if (!statSync(job.source, { throwIfNoEntry: false })?.isFile()) {
-      throw configError(`Page ${job.name}: no HTML file at ${job.source}`, hint)
+      throw configError(`${name}: no HTML file at ${job.source}`, hint)
     }
     if (servedFile(real, relative(root, job.source)) === undefined) {
-      throw configError(`Page ${job.name}: ${job.source} resolves outside the repo or to a dot path`, hint)
+      throw configError(`${name}: ${job.source} resolves outside the repo or to a dot path`, hint)
     }
   }
 }
@@ -229,8 +263,12 @@ function fontCss(root: string, prefix: string, shots: Shots): string {
  * `<header>` is not `<head>`. The rules never go before the doctype, which would force quirks mode.
  */
 export function withFonts(html: string, css: string): string {
-  if (css === '') return html
-  const style = `<style>${css}</style>`
+  return css === '' ? html : withHead(html, `<style>${css}</style>`)
+}
+
+/** `html` with `style` (any head markup) put where `withFonts` puts the font rules. */
+export function withHead(html: string, style: string): string {
+  if (style === '') return html
   // Same length as `html`, so a match index is an index of `html`.
   const masked = html.replace(/<!--[\s\S]*?-->/g, (comment) => ' '.repeat(comment.length))
   for (const tag of [/<head(?:\s[^>]*)?>/i, /<html(?:\s[^>]*)?>/i, /<!doctype[^>]*>/i]) {
@@ -243,11 +281,57 @@ export function withFonts(html: string, css: string): string {
   return style + html
 }
 
+/** The path segment of kit's own routes; no repo file is served from under it. */
+const KIT_ROUTE = '__kit'
+
+/** `<` cannot end a script early: JSON leaves it as is, so it is escaped here. */
+const scriptJson = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c')
+
+/**
+ * Reports the top document's viewport to the server, now and at every resize: Chrome brings the
+ * window to its final size just before the screenshot. Synchronous, so the report is in before
+ * the capture.
+ */
+const viewportScript = (prefix: string): string =>
+  `<script>(()=>{if(window.top!==window)return;const r=()=>{try{const x=new XMLHttpRequest();x.open('GET',${scriptJson(`${prefix}${KIT_ROUTE}/viewport`)}+'?w='+innerWidth+'&h='+innerHeight,false);x.send()}catch{}};r();addEventListener('resize',r)})()</script>`
+
+const CONTEXT_KEYS = ['set', 'target', 'store', 'locale', 'slide', 'index'] as const
+
+/** `data-kit-shot` on an `<img>`: the tag gets the raw shot as its `src`, and loses any `srcset`. */
+const SHOT_IMG = /<img\b(?=[^>]*\sdata-kit-shot(?![\w-]))[^>]*>/gi
+const SRC_ATTR = /\s(?:src|srcset)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi
+
+/**
+ * The slide's HTML as the page is told about its set: `data-kit-*` on `<html>` (set by a script
+ * that runs before the body is parsed), `--kit-shot` on `:root`, and the shot as the `src` of every
+ * `<img data-kit-shot>`. `shot` is the URL path the server exposes the raw shot at.
+ */
+export function withContext(html: string, query: URLSearchParams, shot: string | undefined): string {
+  const data: Record<string, string> = {}
+  for (const key of CONTEXT_KEYS) {
+    const value = query.get(key)
+    if (value !== null) data[`kit${key.charAt(0).toUpperCase()}${key.slice(1)}`] = value
+  }
+  if (shot !== undefined) data.kitShot = shot
+  const style = shot === undefined ? '' : `<style>:root{--kit-shot:url("${shot}")}</style>`
+  const script = `<script>Object.assign(document.documentElement.dataset,${scriptJson(data)})</script>`
+  const filled =
+    shot === undefined
+      ? html
+      : html.replace(SHOT_IMG, (tag) => `<img src="${shot}"${tag.slice(4).replace(SRC_ATTR, '')}`)
+  return withHead(filled, style + script)
+}
+
 export interface PageServer {
   /** `http://127.0.0.1:<port>/<token>/` */
   url: string
-  /** Every request under the token, in order. */
+  /** Every request for a file under the token, in order. */
   requests: ServedRequest[]
+  /** Serve `file` (absolute, inside the repo or not) and give the URL path it is at. */
+  expose(file: string): string
+  /** The viewport the page last reported, since `forgetViewport`. */
+  viewport(): Viewport | undefined
+  forgetViewport(): void
   stop(): Promise<void>
 }
 
@@ -255,16 +339,37 @@ export interface PageServer {
  * Serve the repo root on 127.0.0.1 under a random path token, so a page's relative assets resolve
  * (`../brand/logo.svg`). Any non-dot file under the repo can be read by the page: dot paths, symlinks
  * that lead outside the root or to a dot path, and everything else are 404. HTML gets the
- * `shots.fonts` rules injected. `root` is the real path of the repo root.
+ * `shots.fonts` rules and the viewport report injected, and a slide's page its context (a request
+ * with `set` in its query). `root` is the real path of the repo root.
  */
 export function servePages(root: string, shots: Shots): PageServer {
   const token = randomBytes(16).toString('hex')
   const prefix = `/${token}/`
   const css = fontCss(root, prefix, shots)
+  const head = css === '' ? '' : `<style>${css}</style>`
   const requests: ServedRequest[] = []
+  const exposed: string[] = []
+  let viewport: Viewport | undefined
+  const file = (path: string, type?: string): Response =>
+    new Response(Bun.file(path), {
+      headers: {
+        'content-type': type ?? MIME[extname(path).toLowerCase()] ?? 'application/octet-stream',
+        ...NO_STORE,
+      },
+    })
+  const kitRoute = (rel: string, query: URLSearchParams): Response => {
+    if (rel === 'viewport') {
+      const [width, height] = [Number(query.get('w')), Number(query.get('h'))]
+      if (Number.isFinite(width) && Number.isFinite(height)) viewport = { width, height }
+      return new Response(null, { status: 204, headers: NO_STORE })
+    }
+    const at = /^shot\/(\d+)$/.exec(rel)?.[1]
+    const shot = at === undefined ? undefined : exposed[Number(at)]
+    return shot !== undefined && statSync(shot, { throwIfNoEntry: false })?.isFile() ? file(shot) : notFound()
+  }
   const answer = (req: Request): Response => {
     if (req.method !== 'GET') return notFound()
-    const { pathname } = new URL(req.url)
+    const { pathname, searchParams } = new URL(req.url)
     if (!pathname.startsWith(prefix)) return notFound()
     let rel: string
     try {
@@ -272,14 +377,19 @@ export function servePages(root: string, shots: Shots): PageServer {
     } catch {
       return notFound()
     }
-    const file = servedFile(root, rel)
-    if (file === undefined) return notFound()
-    const type = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream'
-    if (type.startsWith('text/html')) {
-      const html = withFonts(readFileSync(file, 'utf8'), css)
-      return new Response(html, { headers: { 'content-type': type, ...NO_STORE } })
+    if (rel.startsWith(`${KIT_ROUTE}/`)) return kitRoute(rel.slice(KIT_ROUTE.length + 1), searchParams)
+    const served = servedFile(root, rel)
+    if (served === undefined) return notFound()
+    const type = MIME[extname(served).toLowerCase()] ?? 'application/octet-stream'
+    if (!type.startsWith('text/html')) return file(served, type)
+    let html = withHead(readFileSync(served, 'utf8'), head + viewportScript(prefix))
+    if (searchParams.has('set')) {
+      // Only a path this server made is put into the page.
+      const shot = searchParams.get('shot') ?? ''
+      const known = new RegExp(`^${prefix}${KIT_ROUTE}/shot/\\d+$`).test(shot)
+      html = withContext(html, searchParams, known ? shot : undefined)
     }
-    return new Response(Bun.file(file), { headers: { 'content-type': type, ...NO_STORE } })
+    return new Response(html, { headers: { 'content-type': type, ...NO_STORE } })
   }
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -287,41 +397,54 @@ export function servePages(root: string, shots: Shots): PageServer {
     fetch(req) {
       const response = answer(req)
       const { pathname } = new URL(req.url)
-      if (pathname.startsWith(prefix))
+      if (pathname.startsWith(prefix) && pathname !== `${prefix}${KIT_ROUTE}/viewport`)
         requests.push({ path: pathname.slice(prefix.length), status: response.status })
       return response
     },
     error: () => new Response('Internal error', { status: 500 }),
   })
-  return { url: `http://127.0.0.1:${server.port}${prefix}`, requests, stop: () => server.stop(true) }
+  return {
+    url: `http://127.0.0.1:${server.port}${prefix}`,
+    requests,
+    expose: (path) => `${prefix}${KIT_ROUTE}/shot/${exposed.push(path) - 1}`,
+    viewport: () => viewport,
+    forgetViewport: () => {
+      viewport = undefined
+    },
+    stop: () => server.stop(true),
+  }
 }
 
 /** The shot, checked against the page's size and flattened; a failure names the page. */
-export function checkedPage(job: PageJob, bytes: Uint8Array): Uint8Array {
+export function checkedPage(job: ShootJob, bytes: Uint8Array): Uint8Array {
+  const name = labelOf(job)
   let info: ReturnType<typeof imageInfo>
   try {
     info = imageInfo(bytes)
   } catch (e) {
-    throw new KitError(`Chrome wrote a bad image for page ${job.name}: ${reason(e)}`)
+    throw new KitError(`Chrome wrote a bad image for ${name}: ${reason(e)}`)
   }
   if (info.format !== 'png') {
-    throw new KitError(`Chrome wrote a ${info.format} image for page ${job.name}, not a PNG`)
+    throw new KitError(`Chrome wrote a ${info.format} image for ${name}, not a PNG`)
   }
   if (info.width !== job.width || info.height !== job.height) {
     throw new KitError(
-      `The PNG for page ${job.name} is ${info.width}x${info.height}`,
-      `shots.pages declares ${job.width}x${job.height} at scale ${job.scale}`,
+      `The PNG for ${name} is ${info.width}x${info.height}`,
+      job.context
+        ? `The ${job.context.set} set is ${job.width}x${job.height}, shot at scale ${job.scale}`
+        : `shots.pages declares ${job.width}x${job.height} at scale ${job.scale}`,
     )
   }
-  if (!info.alpha) return bytes
+  // No date or text chunk: a run that changes nothing writes the same bytes.
+  if (!info.alpha) return stripPngMetadata(bytes)
   let flat: Uint8Array
   try {
     flat = flattenPng(bytes, job.background)
   } catch (e) {
-    throw new KitError(`Cannot flatten the PNG for page ${job.name}: ${reason(e)}`)
+    throw new KitError(`Cannot flatten the PNG for ${name}: ${reason(e)}`)
   }
   if (imageInfo(flat).alpha) {
-    throw new KitError(`The PNG for page ${job.name} still has an alpha channel after flattening`)
+    throw new KitError(`The PNG for ${name} still has an alpha channel after flattening`)
   }
   return flat
 }
@@ -345,6 +468,8 @@ export interface RenderPagesOptions {
   timeoutMs?: number
   step?: (message: string) => void
   verbose?: (message: string) => void
+  /** A page whose layout size could not be checked. */
+  warn?: (message: string) => void
   /** Filled with every request the page server answered, for tests. */
   requests?: ServedRequest[]
 }
@@ -364,6 +489,33 @@ export async function renderPages(
   jobs: readonly PageJob[],
   opts: RenderPagesOptions,
 ): Promise<RenderedPage[]> {
+  const done: RenderedPage[] = []
+  await shootPages(jobs, opts, (job, png) => {
+    writeAtomic(job.target, png)
+    done.push({ name: job.name, file: repoRel(opts.root, job.target), width: job.width, height: job.height })
+  })
+  return done
+}
+
+/** The query string a slide's page is opened with: its context, the shot as a URL path of `server`. */
+function contextQuery(server: PageServer, context: SlideContext | undefined): string {
+  if (!context) return ''
+  const { shot, index, ...rest } = context
+  const query = new URLSearchParams({ ...rest, index: String(index) })
+  if (shot !== undefined) query.set('shot', server.expose(shot))
+  return `?${query}`
+}
+
+/**
+ * Shoot every job in headless Chrome, one at a time, handing each checked PNG (exact size, no
+ * alpha, no date chunk) to `sink`. A page that asks for a file the server refuses, or that Chrome
+ * lays out at another size than `width / scale` by `height / scale`, fails the run.
+ */
+export async function shootPages<J extends ShootJob>(
+  jobs: readonly J[],
+  opts: RenderPagesOptions,
+  sink: (job: J, png: Uint8Array) => void,
+): Promise<void> {
   const timeoutMs = opts.timeoutMs ?? PAGE_TIMEOUT_MS
   checkSources(opts.root, jobs)
   const root = realpathSync(opts.root)
@@ -381,11 +533,11 @@ export async function renderPages(
     }
   }
   const off = onCleanup(dispose)
-  const done: RenderedPage[] = []
   try {
-    for (const job of jobs) {
-      opts.step?.(`Rendering ${job.name} (${job.width}x${job.height})`)
-      const dir = join(work, job.name)
+    for (const [i, job] of jobs.entries()) {
+      const name = labelOf(job)
+      opts.step?.(`Rendering ${job.label ?? job.name} (${job.width}x${job.height})`)
+      const dir = join(work, String(i))
       const profile = join(dir, 'profile')
       const shot = join(dir, 'shot.png')
       const log = join(dir, 'chrome.log')
@@ -393,7 +545,10 @@ export async function renderPages(
       // The URL carries the path token; Chrome's argv is readable through `ps`, so the URL goes in a file.
       const opener = join(dir, OPENER_FILE)
       const path = relative(root, realpathSync(job.source)).split(sep).map(encodeURIComponent).join('/')
-      writeFileSync(opener, openerHtml(`${server.url}${path}`), { mode: 0o600 })
+      writeFileSync(opener, openerHtml(`${server.url}${path}${contextQuery(server, job.context)}`), {
+        mode: 0o600,
+      })
+      server.forgetViewport()
       const flags = [
         `--force-device-scale-factor=${job.scale}`,
         `--virtual-time-budget=${VIRTUAL_TIME_BUDGET_MS}`,
@@ -423,37 +578,40 @@ export async function renderPages(
       killGroup(chrome)
       if (interrupted()) throw new KitError('Interrupted', undefined, ExitCode.interrupted)
       if (outcome === 'timeout') {
-        throw new KitError(
-          `Chrome did not finish page ${job.name} within ${duration(timeoutMs)}`,
-          logTail(log),
-        )
+        throw new KitError(`Chrome did not finish ${name} within ${duration(timeoutMs)}`, logTail(log))
       }
       const refused = server.requests.slice(seen).find((r) => r.status < 200 || r.status >= 300)
       if (refused) {
         throw new KitError(
-          `Page ${job.name} requested /${refused.path}, which the server answered ${refused.status}`,
+          `${capital(name)} requested /${refused.path}, which the server answered ${refused.status}`,
           'Only files under the repo root are served, and not dot files or links that leave it',
         )
       }
       if (!statSync(shot, { throwIfNoEntry: false })?.size) {
         throw new KitError(
-          `Chrome wrote no screenshot of page ${job.name} (exit code ${outcome.exited})`,
+          `Chrome wrote no screenshot of ${name} (exit code ${outcome.exited})`,
           logTail(log) ?? `Ran ${opts.chrome}`,
         )
       }
-      const png = checkedPage(job, new Uint8Array(readFileSync(shot)))
-      writeAtomic(job.target, png)
-      done.push({
-        name: job.name,
-        file: repoRel(opts.root, job.target),
-        width: job.width,
-        height: job.height,
-      })
+      const seenViewport = server.viewport()
+      if (seenViewport === undefined && job.context) {
+        // The same script-less page was not told its set either.
+        throw new KitError(
+          `${capital(name)} did not report its viewport`,
+          'kit adds a script to the page that reports it and sets data-kit-*; a Content-Security-Policy that blocks inline scripts stops both',
+        )
+      }
+      if (seenViewport === undefined) {
+        opts.warn?.(`${capital(name)} did not report its viewport, so its layout size is unchecked`)
+      } else {
+        const problem = viewportProblem(viewportOf(job.width, job.height, job.scale), seenViewport)
+        if (problem) throw new KitError(`${capital(name)} ${problem.message}`, problem.hint)
+      }
+      sink(job, checkedPage(job, new Uint8Array(readFileSync(shot))))
     }
   } finally {
     opts.requests?.push(...server.requests)
     off()
     await dispose()
   }
-  return done
 }

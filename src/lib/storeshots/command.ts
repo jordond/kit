@@ -9,11 +9,21 @@ import { resolveSuite } from '../maestro/suites'
 import { metadataDirs } from '../release/metadata'
 import { isGenericFamily } from './fonts'
 import { pageBundle } from './page-bundle'
+import { checkSources, shootPages } from './pages'
 import { isLocale, planExport, repoPath } from './plan'
 import { loadProject, requireProjectPath } from './project'
 import { renderJobs } from './render'
+import { planSlides } from './slides'
 import { APPLE_MAX_PER_CLASS, PLAY_MAX_PER_TYPE, type Store } from './sizes'
-import type { ExportOptions, ExportPlan, ExportResult, ExportShots, Project, StoreDestination } from './types'
+import type {
+  ExportOptions,
+  ExportPlan,
+  ExportResult,
+  ExportShots,
+  Project,
+  StoreDestination,
+  WriteJob,
+} from './types'
 import { statOrSkip, writeExport } from './write'
 
 type Shots = NonNullable<KitConfig['shots']>
@@ -52,7 +62,7 @@ export function requireShots(config: KitConfig): Shots {
   if (!config.shots) {
     throw new KitError(
       'No shots block in kit.config.ts',
-      "Add shots: { project: '<saved project>.json' } to kit.config.ts",
+      "Add shots: { project: '<saved project>.json' } or shots: { slides: [...] } to kit.config.ts",
       ExitCode.config,
     )
   }
@@ -224,7 +234,7 @@ function checkFonts(shots: Shots, plan: ExportPlan): void {
 }
 
 /** A set with more slides than its store keeps would lose the extra ones at push. */
-function checkCounts(plan: ExportPlan, project: string): void {
+function checkCounts(plan: { jobs: readonly WriteJob[] }, project: string): void {
   const counts = new Map<string, { store: Store; set: string; count: number }>()
   for (const job of plan.jobs) {
     const key = `${job.store} ${job.set}`
@@ -242,7 +252,7 @@ function checkCounts(plan: ExportPlan, project: string): void {
 }
 
 /** The font and brand files the page loads all have to be there before Chrome starts. */
-function checkAssets(root: string, plan: ExportPlan): void {
+function checkAssets(root: string, plan: Pick<ExportPlan, 'assets'>): void {
   const missing = plan.assets.filter((file) => !existsSync(file)).map((file) => repoPath(root, file))
   if (missing.length === 0) return
   throw new KitError(
@@ -303,6 +313,54 @@ export interface ExportRun {
   step?: (message: string) => void
   /** Chrome's own chatter, for `--verbose`. */
   verbose?: (message: string) => void
+  /** Something the run could not check. */
+  warn?: (message: string) => void
+}
+
+/** `runExport` for `shots.slides`: plan the HTML slides, shoot each in headless Chrome, write. */
+async function runSlideExport(
+  root: string,
+  config: KitConfig,
+  shots: Shots,
+  opts: ExportOptions,
+  run: ExportRun,
+): Promise<ExportResult> {
+  const destinations = resolveDestinations(root, config, opts)
+  const rawDir = shots.slides?.some((slide) => slide.shot !== undefined)
+    ? resolveRawDir(root, config, shots)
+    : undefined
+  const plan = planSlides({
+    root,
+    config,
+    destinations,
+    rawDir,
+    raw: rawDir === undefined ? new Set() : listRaw(rawDir),
+    allowMissing: opts.allowMissing,
+  })
+  checkCounts(plan, 'shots.slides in kit.config.ts')
+  checkSources(root, plan.jobs)
+  const fonts = (shots.fonts ?? []).map((font) => resolve(root, font.file))
+  checkAssets(root, { assets: fonts })
+
+  const planned = await writeExport(plan, { root, force: opts.force, dryRun: true })
+  let outcome = planned
+  if (!run.dryRun && plan.jobs.length > 0) {
+    const chrome = requireChrome()
+    const images = new Map<string, Uint8Array>()
+    await shootPages(
+      plan.jobs,
+      { chrome, root, shots, step: run.step, verbose: run.verbose, warn: run.warn },
+      (job, png) => images.set(job.id, png),
+    )
+    outcome = await writeExport(plan, { root, images, force: opts.force, dryRun: false })
+  }
+  return {
+    dryRun: run.dryRun,
+    stores: destinations.map((d) => d.store),
+    written: outcome.written,
+    removed: outcome.removed,
+    skipped: plan.skipped,
+  }
 }
 
 /**
@@ -316,6 +374,7 @@ export async function runExport(
   run: ExportRun,
 ): Promise<ExportResult> {
   const shots = requireShots(config)
+  if (shots.slides?.length) return await runSlideExport(root, config, shots, opts, run)
   const projectFile = resolve(root, requireProjectPath(shots))
   const project = await loadProject(projectFile)
   const destinations = resolveDestinations(root, config, opts)
@@ -365,6 +424,7 @@ export const exportShots: ExportShots = async (ctx, opts) => {
     dryRun: ctx.flags.dryRun,
     step: ctx.flags.json ? undefined : (message) => ctx.log.step(message),
     verbose: ctx.flags.verbose ? (message) => ctx.log.dim(message) : undefined,
+    warn: (message) => ctx.log.warn(message),
   })
   if (ctx.flags.json) emitJson(result)
   else report(ctx.log, result)

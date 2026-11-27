@@ -228,7 +228,7 @@ export const builtins: BuiltinEntry[] = [
   },
   {
     path: ['shots', 'export'],
-    description: 'Render the store screenshots from the raw shots and the saved project',
+    description: 'Render the store screenshots from the raw shots and the saved project or HTML slides',
     group: 'Quality',
     load: () => import('../commands/shots/export'),
   },

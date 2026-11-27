@@ -16,11 +16,11 @@ import { imageInfo } from '../image/png'
 import { repoPath } from './plan'
 import { APPLE_SET_CLASS, type AppleClass, appleClass, type SetId } from './sizes'
 import {
-  type Job,
   MANIFEST_FILE,
   type ShotsManifest,
   type StoreDestination,
   type WriteExport,
+  type WriteJob,
   type WrittenShot,
 } from './types'
 
@@ -48,7 +48,7 @@ const targetOfSet = (set: string): DeviceTarget | undefined =>
 /** What one store's export does to its dir. Paths in the sets are relative to the dir, `/`-separated. */
 interface DestinationChange {
   destination: StoreDestination
-  jobs: Job[]
+  jobs: WriteJob[]
   /** Images removed: stale files of the manifest, and under `--force` the unlisted ones in the way. */
   remove: string[]
   /** Images in a set being written that are in the way: the unlisted ones, and every entry of `irregular`. */
@@ -145,7 +145,7 @@ function playEntry(entry: string): { locale: string } | undefined {
 }
 
 /** Work out, without touching disk, what the export does to one store's dir. */
-function changeFor(destination: StoreDestination, jobs: Job[], force: boolean): DestinationChange {
+function changeFor(destination: StoreDestination, jobs: WriteJob[], force: boolean): DestinationChange {
   const { dir, store } = destination
   const rel = (file: string) => relative(dir, file).split(sep).join('/')
   const listed = readManifest(dir, force)

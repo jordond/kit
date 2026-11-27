@@ -57,6 +57,7 @@ export async function runPages(ctx: KitContext, opts: PagesOptions): Promise<voi
       shots,
       step: ctx.flags.json ? undefined : (message) => ctx.log.step(message),
       verbose: ctx.flags.verbose ? (message) => ctx.log.dim(message) : undefined,
+      warn: (message) => ctx.log.warn(message),
     })
   }
   if (ctx.flags.json) {

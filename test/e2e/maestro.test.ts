@@ -193,6 +193,47 @@ describe('kit shots', () => {
     expect(png('maestro/screenshots/android')).toEqual(['screenshots-extra.png', 'screenshots.png'])
   })
 
+  test('shots.suites runs each suite in order on one build, and --suite still picks one', async () => {
+    setup()
+    const configPath = join(f.dir, 'kit.config.ts')
+    await Bun.write(
+      configPath,
+      (await Bun.file(configPath).text())
+        .replace(
+          "'shots-full':",
+          "'shots-shelf': { extends: 'shots', tags: ['shelf'] },\n      'shots-full':",
+        )
+        .replace(
+          /\n}\s*$/,
+          "\n  shots: { raw: 'maestro/screenshots', suites: ['shots', 'shots-shelf'], pages: [{ name: 'p', file: 'p.html', width: 1000, height: 500 }] },\n}\n",
+        ),
+    )
+    const r = await f.kit(['shots', 'android', '--json'], { env: env() })
+    expect(r.code).toBe(0)
+    const calls = maestroCalls()
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toContain('--include-tags screenshots ')
+    expect(calls[1]).toContain('--include-tags shelf ')
+    // Both suites write into the shots suite's dir, where the export reads them.
+    expect(png('maestro/screenshots/android')).toEqual(['screenshots.png', 'shelf.png'])
+    expect(acts().filter((l) => l.includes(' install '))).toHaveLength(2)
+    expect(log().filter((l) => /gradle|assemble/i.test(l)).length).toBeLessThanOrEqual(1)
+    const out = JSON.parse(r.stdout)
+    expect(out).toMatchObject({ target: 'android', ok: true })
+    expect(out.suites.map((s: { suite: string }) => s.suite)).toEqual(['shots', 'shots-shelf'])
+
+    const fixtureFlag = await f.kit(['shots', 'android', '--no-fixture'], { env: env() })
+    expect(fixtureFlag.code).toBe(2)
+    expect(fixtureFlag.stderr).toContain('apply to one suite')
+
+    const one = await f.kit(['shots', 'android', '--suite', 'shots-shelf', '--no-build', '--json'], {
+      env: env(),
+    })
+    expect(one.code).toBe(0)
+    expect(JSON.parse(one.stdout).suite).toBe('shots-shelf')
+    expect(maestroCalls()).toHaveLength(3)
+  })
+
   test('--full without a shots-full suite is a config error with an example', async () => {
     setup()
     const configPath = join(f.dir, 'kit.config.ts')

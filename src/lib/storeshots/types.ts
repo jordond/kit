@@ -447,6 +447,18 @@ export interface WriteOptions {
 
 export type WriteResult = Pick<ExportResult, 'written' | 'removed'>
 
+/** What writing needs of a job: where it goes, and the id of its slide. A `Job` is one. */
+export type WriteJob = Pick<
+  Job,
+  'id' | 'store' | 'target' | 'set' | 'locale' | 'index' | 'width' | 'height' | 'file'
+> & { slide: { id: string } }
+
+/** What `writeExport` reads of a plan: an `ExportPlan` is one, and so is a plan of HTML slides. */
+export interface WritePlan {
+  destinations: StoreDestination[]
+  jobs: readonly WriteJob[]
+}
+
 /**
  * `.kit-shots.json` in a `StoreDestination.dir`: the files the last export wrote there. An owned
  * set is one `<locale>` dir (apple, per set id) or one `<locale>/images/phoneScreenshots` dir
@@ -504,4 +516,4 @@ export type RenderJobs = (plan: ExportPlan, opts: RenderOptions) => Promise<Map<
  * stale files of each owned set, and writes the final manifest. Nothing is written when any check
  * fails.
  */
-export type WriteExport = (plan: ExportPlan, opts: WriteOptions) => Promise<WriteResult>
+export type WriteExport = (plan: WritePlan, opts: WriteOptions) => Promise<WriteResult>

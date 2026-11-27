@@ -1,8 +1,8 @@
 # Store screenshots
 
 `kit shots export` turns the raw shots into the images the stores take: each slide of a saved project
-(background, headline, device frame around the raw shot) is drawn by headless Chrome at the store's
-exact size and written into the store listing dirs, ready for [`kit release metadata push --screenshots`](releases.md#store-listing).
+(background, headline, device frame around the raw shot), or each [HTML slide](#html-slides) you write
+yourself, is drawn by headless Chrome at the store's exact size and written into the store listing dirs, ready for [`kit release metadata push --screenshots`](releases.md#store-listing).
 
 ```sh
 kit shots ios && kit shots ipad && kit shots android   # capture the raw shots
@@ -24,12 +24,72 @@ shots: {
 },
 ```
 
+**HTML slides.** When a design needs more than the studio's slide (bands that run off the edge, tilted
+stickers, one coloured word), write each slide as an HTML page and list them in `shots.slides` instead of
+`shots.project`. `kit shots export` then renders every slide, in config order, for every exported set and
+locale, and writes them under the same file names, with the same flags and the same ownership rules as
+project slides: dropping a slide from the config removes its file at the next export.
+
+```ts
+shots: {
+  slides: [
+    { name: 'shelf', file: 'brand/store/01-shelf.html', shot: '01-shelf', background: '#ffd400' },
+    { name: 'playing', file: 'brand/store/02-playing.html', shot: '02-playing' },
+  ],
+  suites: ['shots', 'shots-shelf'],      // optional: the suites `kit shots <target>` runs (see Maestro)
+  fonts: [{ family: 'Nunito', file: 'brand/fonts/nunito.woff2', weight: '400 800' }],
+},
+```
+
+`shot` is the raw shot the slide shows: `<raw>/<target>/<locale>/<shot>` when that exists, else
+`<raw>/<target>/<shot>` (`.png` is added to a name without an extension). A slide whose shot is absent stops
+the export (exit 4) unless `--allow-missing`; a slide with no `shot` is drawn as is. `background` is the
+colour under transparent areas, default `#ffffff`. Setting both `project` and `slides` is a config error:
+the studio edits `project`, and the export renders one or the other.
+
+kit tells the page what it is drawing, four ways, so one HTML file serves every set without guessing from
+the viewport:
+
+| Where                   | What                                                                                                                                                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<html data-kit-…>`     | `data-kit-set` (`ipad-13`), `-target` (`ios`, `ipad`, `android`), `-store`, `-locale`, `-slide`, `-index`, `-shot` (the shot's URL). Set before the body is parsed, so `html[data-kit-target='ipad'] .device { … }` works |
+| `--kit-shot` on `:root` | `url(…)` of the raw shot, for `background-image: var(--kit-shot)`                                                                                                                                                         |
+| `<img data-kit-shot>`   | Its `src` is replaced by the raw shot (and `srcset` dropped); write the tag plainly, with no `>` inside an attribute. Keep a `src` to a sample shot for opening the file by hand                                          |
+| The query string        | `?set=…&target=…&store=…&locale=…&slide=…&index=…&shot=…`, for a script                                                                                                                                                   |
+
+The page is served like an artwork page: from the repo root, with `shots.fonts` injected, so relative paths
+into `brand/` keep working. The raw shot comes from kit's own route, so the raw dir may be gitignored or
+under a dot dir.
+
+**Sizing.** Each slide is shot at its set's pixel size (1320x2868, 2064x2752, 1440x2560 by default). kit
+picks the device scale factor: the largest whole number up to 4 that divides both sides and keeps the CSS
+viewport at least 500 px wide, because headless Chrome makes no narrower window. That gives:
+
+| Set          | Pixels    | Scale | CSS viewport |
+| ------------ | --------- | ----- | ------------ |
+| `iphone-6.9` | 1320x2868 | 2     | 660x1434     |
+| `iphone-6.5` | 1284x2778 | 2     | 642x1389     |
+| `iphone-6.3` | 1206x2622 | 2     | 603x1311     |
+| `ipad-13`    | 2064x2752 | 4     | 516x688      |
+| `phone`      | 1440x2560 | 2     | 720x1280     |
+
+Lay the page out against the viewport (`vw`, `vh`, or a fixed-width stage scaled with `zoom`), not against
+these numbers. After the page loads, kit reads `innerWidth` and `innerHeight` back and fails the render
+(exit 1, nothing written) when they are not the viewport it asked for. Chrome only brings the window to its
+full height just before the shot, so prefer `data-kit-set` over media queries for anything that depends on
+which set is drawn. kit's script in the page does the reporting and sets `data-kit-*`, so a slide whose
+Content-Security-Policy blocks inline scripts fails; an artwork page in the same position only warns.
+Each image is its own Chrome run, so an export takes a second or two per slide, set and locale; `--store`
+and `--locale` narrow it.
+
 **Artwork pages.** `kit shots pages [name...]` renders the HTML pages in `shots.pages` (the App Store
 product page header and search results artwork, for example) with the same headless Chrome, at the pixel
 size you declare and with the alpha channel flattened, which App Store Connect requires. It writes
 `build/shots-pages/<name>-<width>x<height>.png` unless a page sets `out` or you pass `--out <dir>`. `--dry-run`
 lists the files without starting Chrome; `--json` prints them on stdout. A page sets `scale` (default 2, so
-a 3840x1646 page is laid out at 1920x823), and `background` for the colour under transparent areas. The repo
+a 3840x1646 page is laid out at 1920x823), and `background` for the colour under transparent areas. `width / scale` must be at
+least 500: headless Chrome makes no narrower window, so a smaller viewport is a config error that names the
+scale to use, and a page Chrome lays out at any other size than asked fails the render. The repo
 root is served locally (the page can read any non-dot file under it), so a page's relative assets load, and `shots.fonts` is available to every page. With
 only `pages` set, `shots.project` may be left out. See [CONFIG.md](CONFIG.md#artwork-pages).
 
@@ -101,7 +161,7 @@ dir whose name cannot be a locale (`Old Backup`).
 | apple  | ipad    | 2064x2752 (`ipad-13`)    | same dir, `NN_ipad-13_<slug>.png`                                           |
 | google | android | 1440x2560 (`phone`)      | `<release.android.metadata>/<locale>/images/phoneScreenshots/NN_<slug>.png` |
 
-`NN` is the slide's position and `<slug>` its name. Each dir gets a `.kit-shots.json` listing what
+`NN` is the slide's position and `<slug>` its name (an HTML slide's `name`). Each dir gets a `.kit-shots.json` listing what
 export wrote. The next export replaces those files and removes the ones it no longer writes; an image
 in the same set that it did not write is in the way (exit 4) until it is moved or `--force` replaces it.
 So is a directory or a dangling link with an image name there: the uploader would take it and fail.

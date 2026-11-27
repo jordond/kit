@@ -43,6 +43,17 @@ the `shots-full` suite, and `--suite <name>` any other. A suite has `tags` (one 
 filters: a flow that wipes app state belongs in a last stage of its own. Flows get `PLATFORM=ios|android`
 plus the suite's `env`.
 
+`shots.suites` lists the suites `kit shots <target>` runs when neither `--suite` nor `--full` is given, for
+screenshots that need a second fixture or another set of flows. They run in order on one build (the app is
+built for the first suite only), and the run stops at the first that fails. Have each extend `shots` so its
+PNGs land in the same raw dir, where `kit shots export` reads them. `--fixture` and `--no-fixture` apply to
+one suite, so they need `--suite` here. `--out` sends every suite's PNGs to the one dir. `--json` prints `{ target, ok, suites: [...] }`.
+
+```ts
+maestro: { dir: 'maestro', suites: { 'shots-shelf': { extends: 'shots', tags: ['shelf'], fixture: 'full-shelf' } } },
+shots: { suites: ['shots', 'shots-shelf'] },
+```
+
 **The run.** One device is resolved first (see [Devices](devices.md)), then everything lands on it: the debug
 build and install (`--no-build` drives what is installed), the 9:41 status bar when the suite asks, the
 fixture (`--fixture <name>`, `--no-fixture`), then each stage. A failing stage stops the run and exits 1. The status bar stays pinned afterwards

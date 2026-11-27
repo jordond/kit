@@ -139,6 +139,21 @@ export function computeFlags(values: Record<string, unknown>): Flags {
   }
 }
 
+/**
+ * A boolean flag that defaults to true can only be turned off as `--no-<flag>`, so it takes the
+ * negation unless the command says `negatable: false`.
+ */
+export function negatableDefaults(args: Args | undefined): Args {
+  return Object.fromEntries(
+    Object.entries(args ?? {}).map(([name, arg]) => [
+      name,
+      arg.type === 'boolean' && arg.default === true && arg.negatable === undefined
+        ? { ...arg, negatable: true }
+        : arg,
+    ]),
+  )
+}
+
 /** A gunshi command plus what kit's usage renderer reads. */
 export type KitGunshiCommand = Command & { group?: string; passthrough?: boolean }
 
@@ -149,7 +164,7 @@ export function toGunshi(name: string, cmd: KitCommand<Args>, rt: Runtime): KitG
     description: cmd.description,
     examples: cmd.examples,
     // A passthrough parses no flags of its own; gunshi only sees it for `kit <path> --help`.
-    args: cmd.passthrough ? {} : { ...globalArgs, ...cmd.args },
+    args: cmd.passthrough ? {} : { ...globalArgs, ...negatableDefaults(cmd.args) },
     group: cmd.group,
     passthrough: cmd.passthrough,
     run: async (ctx) => {
