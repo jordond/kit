@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.0 (2026-11-28)
+
+### Features
+
+- **upgrade:** `kit upgrade` moves `$schema` URLs. Every `"$schema"` in the repo's JSON that names a schema kit publishes (the product file's `iap.schema.json`) goes to the release's major.minor, so `kit iap check` no longer warns "names another kit version" after an upgrade. `--dry-run` lists the files and `--json` reports them as `schemas`. Files are found with `git grep`, so a repo without git keeps its URLs.
+
+### Fixes
+
+- **lint:** `kit lint` and `kit check` no longer run `ktlint` over git-ignored paths. ktlint does not read `.gitignore`, so a Kotlin project in an ignored dir (a scratch spike) failed the lint. `--staged` runs are unchanged.
+
 ## 0.15.0 (2026-11-27)
 
 ### Features
