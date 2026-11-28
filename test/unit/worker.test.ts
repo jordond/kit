@@ -38,13 +38,30 @@ const db: D1Database = { key: 'db', name: 'infra-db', target: 'edge' }
 
 describe('worker targets', () => {
   test('requireWorker: usage errors name the worker targets', () => {
-    expect(workerTargets(config)).toEqual(['edge'])
-    expect(requireWorker(config, 'edge', 'kit logs').dir).toBe('apps/edge')
+    expect(workerTargets(root, config)).toEqual(['edge'])
+    expect(requireWorker(root, config, 'edge', 'kit logs').dir).toBe('apps/edge')
     for (const name of [undefined, 'nope', 'site']) {
-      expect(() => requireWorker(config, name, 'kit logs')).toThrow(
+      expect(() => requireWorker(root, config, name, 'kit logs')).toThrow(
         expect.objectContaining({ exitCode: 2, hint: 'Worker targets: edge' }),
       )
     }
+  })
+
+  test('a target of any kind with a wrangler config is a worker target', () => {
+    const sites = configSchema.parse({
+      ...config,
+      targets: {
+        dash: { kind: 'vite', dir: 'apps/analytics' },
+        docs: { kind: 'astro', dir: 'apps/edge' },
+        bare: { kind: 'vite', dir: 'apps/admin' },
+        tool: { kind: 'custom', dir: 'apps/edge' },
+      },
+    })
+    expect(workerTargets(root, sites)).toEqual(['dash', 'docs', 'tool'])
+    expect(requireWorker(root, sites, 'dash', 'kit open').dir).toBe('apps/analytics')
+    expect(() => requireWorker(root, sites, 'bare', 'kit open')).toThrow(
+      'kit open supports worker targets only; "bare" is vite with no wrangler config in apps/admin',
+    )
   })
 
   test('readWranglerConfig parses JSONC and TOML; none → undefined', () => {

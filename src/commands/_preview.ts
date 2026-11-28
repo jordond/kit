@@ -89,7 +89,7 @@ export async function runPreview(
     throw new KitError('kit deploy --preview takes one worker target', undefined, ExitCode.usage)
   }
   const name = names[0]!
-  const target = requireWorker(config, name, 'kit deploy --preview')
+  const target = requireWorker(root, config, name, 'kit deploy --preview')
   const env = checkEnv(config, name, opts.env)
   const worker = workerName(readWranglerConfig(resolve(root, target.dir))?.data ?? {}, env) ?? name
   // On a pull_request run HEAD is detached; Actions names the branch.
@@ -108,15 +108,19 @@ export async function runPreview(
       ExitCode.usage,
     )
   }
-  const hasBuild = target.build !== undefined && target.build !== false
-  if (custom !== undefined && !hasBuild) {
+  // A target of another kind deploys with a script that builds before it uploads too, so it takes
+  // its kind's build (the `build` script); a worker's default build uploads nothing new.
+  const site = target.kind !== 'worker'
+  const build =
+    custom !== undefined || site ? (targetCommands(root, config, name, 'build', { env }) ?? []) : []
+  const hasBuild = site ? build.length > 0 : target.build !== undefined && target.build !== false
+  if ((custom !== undefined || site) && !hasBuild) {
     throw new KitError(
       `A preview of "${name}" needs targets.${name}.build`,
-      `targets.${name}.deploy is a custom command; kit runs the target's build, then wrangler versions upload`,
+      `targets.${name}.deploy is ${custom !== undefined ? 'a custom command' : 'not wrangler deploy'}; kit runs the target's build, then wrangler versions upload`,
       ExitCode.usage,
     )
   }
-  const build = custom !== undefined ? (targetCommands(root, config, name, 'build', { env }) ?? []) : []
   const self = [process.execPath, '--no-env-file', process.argv[1]!]
   const before = beforeCommands(config, name).map((args) => ({
     title: `kit ${args.join(' ')}`,

@@ -23,7 +23,7 @@ export default defineCommand({
     const { emitJson } = await import('../../lib/log')
     const { runLines, runPiped } = await import('../../lib/proc')
     const { confirm } = await import('../../lib/prompt')
-    const { gradualRollout, listArgs, pickRollback, rollbackArgs, serviceDeployTarget } =
+    const { gradualRollout, isWorker, listArgs, pickRollback, rollbackArgs, serviceDeployTarget } =
       await import('../../lib/worker')
     const { root, config } = requireProject(ctx)
     const services = config.release?.services ?? {}
@@ -39,7 +39,7 @@ export default defineCommand({
     }
     const deployed = serviceDeployTarget(svc.deploy)
     const target = deployed ? config.targets[deployed.target] : undefined
-    if (!deployed || target?.kind !== 'worker') {
+    if (!deployed || !target || !isWorker(root, target)) {
       const why = !deployed
         ? `release.services.${name}.deploy is not \`kit deploy <worker target>\``
         : target

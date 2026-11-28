@@ -1,6 +1,7 @@
 # Cloudflare workers
 
-For targets of kind `worker`. Every command runs wrangler from the target's directory with
+For worker targets: kind `worker`, and a target of any other kind with a wrangler config
+(`wrangler.jsonc`, `wrangler.json`, `wrangler.toml`) in its directory. Every command runs wrangler from the target's directory with
 `CLOUDFLARE_ACCOUNT_ID` pinned from `cloudflare.accountId`.
 
 | Command                                              | Does                                                                                                                                                            |
@@ -17,7 +18,8 @@ For targets of kind `worker`. Every command runs wrangler from the target's dire
 - `--preview` takes one worker target, honours `--env` and `deploy.before`, and aliases the preview
   to the branch (`feat/login` → `feat-login-<worker>.<subdomain>.workers.dev`); with no usable branch
   name the URL is the per-version one. A target with a custom `deploy` command runs its `build`
-  first (and needs one: exit 2 otherwise); `deploy: false` has no preview.
+  first (and needs one: exit 2 otherwise), as does a target of any other kind (`vite` and `astro` default to
+  the `build` script); `deploy: false` has no preview.
 - `--comment` posts the URL on the branch's pull request with `gh`, and on the next preview updates
   that comment: only one the `gh` user wrote that opens with kit's marker. With no pull request it
   warns; any other `gh` failure exits 1, after the URL is printed (`comment: 'failed'`, `ok: false`).

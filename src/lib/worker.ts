@@ -1,6 +1,6 @@
 import { createHash, createHmac } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { KitConfig, TargetConfig } from '../config/schema'
 import { stripJsonc, WRANGLER_FILES } from './cloudflare'
 import { ExitCode, KitError } from './errors'
@@ -12,22 +12,44 @@ import { parseToml } from './toml'
  * Wrangler flags were checked against wrangler 4.73.
  */
 
-export function workerTargets(config: KitConfig): string[] {
+/**
+ * Whether a target deploys to a Cloudflare Worker: kind `worker`, or a target of any other kind with
+ * a wrangler config in its directory (a site served by a Worker of its own).
+ */
+export function isWorker(root: string, target: TargetConfig): boolean {
+  if (target.kind === 'worker') return true
+  const dir = resolve(root, target.dir)
+  return WRANGLER_FILES.some((f) => existsSync(join(dir, f)))
+}
+
+export function workerTargets(root: string, config: KitConfig): string[] {
   return Object.entries(config.targets)
-    .filter(([, t]) => t.kind === 'worker')
+    .filter(([, t]) => isWorker(root, t))
     .map(([n]) => n)
 }
 
+/** Names the worker targets, for a usage error's hint. */
+export function workerHint(root: string, config: KitConfig): string {
+  const workers = workerTargets(root, config)
+  return workers.length
+    ? `Worker targets: ${workers.join(', ')}`
+    : 'No target has kind "worker" or a wrangler config'
+}
+
 /** The worker target `name`, or a usage error naming the worker targets. `command` is `kit logs`. */
-export function requireWorker(config: KitConfig, name: string | undefined, command: string): TargetConfig {
-  const workers = workerTargets(config)
-  const hint = workers.length ? `Worker targets: ${workers.join(', ')}` : 'No target has kind "worker"'
+export function requireWorker(
+  root: string,
+  config: KitConfig,
+  name: string | undefined,
+  command: string,
+): TargetConfig {
+  const hint = workerHint(root, config)
   if (!name) throw new KitError(`${command} takes a worker target`, hint, ExitCode.usage)
   const target = config.targets[name]
   if (!target) throw new KitError(`Unknown target "${name}"`, hint, ExitCode.usage)
-  if (target.kind !== 'worker') {
+  if (!isWorker(root, target)) {
     throw new KitError(
-      `${command} supports worker targets only; "${name}" is ${target.kind}`,
+      `${command} supports worker targets only; "${name}" is ${target.kind} with no wrangler config in ${target.dir}`,
       hint,
       ExitCode.usage,
     )

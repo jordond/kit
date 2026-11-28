@@ -150,7 +150,7 @@ describe('deploy --preview', () => {
   test('usage errors: not a worker, several targets, --comment alone, unknown env', async () => {
     const site = await fx.kit(['deploy', 'site', '--preview'])
     expect(site.code).toBe(2)
-    expect(site.stderr).toContain('worker targets only; "site" is astro')
+    expect(site.stderr).toContain('worker targets only; "site" is astro with no wrangler config')
     expect((await fx.kit(['deploy', 'edge', 'admin', '--preview'])).code).toBe(2)
     expect((await fx.kit(['deploy', 'edge', '--comment'])).code).toBe(2)
     expect((await fx.kit(['deploy', 'edge', '--preview', '--env', 'nope'])).code).toBe(2)

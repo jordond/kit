@@ -24,7 +24,7 @@ export default defineCommand({
     const { checkEnv } = await import('./deploy')
     const { root, config } = requireProject(ctx)
     const [name, ...more] = ctx.positionals
-    const target = requireWorker(config, name, 'kit open')
+    const target = requireWorker(root, config, name, 'kit open')
     if (more.length) throw new KitError('kit open takes one worker target', undefined, ExitCode.usage)
     const env = checkEnv(config, name!, ctx.args.env)
     const dir = resolve(root, target.dir)

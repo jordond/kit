@@ -22,7 +22,7 @@ export default defineCommand({
     const { checkEnv } = await import('./deploy')
     const { root, config } = requireProject(ctx)
     const [name, ...more] = ctx.positionals
-    requireWorker(config, name, 'kit logs')
+    requireWorker(root, config, name, 'kit logs')
     if (more.length) {
       throw new KitError(
         'kit logs takes one worker target',

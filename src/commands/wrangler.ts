@@ -6,24 +6,20 @@ export default defineCommand({
   passthrough: true,
   examples: 'kit wrangler api whoami\nkit wrangler api d1 list\nkit wrangler api deploy --dry-run',
   async run(ctx) {
-    const workersOf = (targets: Record<string, { kind: string }>) =>
-      Object.entries(targets)
-        .filter(([, t]) => t.kind === 'worker')
-        .map(([n]) => n)
     const { join } = await import('node:path')
     const { requireProject } = await import('../cli/command')
     const { ExitCode, KitError } = await import('../lib/errors')
     const { detectPackageManager, pmExec } = await import('../lib/pm')
     const { run } = await import('../lib/proc')
+    const { isWorker, workerHint } = await import('../lib/worker')
     const { root, config } = requireProject(ctx)
-    const workers = workersOf(config.targets)
-    const hint = workers.length ? `Worker targets: ${workers.join(', ')}` : 'No target has kind "worker"'
+    const hint = workerHint(root, config)
     const [name, ...args] = ctx.rest
     if (!name || name.startsWith('-')) {
       throw new KitError('kit wrangler takes a worker target first', hint, ExitCode.usage)
     }
     const target = config.targets[name]
-    if (target?.kind !== 'worker') {
+    if (!target || !isWorker(root, target)) {
       throw new KitError(`"${name}" is not a worker target`, hint, ExitCode.usage)
     }
     if (config.cloudflare?.accountId) (await import('../lib/cloudflare')).pinCloudflareAccount(root, config)
