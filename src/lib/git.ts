@@ -16,6 +16,22 @@ export async function stagedFiles(cwd = '.'): Promise<string[]> {
   return stdout.split('\0').filter(Boolean)
 }
 
+/**
+ * Git-ignored dirs and files under `cwd`, relative to it; a dir ends with `/` and stands for all it
+ * holds. Empty outside a git repo or without git. Sync: command planning is.
+ */
+export function ignoredPaths(cwd = '.'): string[] {
+  try {
+    const r = Bun.spawnSync(
+      ['git', 'ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
+      { cwd, stdin: 'ignore', stdout: 'pipe', stderr: 'ignore' },
+    )
+    return r.exitCode === 0 ? r.stdout.toString().split('\0').filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
 /** Read-only git call: stdout on success, ProcError (with git's message) otherwise. */
 async function read(args: string[], cwd: string): Promise<string> {
   const cmd = ['git', ...args]

@@ -5,6 +5,8 @@ import { configSchema, RESERVED_SERVICE_NAMES } from '../../src/config/schema'
 import {
   affectedTargets,
   isGradleTask,
+  KTLINT_PATTERNS,
+  ktlintPatterns,
   nativeTargets,
   planVerbs,
   selectTargets,
@@ -207,6 +209,12 @@ describe('affected', () => {
     expect(planVerbs(root, c, ['lint'], { staged: ['shared-kt/A.kt'] }).map((g) => g.title)).toEqual([
       'workspace',
     ])
+  })
+  test('ktlintPatterns skips what git ignores', () => {
+    expect(ktlintPatterns([])).toEqual(KTLINT_PATTERNS)
+    expect(
+      ktlintPatterns(['scratchpad/', 'app/build/', 'node_modules/', '.env', 'gen/Out.kt', 'a/.gradle/']),
+    ).toEqual([...KTLINT_PATTERNS, '!scratchpad/**', '!gen/Out.kt', '!a/.gradle/**'])
   })
   test('staged: a file no target owns does not fan out to every target', () => {
     expect(planVerbs(root, shared, ['lint'], { staged: ['bun.lock'] }).map((g) => g.title)).toEqual([])

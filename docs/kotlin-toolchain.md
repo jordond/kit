@@ -26,15 +26,15 @@ export default defineConfig({
 })
 ```
 
-|                           | Gradle                            | Kotlin toolchain                                                                   |
-| ------------------------- | --------------------------------- | ---------------------------------------------------------------------------------- |
-| `kit test` / `kit build`  | `./gradlew test` / `build`        | `./kotlin test` / `build`                                                          |
-| `kit lint` / `kit format` | `spotlessCheck` / `spotlessApply` | `ktlint` / `ktlint -F` over `**/*.kt` and `**/*.kts`, skipping `build/`            |
-| `kit test -m core -p jvm` | `:core:jvmTest`                   | `./kotlin test -m core -p jvm`                                                     |
-| `kit build <t> --release` | `<project path>:bundleRelease`    | `./kotlin package -m <module name>` (AAB only)                                     |
-| passthrough               | `kit gradle …`                    | `kit kotlin …`                                                                     |
-| `kit init`                | `gradle.init` tasks               | `toolchain.init` (default `./kotlin --version`, which downloads the toolchain)     |
-| `kit doctor`              | java, Android SDK, catalog keys   | the wrapper and its pinned `kotlin_cli_version`, and ktlint; no java or SDK needed |
+|                           | Gradle                            | Kotlin toolchain                                                                              |
+| ------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------- |
+| `kit test` / `kit build`  | `./gradlew test` / `build`        | `./kotlin test` / `build`                                                                     |
+| `kit lint` / `kit format` | `spotlessCheck` / `spotlessApply` | `ktlint` / `ktlint -F` over `**/*.kt` and `**/*.kts`, skipping `build/` and git-ignored paths |
+| `kit test -m core -p jvm` | `:core:jvmTest`                   | `./kotlin test -m core -p jvm`                                                                |
+| `kit build <t> --release` | `<project path>:bundleRelease`    | `./kotlin package -m <module name>` (AAB only)                                                |
+| passthrough               | `kit gradle …`                    | `kit kotlin …`                                                                                |
+| `kit init`                | `gradle.init` tasks               | `toolchain.init` (default `./kotlin --version`, which downloads the toolchain)                |
+| `kit doctor`              | java, Android SDK, catalog keys   | the wrapper and its pinned `kotlin_cli_version`, and ktlint; no java or SDK needed            |
 
 `kit build` and `kit test` take the toolchain's own `-m, --module` and `-p, --platform`, both repeatable, so
 there is no reason to call the wrapper directly: see [Modules and platforms](CONFIG.md#modules-and-platforms).

@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import type { CommandValue, Kind, KitConfig, TargetConfig, Verb } from '../config/schema'
 import { ExitCode, KitError } from './errors'
+import { ignoredPaths } from './git'
 import { MAESTRO_GROUP, maestroLintGroup } from './maestro/lint'
 import {
   detectPackageManager,
@@ -212,13 +213,26 @@ function kotlinCommand(c: Ctx, target: TargetConfig, args: string[]): PlannedCom
 export const KTLINT_PATTERNS = ['**/*.kt', '**/*.kts', '!**/build/**', '!**/node_modules/**']
 
 /**
+ * `KTLINT_PATTERNS` minus what git ignores (`ignored`: paths relative to ktlint's dir, a dir ending
+ * with `/`): ktlint does not read `.gitignore`, so a scratch project in an ignored dir would be linted.
+ */
+export function ktlintPatterns(ignored: string[]): string[] {
+  const covered = /(^|\/)(build|node_modules)\//
+  const skip = ignored
+    .filter((p) => !covered.test(p) && (p.endsWith('/') || /\.kts?$/.test(p)))
+    .map((p) => (p.endsWith('/') ? `!${p}**` : `!${p}`))
+  return [...KTLINT_PATTERNS, ...skip]
+}
+
+/**
  * `ktlint` (lint) or `ktlint -F` (format) in the toolchain root: the Kotlin toolchain has no
  * linter of its own. With `--staged`, only the staged Kotlin files under that dir; none = no command.
  */
 function ktlintCommand(c: Ctx, target: TargetConfig, fix: boolean): PlannedCommand[] {
   const cwd = resolve(c.root, c.config.toolchain?.root ?? target.dir)
-  let files = KTLINT_PATTERNS
-  if (c.opts.staged) {
+  let files: string[]
+  if (!c.opts.staged) files = ktlintPatterns(ignoredPaths(cwd))
+  else {
     files = c.opts.staged
       .filter((f) => /\.kts?$/.test(f))
       .map((f) => relative(cwd, resolve(c.root, f)))
