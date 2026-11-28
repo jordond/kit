@@ -63,7 +63,7 @@ A store takes part only when its key is present. See [`iap` in the config refere
 
 The JSON schema ships with kit (`schemas/iap.schema.json`); `$schema` points editors at it. The URL
 carries your kit's major.minor (`@0.12` above is an example): `check` warns when `$schema` is missing
-or names another kit version, and prints the exact URL to use.
+or names another kit version, and prints the exact URL to use. `kit upgrade` moves it with the pin.
 
 | Field                                                      | App Store Connect                                                          | Google Play                                       | RevenueCat                                              |
 | ---------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------- |

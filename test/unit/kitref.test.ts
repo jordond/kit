@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { bumpPin, isVersion, parseTagSha, repinWorkflow, usesRef } from '../../src/lib/kitref'
+import { bumpPin, isVersion, parseTagSha, repinSchema, repinWorkflow, usesRef } from '../../src/lib/kitref'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)
@@ -42,6 +42,15 @@ describe('kit refs', () => {
     expect(repinWorkflow(`uses: 'jordond/kit/.github/actions/setup@${A}' # v0.5.0\n`, '0.6.0', B).text).toBe(
       `uses: 'jordond/kit/.github/actions/setup@${B}' # v0.6.0\n`,
     )
+  })
+
+  test('repinSchema moves kit schema URLs to the major.minor and nothing else', () => {
+    const url = (v: string) => `https://cdn.jsdelivr.net/npm/@jordond/kit@${v}/schemas/iap.schema.json`
+    const file = (v: string) => `{\n  "$schema" : "${url(v)}",\n  "note": "${url('0.12')}"\n}\n`
+    expect(repinSchema(file('0.12'), '0.15.3')).toEqual({ text: file('0.15'), count: 1 })
+    expect(repinSchema(file('0.15'), '0.15.3')).toEqual({ text: file('0.15'), count: 0 })
+    const other = '{"$schema":"https://docs.renovatebot.com/renovate-schema.json"}'
+    expect(repinSchema(other, '0.15.3')).toEqual({ text: other, count: 0 })
   })
 
   test('bumpPin keeps the range operator and the formatting', () => {

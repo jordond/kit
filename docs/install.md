@@ -83,6 +83,8 @@ kit upgrade 0.6.0
 ```
 
 Moves the range, runs the install, and rewrites every workflow ref to that release's tag commit.
+Every `"$schema"` in the repo's JSON that names a schema kit publishes (the product file's
+`iap.schema.json`) moves to the release's major.minor, so `kit iap check` stops warning about it.
 Re-running it repairs workflow pins that lag the npm pin (`kit doctor --fix` does that part too).
 
 With Renovate, extend kit's preset (the `kit init` templates write this `renovate.json`):

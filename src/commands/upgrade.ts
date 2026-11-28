@@ -4,14 +4,16 @@ import { defineCommand } from '../cli/command'
  * `kit upgrade [version]`: move the repo to another kit release in one step. The npm pin
  * (`package.json`, or `.kit/package.json`) gets the new version, the install runs, and every
  * `jordond/kit/…@<sha> # vX.Y.Z` in `.github/workflows` moves to that release's tag commit, so
- * `kit doctor --ci` keeps passing. Re-running is safe: it also repairs workflow pins that lag
- * the npm pin.
+ * `kit doctor --ci` keeps passing. Every `"$schema"` in the repo's JSON that names a schema kit
+ * publishes moves to the release's major.minor. Re-running is safe: it also repairs workflow pins
+ * and schema URLs that lag the npm pin.
  *
  * `--global` (and any run outside a repo) updates the `kit` on PATH instead, with the package
  * manager that installed it.
  */
 export default defineCommand({
-  description: 'Move the repo to a kit release (npm pin, workflow SHAs); --global updates the kit on PATH',
+  description:
+    'Move the repo to a kit release (npm pin, workflow SHAs, $schema URLs); --global updates the kit on PATH',
   group: 'Setup',
   args: {
     global: {
@@ -31,8 +33,16 @@ export default defineCommand({
     const { join } = await import('node:path')
     const { installDir } = await import('../config/load')
     const { ExitCode, KitError } = await import('../lib/errors')
-    const { bumpPin, isVersion, KIT_PACKAGE, latestVersion, repinWorkflow, tagSha } =
-      await import('../lib/kitref')
+    const {
+      bumpPin,
+      isVersion,
+      KIT_PACKAGE,
+      latestVersion,
+      repinSchema,
+      repinWorkflow,
+      SCHEMA_URL_PREFIX,
+      tagSha,
+    } = await import('../lib/kitref')
     const { emitJson } = await import('../lib/log')
     const { detectPackageManager } = await import('../lib/pm')
     const { run, runQuiet } = await import('../lib/proc')
@@ -149,6 +159,18 @@ export default defineCommand({
         return { file, text: next.text, pins: next.count }
       })
       .filter((w) => w.pins > 0)
+    // JSON files git knows or would track (so not node_modules) that point at a kit schema.
+    const grep = await runQuiet(['git', 'grep', '-lzF', '--untracked', SCHEMA_URL_PREFIX, '--', '*.json'], {
+      cwd: root,
+    }).catch(() => ({ code: 1, output: '' }))
+    const schemas = (grep.code === 0 ? grep.output.split('\0') : [])
+      .filter(Boolean)
+      .sort()
+      .map((file) => {
+        const next = repinSchema(readFileSync(join(root, file), 'utf8'), version)
+        return { file, text: next.text, count: next.count }
+      })
+      .filter((s) => s.count > 0)
     const pinChanged = pin.text !== before
     const say = !ctx.flags.json
     const doc = {
@@ -157,6 +179,7 @@ export default defineCommand({
       manifest,
       sha: sha ?? null,
       workflows: workflows.map(({ file, pins }) => ({ file, pins })),
+      schemas: schemas.map(({ file }) => file),
     }
 
     if (say) {
@@ -164,6 +187,8 @@ export default defineCommand({
       else ctx.log.dim(`- ${manifest}  already ${pin.from}`)
       for (const w of workflows)
         ctx.log.step(`${w.file}: ${w.pins} pin${w.pins === 1 ? '' : 's'} → v${version}`)
+      const minor = version.split('.').slice(0, 2).join('.')
+      for (const s of schemas) ctx.log.step(`${s.file}: $schema → @${minor}`)
     }
     const unresolved = workflows.length > 0 && !sha
     const noSha = () => {
@@ -206,6 +231,7 @@ export default defineCommand({
         return
       }
     }
+    for (const s of schemas) writeFileSync(join(root, s.file), s.text)
     if (sha) for (const w of workflows) writeFileSync(join(root, w.file), w.text)
     else if (unresolved) {
       ok = false
@@ -213,7 +239,9 @@ export default defineCommand({
     }
     if (ctx.flags.json) emitJson({ ok, ...doc })
     else if (ok)
-      ctx.log.success(pinChanged || workflows.length ? `kit ${version}` : `already on kit ${version}`)
+      ctx.log.success(
+        pinChanged || workflows.length || schemas.length ? `kit ${version}` : `already on kit ${version}`,
+      )
     if (!ok) process.exitCode = 1
     globalHint()
   },

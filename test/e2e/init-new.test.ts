@@ -360,6 +360,7 @@ describe('kit upgrade', () => {
         { file: '.github/workflows/ci.yml', pins: 2 },
         { file: '.github/workflows/distribute.yml', pins: 1 },
       ],
+      schemas: [],
     })
     expect(JSON.parse(read('.kit/package.json')).devDependencies['@jordond/kit']).toBe(`^${NEXT}`)
     expect(lines('.bun.log')).toEqual(['.kit install --no-cache'])
@@ -378,6 +379,23 @@ describe('kit upgrade', () => {
     expect(again.code).toBe(0)
     expect(again.stderr).toContain(`already on kit ${NEXT}`)
     expect(lines('.bun.log')).toEqual(['.kit install --no-cache'])
+  })
+
+  test('moves $schema URLs that name a kit schema', async () => {
+    const url = (v: string) => `https://cdn.jsdelivr.net/npm/@jordond/kit@${v}/schemas/iap.schema.json`
+    if (!existsSync(join(f.dir, '.git'))) sh(['git', 'init', '-q'], f.dir)
+    mkdirSync(join(f.dir, 'contract'), { recursive: true })
+    writeFileSync(
+      join(f.dir, 'contract/products.json'),
+      `{\n  "$schema": "${url('0.1')}",\n  "products": []\n}\n`,
+    )
+    const dry = await run(['upgrade', NEXT, '--dry-run'])
+    expect(dry.stderr).toContain('contract/products.json: $schema → @9.9')
+    expect(read('contract/products.json')).toContain(url('0.1'))
+    const r = await run(['upgrade', NEXT, '--json'])
+    expect(r.code).toBe(0)
+    expect(JSON.parse(r.stdout).schemas).toEqual(['contract/products.json'])
+    expect(read('contract/products.json')).toBe(`{\n  "$schema": "${url('9.9')}",\n  "products": []\n}\n`)
   })
 
   test('no version: the latest on npm', async () => {

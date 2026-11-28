@@ -3,6 +3,7 @@ import { isAbsolute, join } from 'node:path'
 import { z } from 'zod'
 import type { KitConfig } from '../../config/schema'
 import { ExitCode, KitError } from '../errors'
+import { SCHEMA_URL_PREFIX, schemaUrlFor } from '../kitref'
 
 /**
  * The product file (`iap.products`): one JSON file that is the source of truth for in-app products
@@ -134,9 +135,8 @@ export type FileProduct = ProductFile['products'][number]
 export type FileSubscription = NonNullable<ProductFile['subscriptions']>[number]
 export type FileOffering = NonNullable<ProductFile['offerings']>[number]
 
-export const SCHEMA_URL_PREFIX = 'https://cdn.jsdelivr.net/npm/@jordond/kit@'
-export const schemaUrl = (version: string): string =>
-  `${SCHEMA_URL_PREFIX}${version.split('.').slice(0, 2).join('.')}/schemas/iap.schema.json`
+export { SCHEMA_URL_PREFIX }
+export const schemaUrl = (version: string): string => schemaUrlFor('iap', version)
 
 export type Iap = NonNullable<KitConfig['iap']>
 

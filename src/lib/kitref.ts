@@ -101,3 +101,23 @@ export function bumpPin(manifest: string, version: string): PinEdit | undefined 
     to,
   }
 }
+
+export const SCHEMA_URL_PREFIX = 'https://cdn.jsdelivr.net/npm/@jordond/kit@'
+
+/** The URL of a schema kit publishes (`schemas/<name>.schema.json`), at `version`'s major.minor. */
+export const schemaUrlFor = (name: string, version: string): string =>
+  `${SCHEMA_URL_PREFIX}${version.split('.').slice(0, 2).join('.')}/schemas/${name}.schema.json`
+
+const KIT_SCHEMA_REF =
+  /("\$schema"\s*:\s*")https:\/\/cdn\.jsdelivr\.net\/npm\/@jordond\/kit@[^/"]+\/schemas\/([\w.-]+)\.schema\.json(")/g
+
+/** Every `"$schema"` that names one of kit's published schemas moved to `version`, formatting kept. */
+export function repinSchema(text: string, version: string): { text: string; count: number } {
+  let count = 0
+  const out = text.replace(KIT_SCHEMA_REF, (m, head: string, name: string, tail: string) => {
+    const next = `${head}${schemaUrlFor(name, version)}${tail}`
+    if (next !== m) count++
+    return next
+  })
+  return { text: out, count }
+}
