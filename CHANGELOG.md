@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.1 (2026-11-28)
+
+### Fixes
+
+- **worker:** `kit open`, `kit logs`, `kit wrangler`, `kit deploy --preview` and `kit release rollback` take any target with a wrangler config in its directory, not only kind `worker`. A `vite` or `astro` site served by a Worker of its own was refused with "supports worker targets only". A preview of such a target runs its build before `wrangler versions upload`.
+
 ## 0.16.0 (2026-11-28)
 
 ### Features
